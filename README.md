@@ -38,6 +38,28 @@ T005 connects the form to `POST /scenarios/preview` (default `http://127.0.0.1:8
 
 `to_ntriples(...)` emits sorted N-Triples for reproducible output. The command validates with the unchanged local HI shapes and ontology before writing. Validation adds no inferred facts to the output. SHACL conformance covers the existing constraints, not full ontology completeness: task capabilities are not required by these shapes, and their `hi:Execution` target differs from the ontology's `hi:TaskExecution`. No ontology artefacts have been altered.
 
+T006a adds one local GraphDB service in `compose.yaml`, using the [official image](https://hub.docker.com/r/ontotext/graphdb/) pinned to `10.8.14`. This [10.8 patch release](https://graphdb.ontotext.com/documentation/10.8/release-notes.html) runs in Free mode without supplying a license file; [GraphDB 11 requires a license file even for Free](https://graphdb.ontotext.com/documentation/11.4/set-up-your-license.html). Use Docker Desktop with Linux containers running, plus the Python environment above:
+
+```powershell
+docker compose up -d --wait --wait-timeout 180
+.\.venv\Scripts\python -m infra.graphdb setup
+.\.venv\Scripts\python -m infra.graphdb verify
+```
+
+`setup` creates repository `hi` if absent and replaces its two reference graphs with the original file bytes, leaving scenario graphs intact. It refuses an existing repository with incompatible inference settings. `verify` uploads a temporary validated three-agent scenario, reruns setup to check repeatability, restarts this Compose container, queries the scenario together with HINT, and compares all stored RDF with the inputs. It removes only its own temporary graph. It is an explicit integration check; normal pytest tests use mocked HTTP and require no running GraphDB.
+
+Workbench is at `http://127.0.0.1:7200` (choose repository `hi`). Python clients can POST a form field `query` to `http://127.0.0.1:7200/repositories/hi`, accepting `application/sparql-results+json`; RDF writes use `/repositories/hi/statements` with an explicit `context=<graph-IRI>`. Reference knowledge uses `urn:hi-app:reference:ontology` and `urn:hi-app:reference:hint`. Reserve `urn:hi-app:graph:scenario:{scenario-id}` for application scenario graphs, keeping the existing instance IRIs. This establishes storage conventions for the next backend task; the preview API still uses its existing local pipeline. In Workbench, this basic SPARQL query lists the stored graph sizes:
+
+```sparql
+SELECT ?graph (COUNT(*) AS ?triples)
+WHERE { GRAPH ?graph { ?s ?p ?o } }
+GROUP BY ?graph
+```
+
+Recommended inference baseline: [`empty` (no reasoning)](https://graphdb.ontotext.com/documentation/10.8/reasoning.html), with `owl:sameAs` optimization disabled. RDFS/rdfsplus would infer that teams using `hi:operatesInContext` are agents because of its current domain; OWL rules can additionally derive property-chain relationships and identity consequences. Those semantics need review before enabling them. Inference does not repair the SHACL execution-class mismatch or make OWL minimum cardinalities closed-world validation. Keep the existing Python SHACL check authoritative and use explicit types or SPARQL property paths for queries requiring superclass traversal.
+
+Data and repository configuration persist in Docker's `hi-project_graphdb-data` named volume, outside Git, across restarts and `docker compose down`/`up`. `docker compose down --volumes` deletes that data. The port is bound only to loopback; this development instance has no authentication. Java heap is limited to 1 GiB; allow additional Docker memory for the process and indexes. Troubleshoot with `docker compose ps` and `docker compose logs graphdb`.
+
 ---
 
 ## Design Problem

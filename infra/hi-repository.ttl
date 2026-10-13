@@ -1,0 +1,24 @@
+@prefix rep: <http://www.openrdf.org/config/repository#> .
+@prefix sr: <http://www.openrdf.org/config/repository/sail#> .
+@prefix sail: <http://www.openrdf.org/config/sail#> .
+@prefix graphdb: <http://www.ontotext.com/config/graphdb#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<#hi> a rep:Repository ;
+    rep:repositoryID "hi" ;
+    rdfs:label "HI application" ;
+    rep:repositoryImpl [
+        rep:repositoryType "graphdb:SailRepository" ;
+        sr:sailImpl [
+            sail:sailType "graphdb:Sail" ;
+            graphdb:repository-type "file-repository" ;
+            graphdb:storage-folder "storage" ;
+            graphdb:base-URL "urn:hi-app:repository:hi:" ;
+            graphdb:ruleset "empty" ;
+            graphdb:disable-sameAs "true" ;
+            graphdb:check-for-inconsistencies "false" ;
+            graphdb:enable-context-index "true" ;
+            graphdb:query-timeout "30" ;
+            graphdb:throw-QueryEvaluationException-on-timeout "true"
+        ]
+    ] .
