@@ -17,6 +17,14 @@ python -m venv .venv
 
 `Scenario.model_validate_json(...)` validates the structure, rejects unhandled fields and duplicate agent/task IDs, and requires both agent kinds. Concept fields and roles use HINT local names, such as `PersonalAssistantUseCase` and `HumanUserRole`; `to_rdf(...)` checks their existence and category against the checked-in thesaurus. Names become `rdfs:label` literals. Application-assigned IDs must be retained across edits: instances use `urn:hi-app:scenario:{scenario-id}:…`, scoped by scenario and entity kind, independently of names, types, and roles. They do not claim the research group's namespace or global agent identity across scenarios.
 
+T004 exposes this same pipeline through `hi_scenario/api.py`. Start the local backend from the repository root:
+
+```powershell
+.\.venv\Scripts\python -m uvicorn hi_scenario.api:app --reload --host 127.0.0.1 --port 8000
+```
+
+`POST /scenarios/preview` accepts the scenario JSON directly (`Content-Type: application/json`). A `200` response contains `scenario_id`, `rdf_format: "nt"`, `rdf` (sorted N-Triples text), `triple_count`, and `validation: {conforms: true, report: "…"}`. Invalid submissions return `422` with `code`, `message`, `issues`, and `shacl_report`: `invalid_request` includes field issues (`location`, `message`, `type`); `invalid_vocabulary` preserves the converter's explanation; `shacl_failed` includes the SHACL report. Unexpected processing failures return `500` with `internal_error` and a generic message. Nothing is persisted. Interactive API documentation is at `http://127.0.0.1:8000/docs`. CORS allows only the local Svelte development origins (`http://localhost:5173` and `http://127.0.0.1:5173`); frontend integration remains a later step. The Python test command above includes API tests; `httpx` is required for FastAPI's test client.
+
 T003 adds a Svelte form in `frontend/` that edits the same JSON contract. It is frontend-only: nothing is stored, converted to RDF, or queried; researchers copy or download the JSON. Choice lists come from `frontend/src/lib/hint-vocabulary.json`, generated from the thesaurus with the same category rule as `to_rdf(...)`; a test fails if it is stale. Entity IDs are random, assigned once, and kept across renames. Run with Node 20.19+ or 22.12+:
 
 ```powershell
