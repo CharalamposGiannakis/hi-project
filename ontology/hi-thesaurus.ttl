@@ -158,7 +158,7 @@ hint:FairAccurateVerdictGoal a skos:Concept ;
     skos:definition "A goal that emphasizes fairness and accuracy in decision-making processes."@en ;
     skos:broader hint:Goal .
 
-hint:EffectiveLeaningGoal a skos:Concept ;
+hint:EffectiveLearningGoal a skos:Concept ;
     skos:inScheme hint:HIScheme ;
     skos:prefLabel "Effective Learning Goal"@en ;
     skos:definition "A goal focused on promoting effective learning and knowledge acquisition."@en ;
