@@ -1,6 +1,7 @@
 <script>
   import example from '../../examples/s1.json';
   import ConceptSelect from './lib/ConceptSelect.svelte';
+  import RdfPreview from './lib/RdfPreview.svelte';
   import {
     concepts,
     emptyScenario,
@@ -129,8 +130,8 @@
     <label class="button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} hidden /></label>
   </div>
   <p class="notice">
-    Not connected to a backend yet: nothing is stored, converted to RDF, or sent to a knowledge graph. Download the
-    JSON to keep your work.
+    Nothing is saved: the RDF preview is generated and validated by the local backend and then discarded, and no
+    knowledge graph is connected. Download the JSON to keep your work.
   </p>
   {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
 </header>
@@ -221,9 +222,11 @@
   </form>
 
   <aside>
+    <RdfPreview {json} issueCount={issues.length} onIncomplete={() => (showErrors = true)} />
+
     <h2>Scenario JSON</h2>
     {#if issues.length === 0}
-      <p class="ok">Complete: matches the scenario contract.</p>
+      <p class="ok">Form complete (local check).</p>
     {:else}
       <p class="warn">
         Draft — {issues.length} {issues.length === 1 ? 'item needs' : 'items need'} attention.

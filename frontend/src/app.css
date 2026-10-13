@@ -67,6 +67,8 @@ button, .button {
   cursor: pointer;
 }
 button:hover, .button:hover { background: #eef3f8; }
+button.primary { background: var(--accent); color: #fff; }
+button.primary:hover { background: #244a6f; }
 button:disabled { opacity: 0.4; cursor: default; }
 button.link { border: none; background: none; padding: 0; text-decoration: underline; }
 
@@ -82,13 +84,16 @@ pre.error { font-family: inherit; }
 aside {
   position: sticky;
   top: 1rem;
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  box-sizing: border-box;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1rem 1.25rem;
 }
-pre.json {
-  max-height: 60vh;
+pre.json, pre.rdf, pre.report {
+  max-height: 40vh;
   overflow: auto;
   background: #f3f5f8;
   border-radius: 4px;
@@ -96,3 +101,8 @@ pre.json {
   font-size: 0.8rem;
 }
 code { font-size: 0.85em; }
+pre.rdf { white-space: pre; font-size: 0.72rem; }
+pre.report { white-space: pre-wrap; font-size: 0.75rem; }
+.preview { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem; }
+.error-title { margin: 0.5rem 0 0; font-weight: 600; color: var(--error); }
+summary { cursor: pointer; font-size: 0.9rem; color: var(--muted); }

@@ -7,7 +7,7 @@
     "checkJs": true,
     "strict": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client", "node"]
   },
-  "include": ["src/**/*.js", "src/**/*.svelte"]
+  "include": ["src/**/*.js", "src/**/*.svelte", "integration/**/*.js"]
 }
