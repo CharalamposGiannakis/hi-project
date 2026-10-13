@@ -1,0 +1,317 @@
+{
+  "UseCase": [
+    {
+      "id": "AutonomousTutoringUseCase",
+      "label": "Autonomous Tutoring Use Case",
+      "definition": "A use case where Hybrid Intelligence systems provide autonomous tutoring and educational support to learners."
+    },
+    {
+      "id": "CollaborativeManipulationUseCase",
+      "label": "Collaborative Manipulation Use Case",
+      "definition": "A use case where Hybrid Intelligence systems collaborate with humans to manipulate objects or environments."
+    },
+    {
+      "id": "EnergyNegotiationUseCase",
+      "label": "Energy Negotiation Use Case",
+      "definition": "A use case where Hybrid Intelligence systems engage in energy negotiation and management tasks."
+    },
+    {
+      "id": "GroupDeliberationUseCase",
+      "label": "Group Deliberation Use Case",
+      "definition": "A use case where Hybrid Intelligence systems facilitate group deliberation and decision-making processes."
+    },
+    {
+      "id": "MedicalDiagnosisUseCase",
+      "label": "Medical Diagnosis Use Case",
+      "definition": "A use case where Hybrid Intelligence systems assist in medical diagnosis and healthcare decision-making."
+    },
+    {
+      "id": "PersonalAssistantUseCase",
+      "label": "Personal Assistant Use Case",
+      "definition": "A use case where Hybrid Intelligence systems function as personal assistants to support users in various tasks."
+    },
+    {
+      "id": "VirtualMuseumGuideUseCase",
+      "label": "Virtual Museum Guide Use Case",
+      "definition": "A use case where Hybrid Intelligence systems serve as virtual guides in museum settings."
+    }
+  ],
+  "Domain": [
+    {
+      "id": "DigitalMuseumDomain",
+      "label": "Digital Museum Domain",
+      "definition": "A domain focused on digital museum experiences and technologies."
+    },
+    {
+      "id": "EducationDomain",
+      "label": "Education Domain",
+      "definition": "A domain focused on educational systems and learning processes."
+    },
+    {
+      "id": "HealthAndLifestyleDomain",
+      "label": "Health and Lifestyle Domain",
+      "definition": "A domain focused on health, wellness, and lifestyle management."
+    },
+    {
+      "id": "IndustrialAndServiceRoboticsDomain",
+      "label": "Industrial and Service Robotics Domain",
+      "definition": "A domain involving the use of robotics in industrial and service settings."
+    },
+    {
+      "id": "LawAndPolicyDomain",
+      "label": "Law and Policy Domain",
+      "definition": "A domain concerned with legal frameworks and policy-making processes."
+    },
+    {
+      "id": "MedicalDomain",
+      "label": "Medical Diagnosis Domain",
+      "definition": "A domain centered around medical diagnosis and healthcare."
+    },
+    {
+      "id": "SmartCampusDomain",
+      "label": "Smart Campus Domain",
+      "definition": "A domain involving smart campus environments and technologies."
+    }
+  ],
+  "Goal": [
+    {
+      "id": "AccurateTrustworthyDiagnosisGoal",
+      "label": "Accurate and Trustworthy Diagnosis",
+      "definition": "A goal aimed at ensuring accurate and trustworthy diagnosis."
+    },
+    {
+      "id": "EffectiveLearningGoal",
+      "label": "Effective Learning Goal",
+      "definition": "A goal focused on promoting effective learning and knowledge acquisition."
+    },
+    {
+      "id": "EnhancedVisitorGoal",
+      "label": "Enhanced Visitor Goal",
+      "definition": "A goal aimed at enhancing visitors."
+    },
+    {
+      "id": "FairAccurateVerdictGoal",
+      "label": "Fair and Accurate Verdict Goal",
+      "definition": "A goal that emphasizes fairness and accuracy in decision-making processes."
+    },
+    {
+      "id": "FairEfficientHeatingGoal",
+      "label": "Fair Efficient Heating Goal",
+      "definition": "A goal aimed at fair and efficient heating."
+    },
+    {
+      "id": "SafeRetrievalGoal",
+      "label": "Safe Retrieval Goal",
+      "definition": "A goal aimed at ensuring the safe retrieval of objects or information."
+    },
+    {
+      "id": "UserWellbeingGoal",
+      "label": "User Wellbeing Goal",
+      "definition": "A goal focused on enhancing the wellbeing and quality of life of users."
+    }
+  ],
+  "Task": [
+    {
+      "id": "AllocationNegotationTask",
+      "label": "Allocation Negotiation Task",
+      "definition": "A task that involves negotiation of energy allocation."
+    },
+    {
+      "id": "AssessCommunicationAccuracy",
+      "label": "Assess Communication Accuracy Task",
+      "definition": "A task that involves assessing the accuracy of communication between agents."
+    },
+    {
+      "id": "BayesianInferenceTask",
+      "label": "Bayesian Inference Task",
+      "definition": "A task that involves performing inference using Bayesian probability principles."
+    },
+    {
+      "id": "CandidateHypothesisGenerationTask",
+      "label": "Candidate Hypothesis Generation Task",
+      "definition": "A task that involves generating candidate hypothesis."
+    },
+    {
+      "id": "ConflictResolutionTask",
+      "label": "Conflict Resolution Task",
+      "definition": "A task focused on resolving conflicts or disagreements."
+    },
+    {
+      "id": "DataCollectionTask",
+      "label": "Data Collection Task",
+      "definition": "A task involving the gathering of data from various sources."
+    },
+    {
+      "id": "DecideInterventionTask",
+      "label": "Decide Intervention Task",
+      "definition": "A task that involves deciding on appropriate interventions based on situational assessments."
+    },
+    {
+      "id": "ExplanationTask",
+      "label": "Explanation Task",
+      "definition": "A task that involves providing explanations or justifications for decisions or actions."
+    },
+    {
+      "id": "FineInsertionTask",
+      "label": "Fine Insertion Task",
+      "definition": "A task that involves the precise insertion of an object into a specific location."
+    },
+    {
+      "id": "HeavyLiftingTask",
+      "label": "Heavy Lifting Task",
+      "definition": "A task that involves lifting or moving heavy objects."
+    },
+    {
+      "id": "HypothesisComparisonTask",
+      "label": "Hypothesis Comparison Task",
+      "definition": "A task that involves comparing hypothesis."
+    },
+    {
+      "id": "KnowledgeGraphQueryTask",
+      "label": "Knowledge Query Task",
+      "definition": "A task that involves querying knowledge graphs or databases for information."
+    },
+    {
+      "id": "LearnEnergyBehaviorTask",
+      "label": "Learn Energy Behavior Task",
+      "definition": "A task that involves learning energy behavior."
+    },
+    {
+      "id": "LearnOccupancyTask",
+      "label": "Learn Occupancy Task",
+      "definition": "A task that involves learning occupancy."
+    },
+    {
+      "id": "MultimodalInputInterpretationTask",
+      "label": "Multimodal Input Interpretation Task",
+      "definition": "A task that involves the interpretation of multimodal input."
+    },
+    {
+      "id": "OpenCabinetTask",
+      "label": "Open Cabinet Task",
+      "definition": "A task that involves opening a cabinet or similar storage unit."
+    },
+    {
+      "id": "OperatorCoordinationTask",
+      "label": "Operator Coordination Task",
+      "definition": "A task that involves coordination with operator."
+    },
+    {
+      "id": "PolicyLearningTask",
+      "label": "Policy Learning Task",
+      "definition": "A task that involves learning optimal policies through reinforcement learning techniques."
+    },
+    {
+      "id": "ProvideStatementTask",
+      "label": "Provide Statement Task",
+      "definition": "A task that involves providing statements or reports about observations or actions."
+    },
+    {
+      "id": "QuestionAnsweringTask",
+      "label": "Question Answering Task",
+      "definition": "A task that involves answering questions."
+    },
+    {
+      "id": "RecommendResourcesTask",
+      "label": "Recommend Resources Task",
+      "definition": "A task that involves recommending resources or materials to users based on their needs."
+    },
+    {
+      "id": "ReconstructTrajectoryTask",
+      "label": "Reconstruct Trajectory Task",
+      "definition": "A task that involves reconstructing the trajectory of an object or agent based on observed data."
+    },
+    {
+      "id": "RetrieveToolTask",
+      "label": "Retrieve Tool Task",
+      "definition": "A task that involves retrieving a tool from a storage unit or environment."
+    },
+    {
+      "id": "SemanticReasoningTask",
+      "label": "Semantic Reasoning Task",
+      "definition": "A task that involves performing reasoning based on semantic relationships and ontologies."
+    },
+    {
+      "id": "SituationalAssessmentTask",
+      "label": "Situational Assessment Task",
+      "definition": "A task that involves assessing the current situation or environment."
+    },
+    {
+      "id": "SymptomAnalysisTask",
+      "label": "Symptom Analysis Task",
+      "definition": "A task that involves analysing the symptoms."
+    },
+    {
+      "id": "UnlockCabinetTask",
+      "label": "Unlock Cabinet Task",
+      "definition": "A task that involves unlocking a cabinet or similar storage unit."
+    }
+  ],
+  "Role": [
+    {
+      "id": "AIAdvisorRole",
+      "label": "AI Advisor Role",
+      "definition": "A role where the agent provides advice and recommendations to human users."
+    },
+    {
+      "id": "BuilderRole",
+      "label": "Builder Role",
+      "definition": "A role where the agent represents the builder."
+    },
+    {
+      "id": "ClinicianRole",
+      "label": "Clinician Role",
+      "definition": "A role where the agent represents the clinician."
+    },
+    {
+      "id": "FineManipulatorRole",
+      "label": "Fine Manipulator Role",
+      "definition": "A role where the agent performs precise manipulation tasks within the Hybrid Intelligence system."
+    },
+    {
+      "id": "GridOperatorRole",
+      "label": "Grid Operator Role",
+      "definition": "A role where the agent represents the grid operator."
+    },
+    {
+      "id": "JurorRole",
+      "label": "Juror Role",
+      "definition": "A role where the agent participates in jury deliberation and decision-making processes."
+    },
+    {
+      "id": "LearnerRole",
+      "label": "Learner Role",
+      "definition": "A role where the agent represents the learner engaging with educational content."
+    },
+    {
+      "id": "RiskOperatorRole",
+      "label": "Risk Operator Role",
+      "definition": "A role where the agent is responsible for managing and mitigating risks within the Hybrid Intelligence system."
+    },
+    {
+      "id": "AIAssistantRole",
+      "label": "System Assistant Role",
+      "definition": "A role where the agent assists the system in performing tasks and achieving goals."
+    },
+    {
+      "id": "TutorRole",
+      "label": "Tutor Role",
+      "definition": "A role where the agent provides tutoring and educational support to learners."
+    },
+    {
+      "id": "HumanUserRole",
+      "label": "User Role",
+      "definition": "A role where the agent represents the user interacting with the Hybrid Intelligence system."
+    },
+    {
+      "id": "VirtualGuideRole",
+      "label": "Virtual Guide Role",
+      "definition": "A role where the agent represents the virtual guide."
+    },
+    {
+      "id": "VisitorRole",
+      "label": "Visitor Role",
+      "definition": "A role where the agent represents the visitor."
+    }
+  ]
+}

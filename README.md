@@ -17,6 +17,14 @@ python -m venv .venv
 
 `Scenario.model_validate_json(...)` validates the structure, rejects unhandled fields and duplicate agent/task IDs, and requires both agent kinds. Concept fields and roles use HINT local names, such as `PersonalAssistantUseCase` and `HumanUserRole`; `to_rdf(...)` checks their existence and category against the checked-in thesaurus. Names become `rdfs:label` literals. Application-assigned IDs must be retained across edits: instances use `urn:hi-app:scenario:{scenario-id}:…`, scoped by scenario and entity kind, independently of names, types, and roles. They do not claim the research group's namespace or global agent identity across scenarios.
 
+T003 adds a Svelte form in `frontend/` that edits the same JSON contract. It is frontend-only: nothing is stored, converted to RDF, or queried; researchers copy or download the JSON. Choice lists come from `frontend/src/lib/hint-vocabulary.json`, generated from the thesaurus with the same category rule as `to_rdf(...)`; a test fails if it is stale. Entity IDs are random, assigned once, and kept across renames. Run with Node 20.19+ or 22.12+:
+
+```powershell
+.\.venv\Scripts\python -m hi_scenario.vocabulary frontend/src/lib/hint-vocabulary.json  # after thesaurus changes
+cd frontend; npm install; npm run dev    # http://localhost:5173
+npm test; npm run check                  # unit tests, type checks
+```
+
 `to_ntriples(...)` emits sorted N-Triples for reproducible output. The command validates with the unchanged local HI shapes and ontology before writing. Validation adds no inferred facts to the output. SHACL conformance covers the existing constraints, not full ontology completeness: task capabilities are not required by these shapes, and their `hi:Execution` target differs from the ontology's `hi:TaskExecution`. No ontology artefacts have been altered.
 
 ---
