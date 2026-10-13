@@ -1,0 +1,201 @@
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix hi: <https://w3id.org/hi-ontology#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+#################################################################
+# HI SHACL Shapes – Refined and Strictly Aligned with Ontology
+#################################################################
+
+###############################################################
+# HITeam Shape
+# - At least TWO members
+# - At least ONE HumanAgent
+# - At least ONE ArtificialAgent
+# - At least one goal
+###############################################################
+hi:HITeamShape
+    a sh:NodeShape ;
+    sh:targetClass hi:HITeam ;
+
+    ## At least two total members
+    sh:property [
+        sh:path hi:hasMember ;
+        sh:minCount 2 ;
+        sh:message "A HITeam must have at least two agents." ;
+    ] ;
+
+    ## At least one human member
+    sh:property [
+        sh:path hi:hasMember ;
+        sh:qualifiedValueShape [ sh:class hi:HumanAgent ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "A HITeam must include at least one HumanAgent." ;
+    ] ;
+
+    ## At least one artificial agent
+    sh:property [
+        sh:path hi:hasMember ;
+        sh:qualifiedValueShape [ sh:class hi:ArtificialAgent ] ;
+        sh:qualifiedMinCount 1 ;
+        sh:message "A HITeam must include at least one ArtificialAgent." ;
+    ] ;
+
+    ## At least one goal
+    sh:property [
+        sh:path hi:hasGoal ;
+        sh:minCount 1 ;
+        sh:message "A HITeam must have at least one hi:hasGoal." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# Agent MUST HAVE ROLE if part of a team
+###############################################################
+hi:TeamMemberRoleRequirement
+    a sh:NodeShape ;
+    sh:targetObjectsOf hi:hasMember ;
+
+    sh:property [
+        sh:path hi:hasRoleConcept ;
+        sh:minCount 1 ;
+        sh:message "Any agent who is a member of a team MUST have at least one RoleConcept." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# Agent Shape (soft constraints)
+###############################################################
+hi:AgentShape
+    a sh:NodeShape ;
+    sh:targetClass hi:Agent ;
+
+    sh:property [
+        sh:path hi:hasRoleConcept ;
+        sh:minCount 0 ;
+        sh:message "Agents may optionally have a RoleConcept (required only if part of a team)." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# HumanAgent Shape
+###############################################################
+hi:HumanAgentShape
+    a sh:NodeShape ;
+    sh:targetClass hi:HumanAgent ;
+
+    sh:property [
+        sh:path hi:hasRoleConcept ;
+        sh:minCount 0 ;
+        sh:message "A HumanAgent may optionally have a RoleConcept (mandatory when in a team)." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# ArtificialAgent Shape
+###############################################################
+hi:ArtificialAgentShape
+    a sh:NodeShape ;
+    sh:targetClass hi:ArtificialAgent ;
+
+    sh:property [
+        sh:path hi:hasRoleConcept ;
+        sh:minCount 0 ;
+        sh:message "An ArtificialAgent may optionally have a RoleConcept (mandatory when in a team)." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# Goal Shape
+# - Must require at least one task
+###############################################################
+hi:GoalShape
+    a sh:NodeShape ;
+    sh:targetClass hi:Goal ;
+
+    sh:property [
+        sh:path hi:requiresTask ;
+        sh:minCount 1 ;
+        sh:message "Each Goal must require at least one Task (hi:requiresTask)." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# Task Shape
+###############################################################
+hi:TaskShape
+    a sh:NodeShape ;
+    sh:targetClass hi:Task ;
+
+    sh:property [
+        sh:path hi:realizedBy ;
+        sh:node hi:ExecutionShape ;
+        sh:message "If present, hi:realizedBy must point to an Execution instance." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# Execution Shape
+###############################################################
+hi:ExecutionShape
+    a sh:NodeShape ;
+    sh:targetClass hi:Execution ;
+
+    sh:property [
+        sh:path hi:performedBy ;
+        sh:minCount 1 ;
+        sh:message "Every Execution must be performedBy an Agent." ;
+    ] ;
+
+    sh:closed false
+.
+
+#################################################################
+# Cross-entity Consistency Shapes
+#################################################################
+
+###############################################################
+# Team → Goal → Task chain must be coherent
+###############################################################
+hi:TeamGoalTaskChainShape
+    a sh:NodeShape ;
+    sh:targetClass hi:HITeam ;
+
+    sh:property [
+        sh:path hi:hasGoal ;
+        sh:node hi:GoalShape ;
+        sh:message "Goals linked to a team must correctly require tasks." ;
+    ] ;
+
+    sh:closed false
+.
+
+###############################################################
+# Soft consistency: assigned → eligible
+###############################################################
+hi:AssignmentEligibilityShape
+    a sh:NodeShape ;
+    sh:targetObjectsOf hi:isAssignedToTask ;
+
+    sh:property [
+        sh:path hi:isEligibleForTask ;
+        sh:minCount 0 ;
+        sh:message "If an agent is assigned to a task, eligibility should also be asserted (soft constraint)." ;
+    ] ;
+
+    sh:closed false
+.
