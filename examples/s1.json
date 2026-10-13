@@ -1,0 +1,45 @@
+{
+  "id": "s1",
+  "use_case": {
+    "id": "personal-assistant",
+    "name": "Personal assistant HI system",
+    "concept": "PersonalAssistantUseCase",
+    "domain": "HealthAndLifestyleDomain"
+  },
+  "goal": {
+    "id": "user-wellbeing",
+    "name": "Maintain and improve user wellbeing",
+    "concept": "UserWellbeingGoal"
+  },
+  "tasks": [
+    {
+      "id": "data-collection",
+      "name": "Collect self-reports and sensor activity data",
+      "concept": "DataCollectionTask"
+    },
+    {
+      "id": "conflict-resolution",
+      "name": "Resolve inconsistencies between reported and sensed data",
+      "concept": "ConflictResolutionTask"
+    },
+    {
+      "id": "explanation",
+      "name": "Provide explanations to maintain trust and engagement",
+      "concept": "ExplanationTask"
+    }
+  ],
+  "agents": [
+    {
+      "id": "human-user",
+      "name": "Human user",
+      "kind": "human",
+      "roles": ["HumanUserRole"]
+    },
+    {
+      "id": "ai-assistant",
+      "name": "AI assistant",
+      "kind": "artificial",
+      "roles": ["AIAssistantRole"]
+    }
+  ]
+}

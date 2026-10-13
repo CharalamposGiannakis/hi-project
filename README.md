@@ -4,6 +4,21 @@
 
 Early research prototype. All design, architecture, stack, and interaction choices are **provisional** and should evolve as the project becomes clearer.
 
+T002 implements a local `JSON → RDF → SHACL` flow in `hi_scenario/`. It supports one use case, one implicit HI team, one goal, one or more tasks, and distinct human/artificial agents with names and HINT roles. `examples/s1.json` is a minimal projection of S1 in `ontology/scenarios_kgs.ttl`; its descriptive names are example labels. Context, capabilities, executions, evaluations, and interactions remain outside this representation.
+
+Run from the repository root with Python 3.11+ (PowerShell):
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python -m pip install -r requirements.txt
+.\.venv\Scripts\python -m hi_scenario examples/s1.json --output scenario.nt
+.\.venv\Scripts\python -m pytest -q
+```
+
+`Scenario.model_validate_json(...)` validates the structure, rejects unhandled fields and duplicate agent/task IDs, and requires both agent kinds. Concept fields and roles use HINT local names, such as `PersonalAssistantUseCase` and `HumanUserRole`; `to_rdf(...)` checks their existence and category against the checked-in thesaurus. Names become `rdfs:label` literals. Application-assigned IDs must be retained across edits: instances use `urn:hi-app:scenario:{scenario-id}:…`, scoped by scenario and entity kind, independently of names, types, and roles. They do not claim the research group's namespace or global agent identity across scenarios.
+
+`to_ntriples(...)` emits sorted N-Triples for reproducible output. The command validates with the unchanged local HI shapes and ontology before writing. Validation adds no inferred facts to the output. SHACL conformance covers the existing constraints, not full ontology completeness: task capabilities are not required by these shapes, and their `hi:Execution` target differs from the ontology's `hi:TaskExecution`. No ontology artefacts have been altered.
+
 ---
 
 ## Design Problem
