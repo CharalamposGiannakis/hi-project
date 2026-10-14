@@ -172,7 +172,7 @@ def test_local_frontend_json_preflight(client, origin):
     })
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == origin
-    assert response.headers["access-control-allow-methods"] == "POST"
+    assert set(response.headers["access-control-allow-methods"].split(", ")) == {"GET", "POST"}
     assert "access-control-allow-credentials" not in response.headers
 
 

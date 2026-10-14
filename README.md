@@ -48,7 +48,7 @@ docker compose up -d --wait --wait-timeout 180
 
 `setup` creates repository `hi` if absent and replaces its two reference graphs with the original file bytes, leaving scenario graphs intact. It refuses an existing repository with incompatible inference settings. `verify` uploads a temporary validated three-agent scenario, reruns setup to check repeatability, restarts this Compose container, queries the scenario together with HINT, and compares all stored RDF with the inputs. It removes only its own temporary graph. It is an explicit integration check; normal pytest tests use mocked HTTP and require no running GraphDB.
 
-Workbench is at `http://127.0.0.1:7200` (choose repository `hi`). Python clients can POST a form field `query` to `http://127.0.0.1:7200/repositories/hi`, accepting `application/sparql-results+json`; RDF writes use `/repositories/hi/statements` with an explicit `context=<graph-IRI>`. Reference knowledge uses `urn:hi-app:reference:ontology` and `urn:hi-app:reference:hint`. Reserve `urn:hi-app:graph:scenario:{scenario-id}` for application scenario graphs, keeping the existing instance IRIs. This establishes storage conventions for the next backend task; the preview API still uses its existing local pipeline. In Workbench, this basic SPARQL query lists the stored graph sizes:
+Workbench is at `http://127.0.0.1:7200` (choose repository `hi`). Python clients can POST a form field `query` to `http://127.0.0.1:7200/repositories/hi`, accepting `application/sparql-results+json`; RDF writes use `/repositories/hi/statements` with an explicit `context=<graph-IRI>`. Reference knowledge uses `urn:hi-app:reference:ontology` and `urn:hi-app:reference:hint`. Application scenarios use `urn:hi-app:graph:scenario:{scenario-id}`, keeping the existing instance IRIs. In Workbench, this basic SPARQL query lists the stored graph sizes:
 
 ```sparql
 SELECT ?graph (COUNT(*) AS ?triples)
@@ -59,6 +59,22 @@ GROUP BY ?graph
 Recommended inference baseline: [`empty` (no reasoning)](https://graphdb.ontotext.com/documentation/10.8/reasoning.html), with `owl:sameAs` optimization disabled. RDFS/rdfsplus would infer that teams using `hi:operatesInContext` are agents because of its current domain; OWL rules can additionally derive property-chain relationships and identity consequences. Those semantics need review before enabling them. Inference does not repair the SHACL execution-class mismatch or make OWL minimum cardinalities closed-world validation. Keep the existing Python SHACL check authoritative and use explicit types or SPARQL property paths for queries requiring superclass traversal.
 
 Data and repository configuration persist in Docker's `hi-project_graphdb-data` named volume, outside Git, across restarts and `docker compose down`/`up`. `docker compose down --volumes` deletes that data. The port is bound only to loopback; this development instance has no authentication. Java heap is limited to 1 GiB; allow additional Docker memory for the process and indexes. Troubleshoot with `docker compose ps` and `docker compose logs graphdb`.
+
+T006b adds `POST /scenarios` and `GET /scenarios/{scenario_id}/team`; the preview endpoint keeps its existing contract and works without GraphDB. Saving accepts the same scenario JSON and runs the shared Python/HINT/SHACL validation before contacting GraphDB. A `201` response includes `scenario_id`, `repository_id`, `graph_iri`, `workbench_url`, `use_case_iri`, `team_iri`, `triple_count`, and `validation`. In Workbench, choose the returned repository and query `GRAPH <graph_iri> { ?s ?p ?o }` to locate that scenario.
+
+Save policy is **create-only**: an existing ID returns `409 scenario_exists`, including identical resubmissions. Use a new ID for a new version. Saves are serialized within one backend process and use a guarded SPARQL insert plus RDF read-back verification; they never replace or delete stored graphs. **Run one backend worker**: GraphDB 10.8's read-committed isolation and its `CREATE GRAPH` check do not prevent concurrent writers from merging data. Multiple backend workers/instances and concurrent direct Workbench writes require a stronger coordination policy before deployment. A failed/timeout response after sending a write can leave its outcome uncertain; retrieve the ID before retrying. No automatic overwrite or retry is performed.
+
+CQ1 is adapted from `TEST/HI-Ontology-Test/cqs.ipynb` in the research ontology repository: it follows use case → team → member → type/role, adding member IRIs and names so `DISTINCT` cannot merge different agents. It queries only the scenario graph and the two reference graphs with `infer=false`. The `200` response contains the same location fields, `use_case_name`, and `members: [{iri, name, types: [{iri, label}], roles: [{iri, label, definition}]}]`. Names come from scenario RDF, type labels from the ontology, and role labels/definitions from HINT. Members and concepts are grouped by IRI and sorted deterministically. English/untyped reference labels are selected; missing text is `null`, never fabricated.
+
+New endpoints reuse the JSON error envelope (`code`, `message`, `issues`, `shacl_report`): invalid input is `422`; missing scenarios are `404 scenario_not_found`; database/network/repository failures are `503 graphdb_unavailable`; invalid connection settings are `503 graphdb_configuration`; malformed/incomplete query results are `502 graphdb_invalid_response`. Connection settings are read from `GRAPHDB_URL` (default `http://127.0.0.1:7200`), `GRAPHDB_REPOSITORY` (`hi`), and `GRAPHDB_TIMEOUT_SECONDS` (`10`). URL base paths and HTTPS are supported; URL credentials are rejected because authentication is outside this prototype. Set these process environment variables before starting uvicorn; `.env` files are not loaded automatically.
+
+The normal Python suite tests persistence requests and evaluates CQ1 over the actual reference RDF with mocked HTTP. Run the explicit live check against local Compose to exercise the API with real GraphDB, concurrent duplicate saves, container restart persistence, and a refused connection. It uses unique test IDs and deletes only its own test graphs:
+
+```powershell
+$env:HI_GRAPHDB_LIVE = "1"
+.\.venv\Scripts\python -m pytest -q -s tests/test_graphdb_live.py
+Remove-Item Env:HI_GRAPHDB_LIVE
+```
 
 ---
 

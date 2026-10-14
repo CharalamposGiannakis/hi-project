@@ -12,6 +12,7 @@ from rdflib import Graph
 from rdflib.compare import isomorphic
 
 from hi_scenario.model import Scenario
+from hi_scenario.graphdb import HINT_GRAPH, ONTOLOGY_GRAPH, scenario_graph_iri
 from hi_scenario.rdf import to_ntriples, to_rdf
 from hi_scenario.validation import validate_rdf
 
@@ -20,8 +21,6 @@ ROOT = Path(__file__).resolve().parent.parent
 BASE_URL = "http://127.0.0.1:7200"
 REPOSITORY = "hi"
 ENDPOINT = f"/repositories/{REPOSITORY}"
-ONTOLOGY_GRAPH = "urn:hi-app:reference:ontology"
-HINT_GRAPH = "urn:hi-app:reference:hint"
 REFERENCES = (
     (ROOT / "ontology" / "hi-ontology.ttl", ONTOLOGY_GRAPH),
     (ROOT / "ontology" / "hi-thesaurus.ttl", HINT_GRAPH),
@@ -120,7 +119,7 @@ def verify(client: httpx.Client) -> None:
     conforms, _, report = validate_rdf(graph)
     if not conforms:
         raise RuntimeError(report)
-    iri = f"urn:hi-app:graph:scenario:{scenario.id}"
+    iri = scenario_graph_iri(scenario.id)
     try:
         put_graph(client, iri, to_ntriples(graph).encode("utf-8"), "application/n-triples")
         # Re-running setup must not alter scenarios or grow reference blank nodes.
