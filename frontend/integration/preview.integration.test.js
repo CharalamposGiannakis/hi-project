@@ -1,61 +1,27 @@
 // @vitest-environment jsdom
 // Svelte App → FastAPI → RDF → SHACL, against a real backend process. Run with
 // `npm run test:integration`; set PYTHON to choose the interpreter (default: ../.venv, then `python`).
-import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { createServer } from 'node:net';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import example from '../../examples/s1.json';
 import { requestPreview } from '../src/lib/api.js';
+import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const PYTHON =
-  process.env.PYTHON ??
-  [join(ROOT, '.venv/Scripts/python.exe'), join(ROOT, '.venv/bin/python')].find(existsSync) ??
-  'python';
-
-/** @type {import('node:child_process').ChildProcess} */
+/** @type {{ url: string, stop: () => void } | undefined} */
 let backend;
 let baseUrl = '';
 
-/** Start uvicorn on a free port and resolve with its URL once it is listening. */
-function startBackend() {
-  return new Promise((resolvePromise, reject) => {
-    backend = spawn(PYTHON, ['-m', 'uvicorn', 'hi_scenario.api:app', '--host', '127.0.0.1', '--port', '0', '--no-use-colors'], {
-      cwd: ROOT,
-      stdio: ['ignore', 'ignore', 'pipe'],
-    });
-    let log = '';
-    backend.on('error', reject);
-    backend.on('exit', (code) => reject(new Error(`Backend exited (${code}):\n${log}`)));
-    backend.stderr?.on('data', (chunk) => {
-      log += chunk;
-      const match = log.match(/Uvicorn running on (http:\/\/127\.0\.0\.1:\d+)/);
-      if (match) resolvePromise(match[1]);
-    });
-  });
-}
-
-/** A local port with nothing listening on it. */
-function closedPort() {
-  return new Promise((resolvePromise) => {
-    const server = createServer().listen(0, '127.0.0.1', () => {
-      const address = /** @type {import('node:net').AddressInfo} */ (server.address());
-      server.close(() => resolvePromise(address.port));
-    });
-  });
-}
-
 beforeAll(async () => {
-  baseUrl = /** @type {string} */ (await startBackend());
+  backend = await startBackend();
+  baseUrl = backend.url;
 }, 60_000);
 
 afterAll(() => {
-  backend?.kill();
+  backend?.stop();
 });
 
 /** @type {Record<string, any> | undefined} */
@@ -144,6 +110,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     vocabulary.agents[0].roles = ['MadeUpRole'];
     expect(await requestPreview(vocabulary, { baseUrl })).toEqual({
       kind: 'rejected',
+      status: 422,
       error: expect.objectContaining({ code: 'invalid_vocabulary', message: 'Unknown HINT concept: MadeUpRole' }),
     });
 

@@ -1,5 +1,6 @@
 <script>
   import { requestPreview } from './api.js';
+  import Rejection from './Rejection.svelte';
 
   /**
    * @type {{
@@ -36,11 +37,6 @@
     loading = false;
   }
 
-  /** @param {(string | number)[]} location */
-  function field(location) {
-    return location.filter((part) => part !== 'body').join('.') || 'scenario';
-  }
-
   /** @param {string} rdf */
   async function copyRdf(rdf) {
     try {
@@ -63,7 +59,7 @@
 </script>
 
 <section class="preview" aria-labelledby="preview-heading">
-  <h2 id="preview-heading">RDF preview</h2>
+  <h2 id="preview-heading">1 · Validate &amp; preview RDF</h2>
   <p class="hint">
     Sends the scenario to the local Python backend, which generates RDF and validates it against the HI SHACL shapes.
     <strong>Previewing does not save the scenario.</strong>
@@ -94,22 +90,12 @@
         <pre class="report">{current.preview.validation.report}</pre>
       </details>
     {:else if current?.kind === 'rejected'}
-      {@const error = current.error}
-      <p class="error-title">
-        {error.code === 'internal_error' ? 'The backend failed while processing the scenario.' : 'Not valid: the backend rejected the scenario.'}
-      </p>
-      <p class="error">{error.message}</p>
-      {#if error.issues.length}
-        <ul class="issues">
-          {#each error.issues as issue, i (i)}<li><code>{field(issue.location)}</code> {issue.message}</li>{/each}
-        </ul>
-      {/if}
-      {#if error.shacl_report}
-        <details open>
-          <summary>SHACL report</summary>
-          <pre class="report">{error.shacl_report}</pre>
-        </details>
-      {/if}
+      <Rejection
+        error={current.error}
+        title={current.error.code === 'internal_error'
+          ? 'The backend failed while processing the scenario.'
+          : 'Not valid: the backend rejected the scenario.'}
+      />
     {:else if current}
       <p class="error-title">Preview unavailable.</p>
       <p class="error">{current.message}</p>

@@ -2,6 +2,7 @@
   import example from '../../examples/s1.json';
   import ConceptSelect from './lib/ConceptSelect.svelte';
   import RdfPreview from './lib/RdfPreview.svelte';
+  import ScenarioSave from './lib/ScenarioSave.svelte';
   import {
     concepts,
     emptyScenario,
@@ -130,8 +131,8 @@
     <label class="button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} hidden /></label>
   </div>
   <p class="notice">
-    Nothing is saved: the RDF preview is generated and validated by the local backend and then discarded, and no
-    knowledge graph is connected. Download the JSON to keep your work.
+    Previewing stores nothing. Only <strong>Save to GraphDB</strong> stores a scenario, as a new graph that cannot
+    be edited or overwritten afterwards. Download the JSON to keep a draft.
   </p>
   {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
 </header>
@@ -223,6 +224,12 @@
 
   <aside>
     <RdfPreview {json} issueCount={issues.length} onIncomplete={() => (showErrors = true)} />
+    <ScenarioSave
+      {json}
+      issueCount={issues.length}
+      onIncomplete={() => (showErrors = true)}
+      onNewScenarioId={(id) => (scenario.id = id)}
+    />
 
     <h2>Scenario JSON</h2>
     {#if issues.length === 0}

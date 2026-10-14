@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { requestPreview } from './api.js';
+import { fetchTeam, requestPreview, saveScenario } from './api.js';
 
 const preview = {
   scenario_id: 's1', rdf_format: 'nt', rdf: '<a> <b> <c> .\n', triple_count: 1,
@@ -27,7 +27,7 @@ describe('requestPreview', () => {
     [422, { code: 'shacl_failed', message: 'SHACL', issues: [], shacl_report: 'Conforms: False' }],
     [500, { code: 'internal_error', message: 'Failed', issues: [], shacl_report: null }],
   ])('returns backend rejections unchanged (%i)', async (status, error) => {
-    expect(await requestPreview({}, { fetch: reply(status, error) })).toEqual({ kind: 'rejected', error });
+    expect(await requestPreview({}, { fetch: reply(status, error) })).toEqual({ kind: 'rejected', status, error });
   });
 
   it('reports an unreachable backend', async () => {
@@ -52,5 +52,62 @@ describe('requestPreview', () => {
   ])('treats malformed or foreign responses as unexpected (%i)', async (status, body) => {
     const result = await requestPreview({}, { fetch: reply(status, body) });
     expect(result).toEqual({ kind: 'unexpected', message: `Unexpected backend response (HTTP ${status}).` });
+  });
+});
+
+const location = {
+  scenario_id: 's1', repository_id: 'hi', graph_iri: 'urn:hi-app:graph:scenario:s1',
+  workbench_url: 'http://127.0.0.1:7200/',
+  workbench_graph_url: 'http://127.0.0.1:7200/resource?uri=urn%3Ahi-app%3Agraph%3Ascenario%3As1&role=context',
+  use_case_iri: 'urn:hi-app:scenario:s1:use-case:personal-assistant', team_iri: 'urn:hi-app:scenario:s1:team',
+};
+const saved = { ...location, triple_count: 32, validation: { conforms: true, report: 'Conforms: True' } };
+const team = {
+  ...location, use_case_name: 'Personal assistant HI system',
+  members: [{
+    iri: 'urn:hi-app:scenario:s1:agent:human-user', name: 'Human user',
+    types: [{ iri: 'https://w3id.org/hi-ontology#HumanAgent', label: 'Human Agent' }],
+    roles: [{ iri: 'https://w3id.org/hi-thesaurus/HumanUserRole', label: 'User Role', definition: null }],
+  }],
+};
+
+describe('saveScenario', () => {
+  it('posts to /scenarios and accepts a 201 location', async () => {
+    const fetch = reply(201, saved);
+    expect(await saveScenario({ id: 's1' }, { fetch, baseUrl: 'http://api.test' })).toEqual({ kind: 'ok', saved });
+    const [url, init] = /** @type {any} */ (fetch.mock.calls[0]);
+    expect(url).toBe('http://api.test/scenarios');
+    expect(init.method).toBe('POST');
+  });
+
+  it.each([[409, 'scenario_exists'], [503, 'graphdb_unavailable'], [502, 'graphdb_invalid_response']])(
+    'keeps the status of rejections (%i)',
+    async (status, code) => {
+      const error = { code, message: 'm', issues: [], shacl_report: null };
+      expect(await saveScenario({}, { fetch: reply(status, error) })).toEqual({ kind: 'rejected', status, error });
+    },
+  );
+
+  it('rejects responses whose Workbench link is not a web URL', async () => {
+    const result = await saveScenario({}, { fetch: reply(201, { ...saved, workbench_graph_url: 'javascript:alert(1)' }) });
+    expect(result.kind).toBe('unexpected');
+  });
+});
+
+describe('fetchTeam', () => {
+  it('GETs the CQ1 endpoint with an encoded ID and no body', async () => {
+    const fetch = reply(200, team);
+    expect(await fetchTeam('s1', { fetch, baseUrl: 'http://api.test' })).toEqual({ kind: 'ok', team });
+    const [url, init] = /** @type {any} */ (fetch.mock.calls[0]);
+    expect(url).toBe('http://api.test/scenarios/s1/team');
+    expect(init.method).toBe('GET');
+    expect(init.body).toBeUndefined();
+    await fetchTeam('a/b?c', { fetch, baseUrl: 'http://api.test' });
+    expect(/** @type {any} */ (fetch.mock.calls[1])[0]).toBe('http://api.test/scenarios/a%2Fb%3Fc/team');
+  });
+
+  it('treats malformed members as unexpected', async () => {
+    const result = await fetchTeam('s1', { fetch: reply(200, { ...team, members: [{ iri: 1 }] }) });
+    expect(result.kind).toBe('unexpected');
   });
 });

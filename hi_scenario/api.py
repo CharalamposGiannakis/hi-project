@@ -54,6 +54,7 @@ class ScenarioLocation(BaseModel):
     repository_id: str
     graph_iri: str
     workbench_url: str
+    workbench_graph_url: str
     use_case_iri: str
     team_iri: str
 

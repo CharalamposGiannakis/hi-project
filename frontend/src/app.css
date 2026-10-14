@@ -101,8 +101,14 @@ pre.json, pre.rdf, pre.report {
   font-size: 0.8rem;
 }
 code { font-size: 0.85em; }
-pre.rdf { white-space: pre; font-size: 0.72rem; }
+pre.rdf { white-space: pre; font-size: 0.72rem; max-height: 16rem; }
 pre.report { white-space: pre-wrap; font-size: 0.75rem; }
-.preview { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem; }
+.preview, .save { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem; }
+.save h3 { margin: 1rem 0 0.25rem; font-size: 0.95rem; }
+a.button { display: inline-block; text-decoration: none; }
+table.team { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+table.team th, table.team td { text-align: left; padding: 0.3rem 0.4rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.team th { font-weight: 600; color: var(--muted); }
+table.team span[title] { text-decoration: underline dotted; cursor: help; }
 .error-title { margin: 0.5rem 0 0; font-weight: 600; color: var(--error); }
 summary { cursor: pointer; font-size: 0.9rem; color: var(--muted); }

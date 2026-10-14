@@ -1,6 +1,7 @@
 """Small GraphDB adapter: create-only scenario storage and the adapted CQ1."""
 
 import os
+from urllib.parse import urlencode
 from contextlib import contextmanager
 from threading import Lock
 from typing import Annotated
@@ -150,11 +151,16 @@ class GraphDBStore:
         return result["boolean"]
 
     def location(self, scenario_id: str, use_case: str, team: str) -> dict:
+        workbench = str(self.settings.url).rstrip("/") + "/"
+        graph_iri = scenario_graph_iri(scenario_id)
         return {
             "scenario_id": scenario_id,
             "repository_id": self.settings.repository,
-            "graph_iri": scenario_graph_iri(scenario_id),
-            "workbench_url": str(self.settings.url).rstrip("/") + "/",
+            "graph_iri": graph_iri,
+            "workbench_url": workbench,
+            # Workbench 2.8 (GraphDB 10.8) resource view of one named graph. The
+            # repository cannot be chosen by URL: Workbench asks once per browser.
+            "workbench_graph_url": workbench + "resource?" + urlencode({"uri": graph_iri, "role": "context"}),
             "use_case_iri": use_case,
             "team_iri": team,
         }
