@@ -228,14 +228,25 @@ def test_bad_graphdb_query_responses_are_502(client, monkeypatch, body):
 
 def test_connection_settings_are_configurable_and_reject_unsafe_values(monkeypatch):
     monkeypatch.setenv("GRAPHDB_URL", "https://db.example/graphdb/")
+    monkeypatch.setenv("GRAPHDB_WORKBENCH_URL", "https://workbench.example/")
     monkeypatch.setenv("GRAPHDB_REPOSITORY", "hi-research")
     monkeypatch.setenv("GRAPHDB_TIMEOUT_SECONDS", "3.5")
     settings = GraphDBSettings.from_env()
     assert str(settings.url) == "https://db.example/graphdb/"
+    assert str(settings.workbench_url) == "https://workbench.example/"
     assert settings.repository == "hi-research" and settings.timeout_seconds == 3.5
-    for values in ({"url": "http://user:secret@localhost:7200"}, {"repository": "hi/../../other"}, {"timeout_seconds": 0}):
+    for values in ({"url": "http://user:secret@localhost:7200"}, {"workbench_url": "http://user:secret@localhost:7200"}, {"repository": "hi/../../other"}, {"timeout_seconds": 0}):
         with pytest.raises(ValidationError):
             GraphDBSettings(**values)
+
+
+def test_workbench_link_uses_public_address_not_internal_graphdb_address():
+    settings = GraphDBSettings(url="http://graphdb:7200", workbench_url="https://workbench.example")
+    with httpx.Client(base_url=str(settings.url)) as http:
+        location = GraphDBStore(http, settings).location("s1", "urn:case", "urn:team")
+    assert location["workbench_url"] == "https://workbench.example/"
+    assert location["workbench_graph_url"].startswith("https://workbench.example/resource?")
+    assert "graphdb:7200" not in str(location)
 
 
 def test_configured_url_base_path_is_used_for_graphdb_requests():

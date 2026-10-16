@@ -35,7 +35,7 @@ export const DEFAULT_API_URL = 'http://127.0.0.1:8000';
 const TIMEOUT_MS = 20_000;
 
 export function apiUrl() {
-  return (import.meta.env.VITE_API_URL || DEFAULT_API_URL).replace(/\/+$/, '');
+  return (import.meta.env.VITE_API_URL ?? DEFAULT_API_URL).replace(/\/+$/, '');
 }
 
 /** @param {unknown} value */

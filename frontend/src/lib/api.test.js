@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fetchTeam, requestPreview, saveScenario } from './api.js';
+import { apiUrl, fetchTeam, requestPreview, saveScenario } from './api.js';
+
+it('uses a relative API route when the deployed bundle requests it', () => {
+  vi.stubEnv('VITE_API_URL', '/api');
+  expect(apiUrl()).toBe('/api');
+  vi.unstubAllEnvs();
+});
 
 const preview = {
   scenario_id: 's1', rdf_format: 'nt', rdf: '<a> <b> <c> .\n', triple_count: 1,

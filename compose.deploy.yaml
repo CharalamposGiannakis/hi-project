@@ -1,0 +1,64 @@
+name: hi-project-deploy
+
+services:
+  graphdb:
+    image: ontotext/graphdb:10.8.14
+    volumes:
+      - graphdb-data:/opt/graphdb/home
+    environment:
+      GDB_JAVA_OPTS: "-Xms256m -Xmx1g"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:7200/rest/repositories"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    networks: [data]
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      GRAPHDB_URL: http://graphdb:7200
+      GRAPHDB_REPOSITORY: hi
+      GRAPHDB_WORKBENCH_URL: ${WORKBENCH_PUBLIC_URL:?Set the browser-accessible Workbench URL}
+    command: ["sh", "-c", "python -m infra.graphdb setup && exec python -m uvicorn hi_scenario.api:app --host 0.0.0.0 --port 8000 --workers 1 --root-path /api"]
+    depends_on:
+      graphdb:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [data, edge]
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    environment:
+      APP_SITE_ADDRESS: ${APP_SITE_ADDRESS:?Set the application site address}
+      WORKBENCH_SITE_ADDRESS: ${WORKBENCH_SITE_ADDRESS:?Set the Workbench site address}
+      APP_AUTH_USER: ${APP_AUTH_USER:?Set an application username}
+      APP_AUTH_PASSWORD_HASH: ${APP_AUTH_PASSWORD_HASH:?Set an application password hash}
+      WORKBENCH_AUTH_USER: ${WORKBENCH_AUTH_USER:?Set a Workbench username}
+      WORKBENCH_AUTH_PASSWORD_HASH: ${WORKBENCH_AUTH_PASSWORD_HASH:?Set a Workbench password hash}
+    ports:
+      - "${HTTP_BIND:-80}:80"
+      - "${HTTPS_BIND:-443}:443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on: [backend]
+    restart: unless-stopped
+    networks: [data, edge]
+
+volumes:
+  graphdb-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  data:
+    internal: true
+  edge:

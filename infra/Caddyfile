@@ -1,0 +1,22 @@
+{$APP_SITE_ADDRESS} {
+    basic_auth {
+        {env.APP_AUTH_USER} {env.APP_AUTH_PASSWORD_HASH}
+    }
+
+    handle_path /api/* {
+        reverse_proxy backend:8000
+    }
+
+    handle {
+        root * /srv
+        file_server
+    }
+}
+
+{$WORKBENCH_SITE_ADDRESS} {
+    basic_auth {
+        {env.WORKBENCH_AUTH_USER} {env.WORKBENCH_AUTH_PASSWORD_HASH}
+    }
+
+    reverse_proxy graphdb:7200
+}

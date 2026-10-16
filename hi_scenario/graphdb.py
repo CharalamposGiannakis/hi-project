@@ -31,12 +31,15 @@ def scenario_graph_iri(scenario_id: str) -> str:
 
 class GraphDBSettings(BaseModel):
     url: AnyHttpUrl = AnyHttpUrl("http://127.0.0.1:7200")
+    workbench_url: AnyHttpUrl | None = None
     repository: Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9_-]+$")] = "hi"
     timeout_seconds: float = Field(default=10, gt=0, allow_inf_nan=False)
 
-    @field_validator("url")
+    @field_validator("url", "workbench_url")
     @classmethod
-    def check_url(cls, value: AnyHttpUrl) -> AnyHttpUrl:
+    def check_url(cls, value: AnyHttpUrl | None) -> AnyHttpUrl | None:
+        if value is None:
+            return None
         if value.username or value.password or value.query or value.fragment:
             raise ValueError("GraphDB URL must have no credentials, query, or fragment")
         return value
@@ -45,6 +48,7 @@ class GraphDBSettings(BaseModel):
     def from_env(cls) -> "GraphDBSettings":
         return cls(
             url=os.getenv("GRAPHDB_URL", "http://127.0.0.1:7200"),
+            workbench_url=os.getenv("GRAPHDB_WORKBENCH_URL"),
             repository=os.getenv("GRAPHDB_REPOSITORY", "hi"),
             timeout_seconds=os.getenv("GRAPHDB_TIMEOUT_SECONDS", "10"),
         )
@@ -151,7 +155,7 @@ class GraphDBStore:
         return result["boolean"]
 
     def location(self, scenario_id: str, use_case: str, team: str) -> dict:
-        workbench = str(self.settings.url).rstrip("/") + "/"
+        workbench = str(self.settings.workbench_url or self.settings.url).rstrip("/") + "/"
         graph_iri = scenario_graph_iri(scenario_id)
         return {
             "scenario_id": scenario_id,

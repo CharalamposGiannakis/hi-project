@@ -1,6 +1,7 @@
 """Set up and verify the local Compose GraphDB; no application persistence API."""
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -18,7 +19,7 @@ from hi_scenario.validation import validate_rdf
 
 
 ROOT = Path(__file__).resolve().parent.parent
-BASE_URL = "http://127.0.0.1:7200"
+BASE_URL = os.getenv("GRAPHDB_URL", "http://127.0.0.1:7200")
 REPOSITORY = "hi"
 ENDPOINT = f"/repositories/{REPOSITORY}"
 REFERENCES = (
