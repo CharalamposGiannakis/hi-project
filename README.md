@@ -1,249 +1,69 @@
-# HI Knowledge Graph Population Interface
+# HI Scenario Builder
 
-## Status
+The HI Scenario Builder is a research prototype for describing a small Hybrid Intelligence (HI) scenario, checking its RDF against the existing HI shapes, and exploring its team in a knowledge graph. It gives researchers a controlled path from a form to inspectable RDF and a saved GraphDB graph.
 
-Early research prototype. All design, architecture, stack, and interaction choices are **provisional** and should evolve as the project becomes clearer.
+The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated research demonstration, not a production service. Access credentials are distributed separately.
 
-T002 implements a local `JSON → RDF → SHACL` flow in `hi_scenario/`. It supports one use case, one implicit HI team, one goal, one or more tasks, and distinct human/artificial agents with names and HINT roles. `examples/s1.json` is a minimal projection of S1 in `ontology/scenarios_kgs.ttl`; its descriptive names are example labels. Context, capabilities, executions, evaluations, and interactions remain outside this representation.
+## Researcher workflow
 
-Run from the repository root with Python 3.11+ (PowerShell):
+The Svelte interface can load the bundled S1 example or a local JSON file, and download the current draft as JSON. A researcher edits the form, validates and previews the generated N-Triples without saving, then explicitly saves a new scenario. The Explore step queries the saved team composition (CQ1) and links to its named graph in GraphDB Workbench. Editing the form hides stale preview, save, and query results. The backend is the authoritative validator; the UI's checks provide immediate feedback.
+
+The application API enforces **create-only** saving: each scenario ID identifies one stored graph, and submitting an existing ID returns `409`, even for identical JSON. Direct GraphDB administrators can still change or delete graphs. The interface offers *Save as new scenario* to assign a new ID. It does not list or reopen stored scenarios for editing, so keep downloaded JSON drafts. If a write times out, check `GET /scenarios/{scenario_id}/team` or the named graph in Workbench before trying again; its outcome may be uncertain.
+
+## Scenario and semantic scope
+
+The current JSON model contains one use case, an implicit HI team, one goal, at least one task, and at least two agents including a human and an artificial agent. Agents have names and one or more HINT roles; the use case, goal, and tasks use HINT concepts, with an optional use-case domain. Unknown fields and duplicate task or agent IDs are rejected. [S1 example](examples/s1.json) is a deliberately limited projection of S1 in [the research scenarios](ontology/scenarios_kgs.ttl), with example descriptive labels. It does not model context, capabilities, executions, evaluations, or interactions.
+
+The pipeline validates JSON, checks each HINT concept against the checked-in thesaurus, converts to RDF, and runs the existing SHACL shapes with `inference="none"` and no OWL imports. N-Triples output is sorted for reproducibility. Application-assigned entity IDs remain stable across renames and produce IRIs under `urn:hi-app:scenario:{scenario-id}:…`, scoped by scenario and entity kind. Names, kinds, and roles do not define identity, and agents in different scenarios are not asserted to be the same individual. Ontology terms use `https://w3id.org/hi-ontology#`; HINT concepts use the actual thesaurus IRIs under `https://w3id.org/hi-thesaurus/` (despite `#` in its metadata).
+
+SHACL conformance means only that the current shapes passed; it is not a check of full ontology completeness. In particular, these shapes do not require task capabilities, and their `hi:Execution` target differs from the ontology's `hi:TaskExecution`. GraphDB repository `hi` uses the `empty` ruleset with `owl:sameAs` optimization disabled; application queries use explicit named graphs and `infer=false`. This avoids currently questionable inferences, including the ontology domain of `hi:operatesInContext` classifying teams as agents. Inference would not repair the SHACL mismatch or turn OWL minimum cardinalities into closed-world checks.
+
+The original ontology and HINT files are loaded into separate reference graphs (`urn:hi-app:reference:ontology` and `urn:hi-app:reference:hint`). Each saved scenario occupies `urn:hi-app:graph:scenario:{scenario-id}`. CQ1 keeps each member IRI, so agents sharing a name, type, or role remain distinct. Agent names come from scenario RDF; type labels come from the ontology and role labels/definitions from HINT. Missing labels are returned as `null`, not invented.
+
+## Run locally
+
+Use Python 3.11+, Node 20.19+ or 22.12+, and Docker with Compose. From the repository root in PowerShell:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.txt
-.\.venv\Scripts\python -m hi_scenario examples/s1.json --output scenario.nt
-.\.venv\Scripts\python -m pytest -q
-```
-
-`Scenario.model_validate_json(...)` validates the structure, rejects unhandled fields and duplicate agent/task IDs, and requires both agent kinds. Concept fields and roles use HINT local names, such as `PersonalAssistantUseCase` and `HumanUserRole`; `to_rdf(...)` checks their existence and category against the checked-in thesaurus. Names become `rdfs:label` literals. Application-assigned IDs must be retained across edits: instances use `urn:hi-app:scenario:{scenario-id}:…`, scoped by scenario and entity kind, independently of names, types, and roles. They do not claim the research group's namespace or global agent identity across scenarios.
-
-T004 exposes this same pipeline through `hi_scenario/api.py`. Start the local backend from the repository root:
-
-```powershell
+docker compose up -d --wait --wait-timeout 180
+.\.venv\Scripts\python -m infra.graphdb setup
 .\.venv\Scripts\python -m uvicorn hi_scenario.api:app --reload --host 127.0.0.1 --port 8000
 ```
 
-`POST /scenarios/preview` accepts the scenario JSON directly (`Content-Type: application/json`). A `200` response contains `scenario_id`, `rdf_format: "nt"`, `rdf` (sorted N-Triples text), `triple_count`, and `validation: {conforms: true, report: "…"}`. Invalid submissions return `422` with `code`, `message`, `issues`, and `shacl_report`: `invalid_request` includes field issues (`location`, `message`, `type`); `invalid_vocabulary` preserves the converter's explanation; `shacl_failed` includes the SHACL report. Unexpected processing failures return `500` with `internal_error` and a generic message. Nothing is persisted. Interactive API documentation is at `http://127.0.0.1:8000/docs`. CORS allows only the local Svelte development origins (`http://localhost:5173` and `http://127.0.0.1:5173`), so the Vite dev server is pinned to port 5173. The Python test command above includes API tests; `httpx` is required for FastAPI's test client.
-
-T003 adds a Svelte form in `frontend/` that edits the same JSON contract; researchers copy or download the JSON. Nothing is stored or queried. Choice lists come from `frontend/src/lib/hint-vocabulary.json`, generated from the thesaurus with the same category rule as `to_rdf(...)`; a test fails if it is stale. Entity IDs are random, assigned once, and kept across renames. Run with Node 20.19+ or 22.12+:
+In another terminal, from the repository root:
 
 ```powershell
-.\.venv\Scripts\python -m hi_scenario.vocabulary frontend/src/lib/hint-vocabulary.json  # after thesaurus changes
-cd frontend; npm install; npm run dev    # http://localhost:5173
-npm test; npm run check                  # unit tests, type checks
-npm run test:integration                 # starts uvicorn itself; PYTHON=… selects the interpreter
+cd frontend
+npm ci
+npm run dev
 ```
 
-T005 connects the form to `POST /scenarios/preview` (default `http://127.0.0.1:8000`; override with `VITE_API_URL`). With both servers running, **Validate & preview RDF** shows the backend's SHACL result and N-Triples, or its rejection (field issues, vocabulary message, or SHACL report), or that the backend is unreachable. Local checks still give immediate feedback and block incomplete forms before any request; the backend remains the authoritative validator. A result is shown only while the form's JSON equals the JSON that was validated, so any edit hides an earlier success. Previewing saves nothing. The integration tests mount the real Svelte app in jsdom against a spawned backend and check that the displayed RDF equals the CLI's output for S1.
+Open the app at `http://localhost:5173`, API documentation at `http://127.0.0.1:8000/docs`, or the local Workbench at `http://127.0.0.1:7200` (select repository `hi`). The local GraphDB port is bound to loopback and has no authentication. `setup` creates the repository when needed and refreshes the two reference graphs without deleting scenario graphs.
 
-T007 completes the workflow in the same panel: **1 · Validate & preview** (stores nothing), **2 · Save to GraphDB** (`POST /scenarios`), and **3 · Explore** (CQ1 via `GET /scenarios/{id}/team`, and *Open in GraphDB Workbench*). Every result is shown only while the form's JSON equals the JSON it came from, so edits hide earlier save and CQ1 results. Saved scenarios are immutable: after an edit, or after `409 scenario_exists`, the only save action is *Save as new scenario*, which assigns a new scenario ID and saves a separate graph. `503`, `502`, `500`, and unreachable-backend errors are reported as not saved or uncertain, and saving again is safe because existing scenarios are never overwritten. A failed CQ1 query leaves the saved status unchanged. `npm run test:integration` also runs the GraphDB workflow (S1, a three-agent scenario, edits, 409, 503, CQ1 failure) when the Compose GraphDB is reachable, and skips it otherwise; it deletes only the graphs it created.
-
-`to_ntriples(...)` emits sorted N-Triples for reproducible output. The command validates with the unchanged local HI shapes and ontology before writing. Validation adds no inferred facts to the output. SHACL conformance covers the existing constraints, not full ontology completeness: task capabilities are not required by these shapes, and their `hi:Execution` target differs from the ontology's `hi:TaskExecution`. No ontology artefacts have been altered.
-
-T006a adds one local GraphDB service in `compose.yaml`, using the [official image](https://hub.docker.com/r/ontotext/graphdb/) pinned to `10.8.14`. This [10.8 patch release](https://graphdb.ontotext.com/documentation/10.8/release-notes.html) runs in Free mode without supplying a license file; [GraphDB 11 requires a license file even for Free](https://graphdb.ontotext.com/documentation/11.4/set-up-your-license.html). Use Docker Desktop with Linux containers running, plus the Python environment above:
+For tests, from the repository root:
 
 ```powershell
-docker compose up -d --wait --wait-timeout 180
-.\.venv\Scripts\python -m infra.graphdb setup
-.\.venv\Scripts\python -m infra.graphdb verify
+.\.venv\Scripts\python -m pytest -q
+cd frontend
+npm test
+npm run check
+npm run test:integration
 ```
 
-`setup` creates repository `hi` if absent and replaces its two reference graphs with the original file bytes, leaving scenario graphs intact. It refuses an existing repository with incompatible inference settings. `verify` uploads a temporary validated three-agent scenario, reruns setup to check repeatability, restarts this Compose container, queries the scenario together with HINT, and compares all stored RDF with the inputs. It removes only its own temporary graph. It is an explicit integration check; normal pytest tests use mocked HTTP and require no running GraphDB.
+The frontend integration suite starts its own backend. Its GraphDB workflow runs when the local Compose database is reachable and otherwise skips. The ordinary Python suite does not require a live database.
 
-Workbench is at `http://127.0.0.1:7200` (choose repository `hi`). Python clients can POST a form field `query` to `http://127.0.0.1:7200/repositories/hi`, accepting `application/sparql-results+json`; RDF writes use `/repositories/hi/statements` with an explicit `context=<graph-IRI>`. Reference knowledge uses `urn:hi-app:reference:ontology` and `urn:hi-app:reference:hint`. Application scenarios use `urn:hi-app:graph:scenario:{scenario-id}`, keeping the existing instance IRIs. In Workbench, this basic SPARQL query lists the stored graph sizes:
+## API
 
-```sparql
-SELECT ?graph (COUNT(*) AS ?triples)
-WHERE { GRAPH ?graph { ?s ?p ?o } }
-GROUP BY ?graph
-```
+All scenario POST requests accept the same JSON model as [S1](examples/s1.json). The local base URL is `http://127.0.0.1:8000`; deployment serves the API under `/api`.
 
-Recommended inference baseline: [`empty` (no reasoning)](https://graphdb.ontotext.com/documentation/10.8/reasoning.html), with `owl:sameAs` optimization disabled. RDFS/rdfsplus would infer that teams using `hi:operatesInContext` are agents because of its current domain; OWL rules can additionally derive property-chain relationships and identity consequences. Those semantics need review before enabling them. Inference does not repair the SHACL execution-class mismatch or make OWL minimum cardinalities closed-world validation. Keep the existing Python SHACL check authoritative and use explicit types or SPARQL property paths for queries requiring superclass traversal.
+| Endpoint | Result |
+| --- | --- |
+| `POST /scenarios/preview` | Validates and returns RDF, triple count, and SHACL report; stores nothing. |
+| `POST /scenarios` | Validates and saves a new named graph; returns `201` with repository, graph, and Workbench location. Existing IDs return `409`. |
+| `GET /scenarios/{scenario_id}/team` | Runs CQ1 over the saved graph and reference graphs; returns member IRIs, names, types, and roles. Missing IDs return `404`. |
 
-Data and repository configuration persist in Docker's `hi-project_graphdb-data` named volume, outside Git, across restarts and `docker compose down`/`up`. `docker compose down --volumes` deletes that data. The port is bound only to loopback; this development instance has no authentication. Java heap is limited to 1 GiB; allow additional Docker memory for the process and indexes. Troubleshoot with `docker compose ps` and `docker compose logs graphdb`.
+Invalid submissions return structured `422` errors. Save and team requests report GraphDB unavailability as `503` and unexpected database results as `502`. See the running FastAPI `/docs` for field-level schemas.
 
-T006b adds `POST /scenarios` and `GET /scenarios/{scenario_id}/team`; the preview endpoint keeps its existing contract and works without GraphDB. Saving accepts the same scenario JSON and runs the shared Python/HINT/SHACL validation before contacting GraphDB. A `201` response includes `scenario_id`, `repository_id`, `graph_iri`, `workbench_url`, `workbench_graph_url`, `use_case_iri`, `team_iri`, `triple_count`, and `validation`. `workbench_graph_url` opens that named graph in the Workbench resource view (`/resource?uri=<graph_iri>&role=context`). GraphDB 10.8 Workbench cannot select a repository by URL (it stores the choice in the browser), so a browser that has not used Workbench first shows the repository picker; choosing the returned repository then opens the graph. Verified with Workbench 2.8.9 in Edge.
-
-Save policy is **create-only**: an existing ID returns `409 scenario_exists`, including identical resubmissions. Use a new ID for a new version. Saves are serialized within one backend process and use a guarded SPARQL insert plus RDF read-back verification; they never replace or delete stored graphs. **Run one backend worker**: GraphDB 10.8's read-committed isolation and its `CREATE GRAPH` check do not prevent concurrent writers from merging data. Multiple backend workers/instances and concurrent direct Workbench writes require a stronger coordination policy before deployment. A failed/timeout response after sending a write can leave its outcome uncertain; retrieve the ID before retrying. No automatic overwrite or retry is performed.
-
-CQ1 is adapted from `TEST/HI-Ontology-Test/cqs.ipynb` in the research ontology repository: it follows use case → team → member → type/role, adding member IRIs and names so `DISTINCT` cannot merge different agents. It queries only the scenario graph and the two reference graphs with `infer=false`. The `200` response contains the same location fields, `use_case_name`, and `members: [{iri, name, types: [{iri, label}], roles: [{iri, label, definition}]}]`. Names come from scenario RDF, type labels from the ontology, and role labels/definitions from HINT. Members and concepts are grouped by IRI and sorted deterministically. English/untyped reference labels are selected; missing text is `null`, never fabricated.
-
-New endpoints reuse the JSON error envelope (`code`, `message`, `issues`, `shacl_report`): invalid input is `422`; missing scenarios are `404 scenario_not_found`; database/network/repository failures are `503 graphdb_unavailable`; invalid connection settings are `503 graphdb_configuration`; malformed/incomplete query results are `502 graphdb_invalid_response`. Connection settings are read from `GRAPHDB_URL` (default `http://127.0.0.1:7200`), `GRAPHDB_REPOSITORY` (`hi`), and `GRAPHDB_TIMEOUT_SECONDS` (`10`). `GRAPHDB_WORKBENCH_URL` optionally sets the browser-facing Workbench base URL; by default it uses `GRAPHDB_URL`. URL base paths and HTTPS are supported; URL credentials are rejected. Set these process environment variables before starting uvicorn; `.env` files are not loaded automatically.
-
-The normal Python suite tests persistence requests and evaluates CQ1 over the actual reference RDF with mocked HTTP. Run the explicit live check against local Compose to exercise the API with real GraphDB, concurrent duplicate saves, container restart persistence, and a refused connection. It uses unique test IDs and deletes only its own test graphs:
-
-```powershell
-$env:HI_GRAPHDB_LIVE = "1"
-.\.venv\Scripts\python -m pytest -q -s tests/test_graphdb_live.py
-Remove-Item Env:HI_GRAPHDB_LIVE
-```
-
-T008 adds a separate `compose.deploy.yaml` for the three-container deployment: GraphDB, one FastAPI worker, and Caddy serving the built Svelte app. The existing `compose.yaml` and local Vite/uvicorn commands remain the development workflow. Deployment GraphDB has **no host port**; Caddy alone publishes HTTP/HTTPS. It protects the app, `/api/*` (including writes), and the separate Workbench host with two independent Basic Auth accounts. The backend initializes repository `hi` and the original ontology/HINT graphs on startup, connects internally to `http://graphdb:7200`, and returns the configured public Workbench URL. Named volumes retain GraphDB data and Caddy certificates across restarts. The frontend bundle calls same-origin `/api`, including when opened remotely.
-
-For a Linux server, create an untracked `.env.deploy` with `APP_SITE_ADDRESS=https://<app-host>`, `WORKBENCH_SITE_ADDRESS=https://<workbench-host>`, `WORKBENCH_PUBLIC_URL=https://<workbench-host>`, separate `APP_AUTH_USER`/`WORKBENCH_AUTH_USER`, and separate `APP_AUTH_PASSWORD_HASH`/`WORKBENCH_AUTH_PASSWORD_HASH`. Generate each bcrypt hash with `docker run --rm -it caddy:2.11.6-alpine caddy hash-password` (enter the password at its hidden prompt). Put each hash in **single quotes** in the env file so Compose does not expand its `$` characters. Restrict that file to its owner (`chmod 600 .env.deploy`); it is Git-ignored and excluded from Docker builds. Then run `docker compose --env-file .env.deploy -f compose.deploy.yaml up -d --build --wait`. Choose real hostnames and credentials only when ready to deploy; no hostname or account is supplied in Git. Caddy obtains and renews HTTPS certificates when both DNS names point at the server and inbound TCP 80/443 are reachable. Back up the `hi-project-deploy_graphdb-data` volume separately. Do not use `down --volumes` on stored research data.
-
-For a **local-only** rehearsal, set the two site addresses to `http://app.localhost` and `http://workbench.localhost`, set `WORKBENCH_PUBLIC_URL=http://workbench.localhost:8080`, and add `HTTP_BIND=127.0.0.1:8080` and `HTTPS_BIND=127.0.0.1:8443` in the ignored env file. Open `http://app.localhost:8080` and `http://workbench.localhost:8080`; plain HTTP Basic Auth is suitable only on loopback for this rehearsal. `tests/test_deploy_live.py` is an opt-in check of authentication, preview, save, CQ1, Workbench access, and persistence after restarting GraphDB; it uses a random scenario ID and removes only its own graph. For that test use `APP_AUTH_USER=researcher` and `WORKBENCH_AUTH_USER=graphadmin`; pass their passwords through `HI_DEPLOY_TEST_PASSWORD` and `HI_DEPLOY_WORKBENCH_TEST_PASSWORD`. `HI_DEPLOY_ENV_FILE` points to the ignored env file, and `HI_DEPLOY_LIVE=1` enables the test.
-
-Deployment still uses the T006b **single backend worker** save policy. Workbench users can write directly to GraphDB and must avoid editing application graphs while researchers save; multi-instance writes need stronger coordination. The proxy's Basic Auth is a small shared-access gate, with no per-researcher accounts or audit trail. Only trusted operators should receive Workbench credentials.
-
----
-
-## Design Problem
-
-> **How can a researcher describe an HI scenario without having to think like an ontology engineer, while still knowing and controlling what the machine is adding to the shared knowledge graph?**
-
-Target users are **Hybrid Intelligence researchers**. The immediate goal is to make populating the HI Knowledge Graph understandable, interactive, and visually convincing.
-
----
-
-## Initial Architecture
-
-Two input channels should lead to the **same structured representation**.
-
-```text
-                         ┌── Manual structured input
-                         │   Sidebar form / JSON editor
-Researcher ──────────────┤
-                         │
-                         └── LLM-assisted description
-                                   │
-                                   ▼
-                         Proposed form values
-                                   │
-                            Human review/edit
-                                   │
-                 ┌─────────────────┴─────────────────┐
-                 │                                   │
-                 │     interaction data recorded     │
-                 │  accepted / edited / rejected     │
-                 │                                   │
-                 └─────────────────┬─────────────────┘
-                                   │
-                                   ▼
-                         Canonical Scenario JSON
-                                   │
-                          validate / correct
-                                   │
-                                   ▼
-                              JSON → RDF
-                                   │
-                                SHACL
-                                   │
-                                   ▼
-                            Preview ABox
-                                   │
-                          Researcher approves
-                                   │
-                                   ▼
-                               GraphDB
-                          ┌────────┴────────┐
-                          ▼                 ▼
-                    SPARQL / query    GraphDB visualisation
-                          │
-                          ▼
-                    Application UI
-                          │
-                          ▼
-                  Own graph visualisation
-```
-
-The LLM should `propose values for the same structure used by manual entry`, rather than creating a separate data path.
-
-Human review should remain explicit before anything is committed to the graph.
-
----
-
-## Interaction Research
-
-The LLM channel can also produce useful interaction data.
-
-For each proposed entry, record whether the researcher:
-
-- accepted it unchanged,
-- edited it before accepting,
-- rejected it.
-
-This can later support metrics such as **LLM acceptance rate**, correction rate, and acceptance percentage per ontology field or concept.
-
----
-
-## Graph Interaction
-
-GraphDB can remain directly accessible for researchers who want advanced graph exploration or SPARQL querying.
-
-The application should also provide its own graph visualisation, designed around the current task rather than trying to reproduce all GraphDB functionality.
-
----
-
-## Suggested Stack
-
-```text
-Frontend        Svelte / SvelteKit
-Backend         Python + FastAPI
-Knowledge Graph GraphDB
-Semantic layer  RDF / OWL / SHACL
-AI              LLM-assisted structured extraction
-```
-
-This is the current preferred direction, not a locked technical decision.
-
----
-
-## First Deliverables
-
-```text
-ontology_map.md
-scenario_01_source.ttl
-scenario_01.json
-json_schema.json
-json_to_rdf.py
-validation.py
-README.md
-```
-
-- **ontology_map.md**
-Minimal working map of the HI Ontology: important classes, relationships, HINT concepts, validation requirements, and what the UI eventually needs to collect.
-
-- **scenario_01_source.ttl**
-One existing valid HI scenario taken from the current knowledge graph and used as the reference case.
-
-- **scenario_01.json**
-Human-oriented JSON representation of the same scenario.
-
-- **json_schema.json**
-Definition of the canonical structured representation expected from both manual and LLM-assisted input.
-
-- **json_to_rdf.py**
-Deterministic conversion from canonical JSON into an HI Ontology ABox.
-
-- **validation.py**
-Validation pipeline for generated RDF, initially using the existing SHACL shapes.
-
-- **README.md**
-Living notebook of the current project state, decisions, architecture, and next steps.
-
----
-
-## Next Steps - Current Priority
-
-- **Understand the ontology and one existing scenario** \
-Map the relevant ontology structure and reverse-engineer one complete scenario from the existing KG. \
-**Goal**: understand exactly what information must be collected from a researcher.
-
-
-- **Define and validate the canonical JSON representation** \
-Represent the selected scenario as JSON and build: \
-`JSON → RDF → SHACL validation` \
-**Goal**: reproduce a valid ABox without depending on any UI or LLM.
-
-- **Design the researcher interaction** \
-Once the required information is understood, design the manual form, LLM-assisted filling, review interaction, ABox preview, and graph visualisation. \
-**Goal**: produce one strong end-to-end vertical slice before expanding the system.
-
----
-
-## MVP Principle
-
-`Build one complete scenario well before supporting the whole ontology.`
-
-The first milestone is not a production system. It is a convincing researcher-facing prototype that demonstrates how the HI Knowledge Graph can grow through understandable and controlled human interaction.
+For the Linux Compose deployment, access controls, data handling, and update procedure, see the [deployment guide](docs/deployment.md).
