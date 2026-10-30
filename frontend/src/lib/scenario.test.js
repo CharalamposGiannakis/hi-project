@@ -1,9 +1,54 @@
 import { describe, expect, it } from 'vitest';
 import example from '../../../examples/s1.json';
-import { emptyScenario, fromContract, newAgent, newId, toContract, validate } from './scenario.js';
+import { emptyScenario, fromContract, newAgent, newContext, newId, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const copy = () => structuredClone(example);
+
+describe('optional context', () => {
+  it('keeps legacy JSON and null contexts compatible', () => {
+    /** @type {any} */
+    const data = copy();
+    delete data.context;
+    expect(toContract(fromContract(data))).toEqual(data);
+    data.context = null;
+    expect(fromContract(data).context).toBeNull();
+    expect(toContract(fromContract(data))).not.toHaveProperty('context');
+  });
+
+  it('round-trips every S1 Context field and allows empty concept lists', () => {
+    const scenario = fromContract(copy());
+    expect(scenario.context).toEqual(example.context);
+    expect(toContract(scenario).context).toEqual(example.context);
+    scenario.context = { ...newContext(), concept: 'HealthMonitoringContext' };
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario).context).toEqual({ concept: 'HealthMonitoringContext', phenomena: [], constraints: [] });
+    scenario.context.description = '  Context description  ';
+    expect(toContract(scenario).context?.description).toBe('Context description');
+  });
+
+  it.each([
+    ['concept', 'MadeUpContext'], ['concept', 'HumanUserRole'],
+    ['phenomena', ['MadeUpPhenomenon']], ['phenomena', ['PrivacyConstraint']],
+    ['constraints', ['MadeUpConstraint']], ['constraints', ['SensorNoisePhenomenon']],
+  ])('rejects invalid context vocabulary in %s', (field, value) => {
+    /** @type {any} */
+    const data = copy();
+    data.context[field] = value;
+    expect(() => fromContract(data)).toThrow('not a HINT');
+  });
+
+  it.each([
+    {}, { concept: 'HealthMonitoringContext', phenomena: null },
+    { concept: 'HealthMonitoringContext', constraints: 'PrivacyConstraint' },
+    { concept: 'HealthMonitoringContext', description: 123 },
+    { concept: 'HealthMonitoringContext', description: '  ' },
+    { concept: 'HealthMonitoringContext', extra: 'not supported' },
+  ])('rejects invalid context structure: %j', (context) => {
+    const data = { ...copy(), context };
+    expect(() => fromContract(data)).toThrow();
+  });
+});
 
 describe('example scenario', () => {
   it('loads without issues and round-trips to the identical contract JSON', () => {

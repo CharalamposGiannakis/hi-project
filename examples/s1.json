@@ -11,6 +11,12 @@
     "name": "Maintain and improve user wellbeing",
     "concept": "UserWellbeingGoal"
   },
+  "context": {
+    "concept": "HealthMonitoringContext",
+    "phenomena": ["SensorNoisePhenomenon", "DataMismatchPhenomenon", "TrustShiftPhenomenon"],
+    "constraints": ["PrivacyConstraint", "AutonomyConstraint", "TransparencyConstraint"],
+    "description": "Health-monitoring context involving multimodal data, user reports, and sensor uncertainty."
+  },
   "tasks": [
     {
       "id": "data-collection",

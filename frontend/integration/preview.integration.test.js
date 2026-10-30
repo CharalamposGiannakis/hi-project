@@ -9,6 +9,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { flushSync, mount, unmount } from 'svelte';
 import example from '../../examples/s1.json';
 import { requestPreview } from '../src/lib/api.js';
+import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
 /** @type {{ url: string, stop: () => void } | undefined} */
@@ -57,6 +58,55 @@ async function until(condition) {
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('enters the complete original S1 Context through the form', async () => {
+    await mountApp();
+    clickButton('Load S1 example');
+    clickButton('Remove context');
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('context');
+    clickButton('Add context');
+    clickButton('Validate & preview RDF');
+    expect(text()).toContain('Choose a concept.');
+
+    const label = [...document.querySelectorAll('label')].find((l) => l.textContent?.trim() === 'Context type');
+    const select = /** @type {HTMLSelectElement} */ (label?.control);
+    select.value = example.context.concept;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    for (const id of [...example.context.phenomena, ...example.context.constraints]) {
+      const concept = [...concepts.Phenomenon, ...concepts.Constraint].find((c) => c.id === id);
+      const checkboxLabel = [...document.querySelectorAll('fieldset.concepts label')].find((l) => l.textContent?.trim() === concept?.label);
+      expect(checkboxLabel, `HINT option ${id}`).toBeDefined();
+      /** @type {HTMLInputElement} */ (checkboxLabel?.querySelector('input')).click();
+      flushSync();
+    }
+    const description = /** @type {HTMLTextAreaElement} */ (document.querySelector('#context-description'));
+    description.value = example.context.description;
+    description.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').context).toEqual(example.context);
+
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('43 triples · not saved');
+    const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
+    expect(rdf).toContain('<urn:hi-app:scenario:s1:context>');
+    expect(rdf).toContain(`"${example.context.description}"@en`);
+    description.value = 'Edited context';
+    description.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(document.querySelector('pre.rdf')).toBeNull();
+  });
+
+  it('imports Context JSON through the file input', async () => {
+    await mountApp();
+    const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
+    Object.defineProperty(input, 'files', { value: [{ name: 'context.json', text: async () => JSON.stringify(example) }] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => text().includes('Loaded context.json'));
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(example);
+    expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#context-description')).value).toBe(example.context.description);
+  });
+
   it('previews S1 with exactly the RDF the Python pipeline generates, and invalidates it on edit', async () => {
     // The CLI's --output file always uses LF line endings (stdout may not on Windows).
     const dir = mkdtempSync(join(tmpdir(), 'hi-preview-'));
@@ -70,7 +120,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Load S1 example');
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('32 triples · not saved');
+    expect(text()).toContain('43 triples · not saved');
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected);
 
     const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));

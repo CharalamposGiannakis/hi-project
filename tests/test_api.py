@@ -36,7 +36,7 @@ def test_s1_preview_matches_existing_pipeline(client, payload):
         "scenario_id": "s1",
         "rdf_format": "nt",
         "rdf": to_ntriples(graph),
-        "triple_count": 32,
+        "triple_count": 43,
         "validation": {"conforms": conforms, "report": report},
     }
     assert set(Graph().parse(data=response.json()["rdf"], format="nt")) == set(graph)

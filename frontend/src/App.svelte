@@ -1,6 +1,7 @@
 <script>
   import example from '../../examples/s1.json';
   import ConceptSelect from './lib/ConceptSelect.svelte';
+  import ConceptChecklist from './lib/ConceptChecklist.svelte';
   import RdfPreview from './lib/RdfPreview.svelte';
   import ScenarioSave from './lib/ScenarioSave.svelte';
   import {
@@ -9,6 +10,7 @@
     findConcept,
     fromContract,
     newAgent,
+    newContext,
     newTask,
     toContract,
     validate,
@@ -148,6 +150,23 @@
       </div>
       <ConceptSelect label="Use case type" category="UseCase" bind:value={scenario.use_case.concept} error={errorFor('use_case.concept')} />
       <ConceptSelect label="Domain" category="Domain" optional bind:value={scenario.use_case.domain} error={errorFor('use_case.domain')} />
+    </fieldset>
+
+    <fieldset>
+      <legend>Context (optional)</legend>
+      <p class="hint">Describe the conditions in which the team operates.</p>
+      {#if scenario.context}
+        <ConceptSelect label="Context type" category="Context" bind:value={scenario.context.concept} error={errorFor('context.concept')} />
+        <ConceptChecklist label="Phenomena" category="Phenomenon" bind:values={scenario.context.phenomena} error={errorFor('context.phenomena')} />
+        <ConceptChecklist label="Constraints" category="Constraint" bind:values={scenario.context.constraints} error={errorFor('context.constraints')} />
+        <div class="field">
+          <label for="context-description">Description in English (optional)</label>
+          <textarea id="context-description" rows="3" bind:value={scenario.context.description}></textarea>
+        </div>
+        <button type="button" onclick={() => (scenario.context = null)}>Remove context</button>
+      {:else}
+        <button type="button" onclick={() => (scenario.context = newContext())}>Add context</button>
+      {/if}
     </fieldset>
 
     <fieldset>

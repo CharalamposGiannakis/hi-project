@@ -139,9 +139,9 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(await storedTriples(id)).toBe(0); // Previewing stores nothing.
 
     await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 32 triples');
+    expect(text()).toContain('Saved in GraphDB · repository hi · 43 triples');
     expect(text()).toContain(graphIri(id));
-    expect(await storedTriples(id)).toBe(32);
+    expect(await storedTriples(id)).toBe(43);
 
     click('Show team composition (CQ1)');
     await until(() => text().includes('CQ1 over the saved graph'));
@@ -202,7 +202,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(text()).toContain(graphIri(newId));
     expect(await storedLabel(newId, 'human-user')).toEqual(['Renamed participant']);
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']); // Original untouched.
-    expect(await storedTriples(id)).toBe(32);
+    expect(await storedTriples(id)).toBe(43);
   }, 60_000);
 
   it('409: an existing ID is reported and never overwritten', async () => {
@@ -221,7 +221,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await until(() => text().includes('Not saved: this scenario ID already exists in GraphDB.'));
     expect(text()).not.toContain('Saved in GraphDB');
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']);
-    expect(await storedTriples(id)).toBe(32);
+    expect(await storedTriples(id)).toBe(43);
     expect(document.querySelector('.save button.primary')?.textContent?.trim()).toBe('Save as new scenario');
   }, 60_000);
 
@@ -249,6 +249,6 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await until(() => text().includes('The team query failed. The scenario is still saved.'));
     expect(text()).toContain('GraphDB is unavailable');
     expect(text()).toContain('Saved in GraphDB');
-    expect(await storedTriples(id)).toBe(32);
+    expect(await storedTriples(id)).toBe(43);
   }, 60_000);
 });
