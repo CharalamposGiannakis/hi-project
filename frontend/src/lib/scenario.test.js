@@ -1,14 +1,91 @@
 import { describe, expect, it } from 'vitest';
 import example from '../../../examples/s1.json';
-import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newId, removeEntity, toContract, validate } from './scenario.js';
+import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newId, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const copy = () => structuredClone(example);
+
+describe('optional experiments and evaluations', () => {
+  it('loads legacy JSON unchanged and omits empty collections on export', () => {
+    /** @type {any} */
+    const data = copy();
+    delete data.experiments;
+    delete data.evaluations;
+    expect(toContract(fromContract(data))).toEqual(data);
+    data.experiments = [];
+    data.evaluations = [];
+    expect(toContract(fromContract(data))).not.toHaveProperty('experiments');
+    expect(toContract(fromContract(data))).not.toHaveProperty('evaluations');
+    expect(emptyScenario().experiments).toEqual([]);
+    expect(emptyScenario().evaluations).toEqual([]);
+  });
+
+  it('round-trips multiple metrics and shared evaluations without merging identities', () => {
+    const data = copy();
+    data.experiments[0].metrics.push('FairOutcomeMetric');
+    data.evaluations[0].metrics.push('FairOutcomeMetric');
+    data.evaluations[0].executions = data.executions.map((e) => e.id);
+    const scenario = fromContract(JSON.stringify(data));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(data);
+    expect(scenario.experiments.filter((e) => e.concept === 'TransparencyTrustExperiment')).toHaveLength(2);
+    scenario.experiments[0].hypothesis_language = 'en';
+    scenario.experiments[0].description = ' Experiment description ';
+    scenario.evaluations[0].description = '';
+    expect(toContract(scenario).experiments?.[0]).toMatchObject({ hypothesis_language: 'en', description: 'Experiment description', id: data.experiments[0].id });
+    expect(toContract(scenario).evaluations?.[0]).not.toHaveProperty('description');
+    expect(newExperiment(scenario.experiments.map((e) => e.id)).id).toMatch(ID);
+    expect(newEvaluation(scenario.evaluations.map((e) => e.id)).id).toMatch(ID);
+  });
+
+  it('accepts null optional descriptions and hypothesis language', () => {
+    const data = { ...copy(), experiments: [{ ...example.experiments[0], description: null, hypothesis_language: null }] };
+    data.evaluations = [data.evaluations[0]];
+    expect(toContract(fromContract(data)).experiments?.[0]).toEqual(example.experiments[0]);
+  });
+
+  it.each([
+    ['experiments', 'id', 'conflict-accuracy'], ['evaluations', 'id', 'conflict-accuracy'],
+    ['experiments', 'concept', 'MadeUpExperiment'], ['experiments', 'concept', 'TransparencyEvaluation'],
+    ['evaluations', 'concept', 'MadeUpEvaluation'], ['evaluations', 'concept', 'DiagnosisAccuracyMetric'],
+    ['experiments', 'metrics', ['MadeUpMetric']], ['evaluations', 'metrics', ['TransparencyEvaluation']],
+    ['evaluations', 'experiment', 'missing'], ['evaluations', 'executions', ['missing']],
+    ['experiments', 'null_hypothesis', '  '], ['experiments', 'alternative_hypothesis', 123],
+    ['experiments', 'hypothesis_language', 'fr'], ['experiments', 'hypothesis_language', ''],
+    ['experiments', 'description', ' '], ['evaluations', 'description', 123],
+  ])('rejects invalid %s field %s', (collection, field, value) => {
+    /** @type {any} */
+    const data = copy();
+    data[collection][0][field] = value;
+    expect(() => fromContract(data)).toThrow();
+  });
+
+  it.each([null, {}, [{}]])('rejects malformed assessment collections: %j', (value) => {
+    expect(() => fromContract({ ...copy(), experiments: value })).toThrow();
+    expect(() => fromContract({ ...copy(), evaluations: value })).toThrow();
+  });
+
+  it('preserves evaluations on deletion and requires explicit relationship repair', () => {
+    const scenario = fromContract(copy());
+    const original = structuredClone(scenario.evaluations);
+    scenario.experiments.splice(0, 1);
+    scenario.executions.splice(0, 1);
+    expect(scenario.evaluations).toEqual(original);
+    expect(validate(scenario).map((issue) => issue.path)).toEqual(['evaluations.0.experiment', 'evaluations.0.executions']);
+    scenario.evaluations[0].experiment = scenario.experiments[0].id;
+    scenario.evaluations[0].executions = [scenario.executions[0].id];
+    expect(validate(scenario)).toEqual([]);
+    expect(scenario.evaluations[0].id).toBe(original[0].id);
+    expect(scenario.evaluations[0].description).toBe(original[0].description);
+  });
+});
 
 describe('optional task executions', () => {
   it('keeps legacy JSON compatible and omits an empty execution list', () => {
     /** @type {any} */
     const data = copy();
+    delete data.evaluations;
+    delete data.experiments;
     delete data.executions;
     expect(toContract(fromContract(data))).toEqual(data);
     data.executions = [];

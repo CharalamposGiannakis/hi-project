@@ -111,6 +111,29 @@ def to_rdf(scenario: Scenario) -> Graph:
         if execution.method is not None:
             graph.add((execution_node, HI.hasMethodConcept, _concept(execution.method, "Method")))
 
+    for experiment in scenario.experiments:
+        node = URIRef(f"{base}experiment:{experiment.id}")
+        graph.add((node, RDF.type, HI.Experiment))
+        graph.add((node, HI.hasExperimentConcept, _concept(experiment.concept, "Experiment")))
+        for metric in experiment.metrics:
+            graph.add((node, HI.hasMetricTested, _concept(metric, "Metric")))
+        graph.add((node, HI.hasNullHypothesis, Literal(experiment.null_hypothesis, lang=experiment.hypothesis_language)))
+        graph.add((node, HI.hasAlternativeHypothesis, Literal(experiment.alternative_hypothesis, lang=experiment.hypothesis_language)))
+        if experiment.description is not None:
+            graph.add((node, RDFS.comment, Literal(experiment.description, lang="en")))
+
+    for evaluation in scenario.evaluations:
+        node = URIRef(f"{base}evaluation:{evaluation.id}")
+        graph.add((node, RDF.type, HI.Evaluation))
+        graph.add((node, HI.hasEvaluationConcept, _concept(evaluation.concept, "Evaluation")))
+        graph.add((node, HI.hasExperiment, URIRef(f"{base}experiment:{evaluation.experiment}")))
+        for metric in evaluation.metrics:
+            graph.add((node, HI.hasMetricConcept, _concept(metric, "Metric")))
+        for execution_id in evaluation.executions:
+            graph.add((URIRef(f"{base}execution:{execution_id}"), HI.evaluatedBy, node))
+        if evaluation.description is not None:
+            graph.add((node, RDFS.comment, Literal(evaluation.description, lang="en")))
+
     return graph
 
 

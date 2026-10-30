@@ -59,6 +59,25 @@ class Execution(Record):
     method: Concept | None = None
 
 
+class Experiment(Record):
+    id: Identifier
+    concept: Concept
+    metrics: tuple[Concept, ...] = ()
+    null_hypothesis: Name
+    alternative_hypothesis: Name
+    hypothesis_language: Literal["en"] | None = None
+    description: Name | None = None
+
+
+class Evaluation(Record):
+    id: Identifier
+    concept: Concept
+    metrics: tuple[Concept, ...] = ()
+    experiment: Identifier
+    executions: tuple[Identifier, ...] = ()
+    description: Name | None = None
+
+
 class Scenario(Record):
     # IDs are assigned by the application and retained across edits.
     id: Identifier
@@ -69,12 +88,15 @@ class Scenario(Record):
     context: Context | None = None
     capabilities: tuple[Capability, ...] = ()
     executions: tuple[Execution, ...] = ()
+    experiments: tuple[Experiment, ...] = ()
+    evaluations: tuple[Evaluation, ...] = ()
 
     @model_validator(mode="after")
     def check_team_and_identities(self) -> Self:
         for label, entities in (
             ("task", self.tasks), ("agent", self.agents),
             ("capability", self.capabilities), ("execution", self.executions),
+            ("experiment", self.experiments), ("evaluation", self.evaluations),
         ):
             ids = [entity.id for entity in entities]
             if len(ids) != len(set(ids)):
@@ -95,4 +117,10 @@ class Scenario(Record):
             ):
                 if reference not in {entity.id for entity in entities}:
                     raise ValueError(f"Execution {execution.id} references unknown {label} ID: {reference}")
+        for evaluation in self.evaluations:
+            if evaluation.experiment not in {experiment.id for experiment in self.experiments}:
+                raise ValueError(f"Evaluation {evaluation.id} references unknown experiment ID: {evaluation.experiment}")
+            unknown = set(evaluation.executions) - {execution.id for execution in self.executions}
+            if unknown:
+                raise ValueError(f"Evaluation {evaluation.id} references unknown execution IDs: {', '.join(sorted(unknown))}")
         return self

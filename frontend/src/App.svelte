@@ -15,6 +15,8 @@
     newCapability,
     newContext,
     newExecution,
+    newExperiment,
+    newEvaluation,
     newTask,
     removeEntity,
     toContract,
@@ -30,6 +32,11 @@
 
   let issues = $derived(validate(scenario));
   let json = $derived(serialize(scenario));
+  let experimentOptions = $derived(scenario.experiments.map((e) => ({ id: e.id, name: findConcept('Experiment', e.concept)?.label ?? 'Experiment' })));
+  let executionOptions = $derived(scenario.executions.map((e) => ({
+    id: e.id,
+    name: `${findConcept('TaskExecution', e.concept)?.label ?? 'Execution'} · ${scenario.agents.find((a) => a.id === e.agent)?.name || e.agent} · ${scenario.tasks.find((t) => t.id === e.task)?.name || e.task}`,
+  })));
   // JSON at the last new/load, to ask before discarding edits.
   let pristine = $state(serialize(initial));
 
@@ -280,6 +287,66 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.executions.push(newExecution(scenario.executions.map((e) => e.id)))}>Add execution</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Experiments (optional)</legend>
+      {#if errorFor('experiments')}<p class="error">{errorFor('experiments')}</p>{/if}
+      {#each scenario.experiments as experiment, i (experiment.id)}
+        <section class="item" data-experiment-id={experiment.id}>
+          <div class="item-head">
+            <h3>{findConcept('Experiment', experiment.concept)?.label ?? `Experiment ${i + 1}`}</h3>
+            <button type="button" class="link" onclick={() => scenario.experiments.splice(i, 1)}>Remove experiment</button>
+          </div>
+          <ConceptSelect label="Experiment type" category="Experiment" bind:value={experiment.concept} error={errorFor(`experiments.${i}.concept`)} />
+          <ConceptChecklist label="Metrics" category="Metric" bind:values={experiment.metrics} error={errorFor(`experiments.${i}.metrics`)} />
+          <div class="field">
+            <label for="null-hypothesis-{experiment.id}">Null hypothesis</label>
+            <textarea id="null-hypothesis-{experiment.id}" rows="2" bind:value={experiment.null_hypothesis} aria-invalid={errorFor(`experiments.${i}.null_hypothesis`) ? 'true' : undefined}></textarea>
+            {#if errorFor(`experiments.${i}.null_hypothesis`)}<p class="error">{errorFor(`experiments.${i}.null_hypothesis`)}</p>{/if}
+          </div>
+          <div class="field">
+            <label for="alternative-hypothesis-{experiment.id}">Alternative hypothesis</label>
+            <textarea id="alternative-hypothesis-{experiment.id}" rows="2" bind:value={experiment.alternative_hypothesis} aria-invalid={errorFor(`experiments.${i}.alternative_hypothesis`) ? 'true' : undefined}></textarea>
+            {#if errorFor(`experiments.${i}.alternative_hypothesis`)}<p class="error">{errorFor(`experiments.${i}.alternative_hypothesis`)}</p>{/if}
+          </div>
+          <div class="field">
+            <label for="hypothesis-language-{experiment.id}">Hypothesis literal format</label>
+            <select id="hypothesis-language-{experiment.id}" bind:value={experiment.hypothesis_language}>
+              <option value="">Plain text</option>
+              <option value="en">English (@en)</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="experiment-description-{experiment.id}">Description in English (optional)</label>
+            <textarea id="experiment-description-{experiment.id}" rows="2" bind:value={experiment.description}></textarea>
+          </div>
+        </section>
+      {/each}
+      <button type="button" onclick={() => scenario.experiments.push(newExperiment(scenario.experiments.map((e) => e.id)))}>Add experiment</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Evaluations (optional)</legend>
+      <p class="hint">Define each evaluation once and select all executions it evaluates. Deleting an experiment or execution keeps these records for repair.</p>
+      {#if errorFor('evaluations')}<p class="error">{errorFor('evaluations')}</p>{/if}
+      {#each scenario.evaluations as evaluation, i (evaluation.id)}
+        <section class="item" data-evaluation-id={evaluation.id}>
+          <div class="item-head">
+            <h3>{findConcept('Evaluation', evaluation.concept)?.label ?? `Evaluation ${i + 1}`}</h3>
+            <button type="button" class="link" onclick={() => scenario.evaluations.splice(i, 1)}>Remove evaluation</button>
+          </div>
+          <ConceptSelect label="Evaluation type" category="Evaluation" bind:value={evaluation.concept} error={errorFor(`evaluations.${i}.concept`)} />
+          <ConceptChecklist label="Metrics" category="Metric" bind:values={evaluation.metrics} error={errorFor(`evaluations.${i}.metrics`)} />
+          <ReferenceSelect label="Experiment" options={experimentOptions} bind:value={evaluation.experiment} error={errorFor(`evaluations.${i}.experiment`)} />
+          <ReferenceChecklist label="Evaluated executions" options={executionOptions} bind:values={evaluation.executions} error={errorFor(`evaluations.${i}.executions`)} />
+          <div class="field">
+            <label for="evaluation-description-{evaluation.id}">Description in English (optional)</label>
+            <textarea id="evaluation-description-{evaluation.id}" rows="2" bind:value={evaluation.description}></textarea>
+          </div>
+        </section>
+      {/each}
+      <button type="button" onclick={() => scenario.evaluations.push(newEvaluation(scenario.evaluations.map((e) => e.id)))}>Add evaluation</button>
     </fieldset>
   </form>
 

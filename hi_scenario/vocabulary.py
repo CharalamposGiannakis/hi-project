@@ -13,7 +13,7 @@ from .rdf import HINT, _thesaurus
 # Category used by each JSON field; agent concepts are derived from `kind`.
 CATEGORIES = (
     "UseCase", "Domain", "Goal", "Task", "Role", "Context", "Phenomenon", "Constraint",
-    "Capability", "TaskExecution", "Method",
+    "Capability", "TaskExecution", "Method", "Experiment", "Evaluation", "Metric",
 )
 
 

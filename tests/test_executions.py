@@ -23,7 +23,10 @@ EXECUTION_PREDICATES = {
 
 @pytest.fixture
 def payload():
-    return json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data.pop("experiments", None)
+    data.pop("evaluations", None)
+    return data
 
 
 def test_s1_reproduces_all_twenty_one_supported_execution_triples(payload):

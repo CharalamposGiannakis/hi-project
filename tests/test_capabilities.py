@@ -21,6 +21,8 @@ BASE = "urn:hi-app:scenario:s1:"
 def payload():
     data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
     data.pop("executions", None)  # Isolate capabilities from execution assignments.
+    data.pop("experiments", None)
+    data.pop("evaluations", None)
     return data
 
 

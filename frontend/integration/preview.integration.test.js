@@ -66,10 +66,103 @@ function selectValue(root, label, value) {
   flushSync();
 }
 
+/** @param {ParentNode} root @param {string} label @param {string} value */
+function enterText(root, label, value) {
+  const control = [...root.querySelectorAll('label')].find((l) => l.textContent?.trim() === label)?.control;
+  if (!(control instanceof HTMLTextAreaElement)) throw new Error(`No textarea "${label}"`);
+  control.value = value;
+  control.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('enters all S1 experiments and evaluations through the form', async () => {
+    await mountApp();
+    clickButton('Load S1 example');
+    for (const _ of example.evaluations) clickButton('Remove evaluation');
+    for (const _ of example.experiments) clickButton('Remove experiment');
+    for (const experiment of example.experiments) {
+      clickButton('Add experiment');
+      const section = /** @type {Element} */ ([...document.querySelectorAll('[data-experiment-id]')].at(-1));
+      selectValue(section, 'Experiment type', experiment.concept);
+      for (const id of experiment.metrics) {
+        /** @type {HTMLInputElement} */ (section.querySelector(`input[value="${id}"]`)).click();
+        flushSync();
+      }
+      enterText(section, 'Null hypothesis', experiment.null_hypothesis);
+      enterText(section, 'Alternative hypothesis', experiment.alternative_hypothesis);
+    }
+    const created = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    for (const evaluation of example.evaluations) {
+      clickButton('Add evaluation');
+      const section = /** @type {Element} */ ([...document.querySelectorAll('[data-evaluation-id]')].at(-1));
+      selectValue(section, 'Evaluation type', evaluation.concept);
+      const index = example.experiments.findIndex((e) => e.id === evaluation.experiment);
+      selectValue(section, 'Experiment', created.experiments[index].id);
+      for (const id of [...evaluation.metrics, ...evaluation.executions]) {
+        /** @type {HTMLInputElement} */ (section.querySelector(`input[value="${id}"]`)).click();
+        flushSync();
+      }
+      enterText(section, 'Description in English (optional)', evaluation.description);
+    }
+    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    expect(entered.experiments.map(({ id, ...facts }) => facts)).toEqual(example.experiments.map(({ id, ...facts }) => facts));
+    expect(entered.evaluations.map(({ id, experiment, ...facts }) => facts)).toEqual(example.evaluations.map(({ id, experiment, ...facts }) => facts));
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('117 triples · not saved');
+    const firstExperiment = /** @type {Element} */ (document.querySelector('[data-experiment-id]'));
+    selectValue(firstExperiment, 'Hypothesis literal format', 'en');
+    expect(document.querySelector('pre.rdf')).toBeNull();
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(document.querySelector('pre.rdf')?.textContent).toContain(`"${example.experiments[0].null_hypothesis}"@en`);
+    const firstEvaluation = /** @type {Element} */ (document.querySelector('[data-evaluation-id]'));
+    for (const section of [firstExperiment, firstEvaluation]) {
+      /** @type {HTMLInputElement} */ (section.querySelector('input[value="FairOutcomeMetric"]')).click();
+      flushSync();
+    }
+    /** @type {HTMLInputElement} */ (firstEvaluation.querySelector('input[value="conflict-resolution"]')).click();
+    flushSync();
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('120 triples · not saved');
+  });
+
+  it.each(['experiment', 'execution'])('keeps evaluation data when a referenced %s is deleted and supports repair', async (kind) => {
+    await mountApp();
+    clickButton('Load S1 example');
+    const id = kind === 'experiment' ? 'data-collection-quality' : 'data-collection';
+    document.querySelector(`[data-${kind}-id="${id}"] button`)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    flushSync();
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').evaluations).toEqual(example.evaluations);
+    expect(text()).toContain(kind === 'experiment' ? `"${id}" no longer exists` : `Referenced records no longer exist: ${id}`);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      clickButton('Validate & preview RDF');
+      clickButton('Save to GraphDB');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
+    const evaluation = /** @type {Element} */ (document.querySelector('[data-evaluation-id="data-collection-quality"]'));
+    if (kind === 'experiment') selectValue(evaluation, 'Experiment', 'conflict-accuracy');
+    else {
+      /** @type {HTMLInputElement} */ (evaluation.querySelector('input[value="conflict-resolution"]')).click();
+      flushSync();
+      /** @type {HTMLInputElement} */ (evaluation.querySelector('input[value="data-collection"]')).click();
+      flushSync();
+    }
+    const repaired = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').evaluations[0];
+    expect(repaired.id).toBe(example.evaluations[0].id);
+    expect(repaired.description).toBe(example.evaluations[0].description);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+  });
+
   it('enters all S1 executions through the form and supports optional methods', async () => {
     await mountApp();
     clickButton('Load S1 example');
+    for (const _ of example.evaluations) clickButton('Remove evaluation');
+    for (const _ of example.experiments) clickButton('Remove experiment');
     for (const _ of example.executions) clickButton('Remove execution');
     expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('executions');
     for (const execution of example.executions) {
@@ -148,7 +241,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(new Set(entered.capabilities.map((c) => c.id)).size).toBe(4);
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('84 triples · not saved');
+    expect(text()).toContain('117 triples · not saved');
 
     const first = document.querySelector('[data-capability-id]');
     for (const id of ['human-user', 'conflict-resolution']) {
@@ -162,7 +255,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(document.querySelector('pre.rdf')).toBeNull();
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('87 triples · not saved');
+    expect(text()).toContain('120 triples · not saved');
   });
 
   it('enters the complete original S1 Context through the form', async () => {
@@ -194,7 +287,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('84 triples · not saved');
+    expect(text()).toContain('117 triples · not saved');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain('<urn:hi-app:scenario:s1:context>');
     expect(rdf).toContain(`"${example.context.description}"@en`);
@@ -227,7 +320,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Load S1 example');
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('84 triples · not saved');
+    expect(text()).toContain('117 triples · not saved');
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected);
 
     const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));

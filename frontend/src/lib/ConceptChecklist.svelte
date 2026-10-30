@@ -21,7 +21,7 @@
   <legend>{label}</legend>
   {#each concepts[category] as concept (concept.id)}
     <label class="inline" title={concept.definition}>
-      <input type="checkbox" checked={values.includes(concept.id)} onchange={() => toggle(concept.id)} />
+      <input type="checkbox" value={concept.id} checked={values.includes(concept.id)} onchange={() => toggle(concept.id)} />
       {concept.label}
     </label>
   {/each}
