@@ -58,6 +58,45 @@ async function until(condition) {
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('enters all four S1 capabilities through the form and shares their references', async () => {
+    await mountApp();
+    clickButton('Load S1 example');
+    for (const _ of example.capabilities) clickButton('Remove capability');
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('capabilities');
+    for (const capability of example.capabilities) {
+      clickButton('Add capability');
+      const section = [...document.querySelectorAll('[data-capability-id]')].at(-1);
+      const select = /** @type {HTMLSelectElement} */ (section?.querySelector('select'));
+      select.value = capability.concept;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+      for (const id of [...capability.agents, ...capability.tasks]) {
+        /** @type {HTMLInputElement} */ (section?.querySelector(`input[value="${id}"]`)).click();
+        flushSync();
+      }
+    }
+    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    expect(entered.capabilities.map(({ id, ...facts }) => facts)).toEqual(example.capabilities.map(({ id, ...facts }) => facts));
+    expect(new Set(entered.capabilities.map((c) => c.id)).size).toBe(4);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('63 triples · not saved');
+
+    const first = document.querySelector('[data-capability-id]');
+    for (const id of ['human-user', 'conflict-resolution']) {
+      /** @type {HTMLInputElement} */ (first?.querySelector(`input[value="${id}"]`)).click();
+      flushSync();
+    }
+    const changed = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').capabilities[0];
+    expect(changed.id).toBe(entered.capabilities[0].id);
+    expect(changed.agents).toEqual(['ai-assistant', 'human-user']);
+    expect(changed.tasks).toEqual(['data-collection', 'conflict-resolution']);
+    expect(document.querySelector('pre.rdf')).toBeNull();
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('66 triples · not saved');
+  });
+
   it('enters the complete original S1 Context through the form', async () => {
     await mountApp();
     clickButton('Load S1 example');
@@ -87,7 +126,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('43 triples · not saved');
+    expect(text()).toContain('63 triples · not saved');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain('<urn:hi-app:scenario:s1:context>');
     expect(rdf).toContain(`"${example.context.description}"@en`);
@@ -120,7 +159,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Load S1 example');
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('43 triples · not saved');
+    expect(text()).toContain('63 triples · not saved');
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected);
 
     const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));

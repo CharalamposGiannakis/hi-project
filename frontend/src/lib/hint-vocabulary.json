@@ -514,5 +514,137 @@
       "label": "User Comfort Constraint",
       "definition": "A constraint that promotes user comfort."
     }
+  ],
+  "Capability": [
+    {
+      "id": "BayesianReasoningCapability",
+      "label": "Bayesian reasoning capability",
+      "definition": "Capability to perform reasoning based on Bayesian probability principles."
+    },
+    {
+      "id": "ClinicalJudgmentCapability",
+      "label": "Clinical judgment capability",
+      "definition": "Capability to make informed clinical judgments based on medical knowledge and patient data."
+    },
+    {
+      "id": "CognitiveReasoningCapability",
+      "label": "Cognitive & reasoning capability",
+      "definition": ""
+    },
+    {
+      "id": "CommunicationExplanationCapability",
+      "label": "Communication & explanation capability",
+      "definition": ""
+    },
+    {
+      "id": "ConfinedReachingCapability",
+      "label": "Confined-reaching capability",
+      "definition": "Capability to operate or reach within confined or restricted environments."
+    },
+    {
+      "id": "DomainSpecificCapability",
+      "label": "Domain-specific expert capability",
+      "definition": ""
+    },
+    {
+      "id": "EmbeddingReasoningCapability",
+      "label": "Embedding reasoning capability",
+      "definition": "Capability to reason using vector embeddings of data."
+    },
+    {
+      "id": "ExplainingCapability",
+      "label": "Explaining capability",
+      "definition": "Capability to provide explanations or justifications for decisions or actions taken."
+    },
+    {
+      "id": "FineDexterityCapability",
+      "label": "Fine dexterity capability",
+      "definition": "Capability to perform tasks requiring precise and delicate movements."
+    },
+    {
+      "id": "HeavyLiftingCapability",
+      "label": "Heavy-lifting capability",
+      "definition": "Capability to handle complex, resource-intensive, or large-scale tasks."
+    },
+    {
+      "id": "KnowledgeGraphQueryingCapability",
+      "label": "Knowledge graph querying capability",
+      "definition": "Capability to query and retrieve information from knowledge graphs."
+    },
+    {
+      "id": "LearningAdaptationCapability",
+      "label": "Learning & adaptation capability",
+      "definition": ""
+    },
+    {
+      "id": "MetaAnalysisCapability",
+      "label": "Meta-analysis capability",
+      "definition": "Capability to conduct meta-analyses by synthesizing data from multiple studies."
+    },
+    {
+      "id": "MultimodalInterpretationCapability",
+      "label": "Multimodal interpretation capability",
+      "definition": "Capability to interpret information from multiple modalities (e.g., text, images, audio)."
+    },
+    {
+      "id": "NegotiationCapability",
+      "label": "Negotiation capability",
+      "definition": "Capability to engage in negotiation processes to reach agreements."
+    },
+    {
+      "id": "OperatorCoordinationCapability",
+      "label": "Operator coordination capability",
+      "definition": "Capability to coordinate actions and communications among multiple operators."
+    },
+    {
+      "id": "PatternLearningCapability",
+      "label": "Pattern learning capability",
+      "definition": "Capability to learn and recognize patterns in data."
+    },
+    {
+      "id": "PerceptionSensingCapability",
+      "label": "Perception & sensing capability",
+      "definition": ""
+    },
+    {
+      "id": "PhysicalManipulationCapability",
+      "label": "Physical & manipulation capability",
+      "definition": ""
+    },
+    {
+      "id": "ReasoningCapability",
+      "label": "Reasoning capability",
+      "definition": "Capability to analyze information, draw conclusions, and make decisions based on data."
+    },
+    {
+      "id": "ReinforcementLearningCapability",
+      "label": "Reinforcement learning policy capability",
+      "definition": "Capability to learn optimal policies through reinforcement learning techniques."
+    },
+    {
+      "id": "ReportingCapability",
+      "label": "Reporting capability",
+      "definition": "Capability to generate and communicate reports or summaries of information."
+    },
+    {
+      "id": "SelfReportingCapability",
+      "label": "Self-reporting capability",
+      "definition": "Capability to autonomously generate reports about one's own status or actions."
+    },
+    {
+      "id": "SemanticReasoningCapability",
+      "label": "Semantic reasoning capability",
+      "definition": "Capability to perform reasoning based on semantic relationships and ontologies."
+    },
+    {
+      "id": "SensingCapability",
+      "label": "Sensing capability",
+      "definition": "Capability to perceive or detect signals, data, or environmental information."
+    },
+    {
+      "id": "SituationalAwarenessCapability",
+      "label": "Situational awareness capability",
+      "definition": "Capability to perceive, comprehend, and project the status of the environment."
+    }
   ]
 }

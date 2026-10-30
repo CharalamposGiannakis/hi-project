@@ -44,6 +44,13 @@ class Context(Record):
     description: Name | None = None
 
 
+class Capability(Record):
+    id: Identifier
+    concept: Concept
+    agents: tuple[Identifier, ...] = ()
+    tasks: tuple[Identifier, ...] = ()
+
+
 class Scenario(Record):
     # IDs are assigned by the application and retained across edits.
     id: Identifier
@@ -52,13 +59,22 @@ class Scenario(Record):
     tasks: tuple[Task, ...] = Field(min_length=1)
     agents: tuple[Agent, ...] = Field(min_length=2)
     context: Context | None = None
+    capabilities: tuple[Capability, ...] = ()
 
     @model_validator(mode="after")
     def check_team_and_identities(self) -> Self:
-        for label, entities in (("task", self.tasks), ("agent", self.agents)):
+        for label, entities in (("task", self.tasks), ("agent", self.agents), ("capability", self.capabilities)):
             ids = [entity.id for entity in entities]
             if len(ids) != len(set(ids)):
                 raise ValueError(f"Duplicate {label} IDs are not allowed")
         if {agent.kind for agent in self.agents} != {"human", "artificial"}:
             raise ValueError("A team must include a human and an artificial agent")
+        for capability in self.capabilities:
+            for label, references, entities in (
+                ("agent", capability.agents, self.agents),
+                ("task", capability.tasks, self.tasks),
+            ):
+                unknown = set(references) - {entity.id for entity in entities}
+                if unknown:
+                    raise ValueError(f"Capability {capability.id} references unknown {label} IDs: {', '.join(sorted(unknown))}")
         return self

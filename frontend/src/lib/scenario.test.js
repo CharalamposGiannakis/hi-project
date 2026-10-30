@@ -1,9 +1,81 @@
 import { describe, expect, it } from 'vitest';
 import example from '../../../examples/s1.json';
-import { emptyScenario, fromContract, newAgent, newContext, newId, toContract, validate } from './scenario.js';
+import { emptyScenario, fromContract, newAgent, newCapability, newContext, newId, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const copy = () => structuredClone(example);
+
+describe('optional capabilities', () => {
+  it('loads legacy JSON unchanged and omits an empty capabilities list on export', () => {
+    /** @type {any} */
+    const data = copy();
+    delete data.capabilities;
+    expect(toContract(fromContract(data))).toEqual(data);
+    data.capabilities = [];
+    expect(toContract(fromContract(data))).not.toHaveProperty('capabilities');
+    expect(emptyScenario().capabilities).toEqual([]);
+  });
+
+  it('round-trips shared capability references without merging equal concepts', () => {
+    const data = copy();
+    data.capabilities[0].agents = data.agents.map((a) => a.id);
+    data.capabilities[0].tasks = data.tasks.map((t) => t.id);
+    data.capabilities.push({ ...data.capabilities[0], id: 'another-sensing' });
+    const scenario = fromContract(JSON.stringify(data));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(data);
+    scenario.capabilities[0].concept = 'ReasoningCapability';
+    scenario.agents[0].name = 'Renamed';
+    expect(toContract(scenario).capabilities?.[0].id).toBe('sensing');
+    expect(newCapability(scenario.capabilities.map((c) => c.id)).id).toMatch(ID);
+  });
+
+  it('allows unassigned capabilities and defaults missing link lists to empty', () => {
+    const scenario = fromContract({ ...copy(), capabilities: [{ id: 'unassigned', concept: 'SensingCapability' }] });
+    expect(scenario.capabilities).toEqual([{ id: 'unassigned', concept: 'SensingCapability', agents: [], tasks: [] }]);
+    expect(validate(scenario)).toEqual([]);
+  });
+
+  it.each([
+    ['concept', 'MadeUpCapability', 'not a HINT Capability concept'],
+    ['concept', 'HumanUserRole', 'not a HINT Capability concept'],
+    ['agents', ['missing'], 'Unknown agent ID'],
+    ['agents', ['data-collection'], 'Unknown agent ID'],
+    ['tasks', ['missing'], 'Unknown task ID'],
+    ['tasks', ['ai-assistant'], 'Unknown task ID'],
+    ['id', 'self-reporting', 'Duplicate capability IDs'],
+  ])('rejects invalid capability %s', (field, value, message) => {
+    /** @type {any} */
+    const data = copy();
+    data.capabilities[0][field] = value;
+    expect(() => fromContract(data)).toThrow(message);
+  });
+
+  it.each([
+    null, {}, [{}], [{ id: 'invalid:id', concept: 'SensingCapability' }],
+    [{ id: 'x', concept: 'SensingCapability', agents: null }],
+    [{ id: 'x', concept: 'SensingCapability', tasks: 'data-collection' }],
+    [{ id: 'x', concept: 'SensingCapability', tasks: [123] }],
+    [{ id: 'x', concept: 'SensingCapability', name: 'redundant' }],
+  ])('rejects malformed capability JSON: %j', (capabilities) => {
+    expect(() => fromContract({ ...copy(), capabilities })).toThrow();
+  });
+
+  it('removes only the deleted entity links and keeps capability identities', () => {
+    const scenario = fromContract(copy());
+    const ids = scenario.capabilities.map((c) => c.id);
+    scenario.capabilities[0].agents.push('human-user');
+    scenario.capabilities[0].tasks.push('explanation');
+    scenario.agents.push({ ...scenario.agents[0], id: 'second-human' });
+    removeEntity(scenario, 'agents', 'human-user');
+    removeEntity(scenario, 'tasks', 'data-collection');
+    expect(validate(scenario)).toEqual([]);
+    expect(scenario.capabilities[0].agents).toEqual(['ai-assistant']);
+    expect(scenario.capabilities[0].tasks).toEqual(['explanation']);
+    expect(scenario.capabilities[1].agents).toEqual([]);
+    expect(scenario.capabilities.map((c) => c.id)).toEqual(ids);
+  });
+});
 
 describe('optional context', () => {
   it('keeps legacy JSON and null contexts compatible', () => {

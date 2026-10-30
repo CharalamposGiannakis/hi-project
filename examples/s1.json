@@ -34,6 +34,32 @@
       "concept": "ExplanationTask"
     }
   ],
+  "capabilities": [
+    {
+      "id": "sensing",
+      "concept": "SensingCapability",
+      "agents": ["ai-assistant"],
+      "tasks": ["data-collection"]
+    },
+    {
+      "id": "self-reporting",
+      "concept": "SelfReportingCapability",
+      "agents": ["human-user"],
+      "tasks": ["data-collection"]
+    },
+    {
+      "id": "reasoning",
+      "concept": "ReasoningCapability",
+      "agents": ["ai-assistant"],
+      "tasks": ["conflict-resolution"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["ai-assistant"],
+      "tasks": ["explanation"]
+    }
+  ],
   "agents": [
     {
       "id": "human-user",
