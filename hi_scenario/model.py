@@ -37,6 +37,13 @@ class Agent(NamedEntity):
     roles: tuple[Concept, ...] = Field(min_length=1)
 
 
+class Context(Record):
+    concept: Concept
+    phenomena: tuple[Concept, ...] = ()
+    constraints: tuple[Concept, ...] = ()
+    description: Name | None = None
+
+
 class Scenario(Record):
     # IDs are assigned by the application and retained across edits.
     id: Identifier
@@ -44,6 +51,7 @@ class Scenario(Record):
     goal: Goal
     tasks: tuple[Task, ...] = Field(min_length=1)
     agents: tuple[Agent, ...] = Field(min_length=2)
+    context: Context | None = None
 
     @model_validator(mode="after")
     def check_team_and_identities(self) -> Self:

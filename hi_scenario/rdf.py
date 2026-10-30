@@ -55,6 +55,21 @@ def to_rdf(scenario: Scenario) -> Graph:
     graph.add((goal, RDFS.label, Literal(scenario.goal.name)))
     graph.add((goal, HI.hasGoalConcept, _concept(scenario.goal.concept, "Goal")))
 
+    if scenario.context is not None:
+        # Like the implicit team, the single context has a scenario-scoped identity.
+        context = scenario.context
+        context_node = URIRef(f"{base}context")
+        graph.add((context_node, RDF.type, HI.Context))
+        graph.add((context_node, HI.hasContextConcept, _concept(context.concept, "Context")))
+        graph.add((team, HI.operatesInContext, context_node))
+        graph.add((context_node, HI.hasInfluenceOn, team))
+        for phenomenon in context.phenomena:
+            graph.add((context_node, HI.hasPhenomenonConcept, _concept(phenomenon, "Phenomenon")))
+        for constraint in context.constraints:
+            graph.add((context_node, HI.hasConstraintConcept, _concept(constraint, "Constraint")))
+        if context.description is not None:
+            graph.add((context_node, RDFS.comment, Literal(context.description, lang="en")))
+
     for task in scenario.tasks:
         task_node = URIRef(f"{base}task:{task.id}")
         graph.add((goal, HI.requiresTask, task_node))

@@ -313,5 +313,206 @@
       "label": "Visitor Role",
       "definition": "A role where the agent represents the visitor."
     }
+  ],
+  "Context": [
+    {
+      "id": "ClinicalConsultationContext",
+      "label": "Clinical Consultation Context",
+      "definition": "A context where Hybrid Intelligence systems support clinical consulation."
+    },
+    {
+      "id": "HealthMonitoringContext",
+      "label": "Health Monitoring Context",
+      "definition": "A context involving the monitoring of health-related data and activities."
+    },
+    {
+      "id": "JuryDeliberationContext",
+      "label": "Jury Deliberation Context",
+      "definition": "A context involving group deliberation and decision-making in a jury setting."
+    },
+    {
+      "id": "OnlineLearningContext",
+      "label": "Online Learning Context",
+      "definition": "A context where Hybrid Intelligence systems support online learning and educational activities."
+    },
+    {
+      "id": "SmartCampusContext",
+      "label": "Smart Campus Context",
+      "definition": "A context involving a smart campus."
+    },
+    {
+      "id": "VirtualExhibitionContext",
+      "label": "Virtual Exhibition Context",
+      "definition": "A context involving a virtual exhibition."
+    },
+    {
+      "id": "WorkspaceManipulationContext",
+      "label": "Workspace Manipulation Context",
+      "definition": "A context where Hybrid Intelligence systems assist in manipulating objects within a workspace."
+    }
+  ],
+  "Phenomenon": [
+    {
+      "id": "AgentRelatedPhenomenon",
+      "label": "Agent-Related Phenomenon",
+      "definition": "A phenomenon arising from the cognitive, perceptual, inferential, or decision-making processes of human or artificial agents."
+    },
+    {
+      "id": "AllocationRationaleFeedback",
+      "label": "Allocation Rationale Feedback",
+      "definition": "Feedback on whether a resource or energy allocation decision appears fair, well justified, or appropriate."
+    },
+    {
+      "id": "Bias",
+      "label": "Bias",
+      "definition": "A systematic deviation in judgment or decision-making arising from cognitive shortcuts or structural tendencies in human or artificial agents."
+    },
+    {
+      "id": "ConfirmationBias",
+      "label": "Confirmation Bias",
+      "definition": "A bias in which an agent favors information that confirms preexisting beliefs while discounting contradictory evidence."
+    },
+    {
+      "id": "CooperativeLearningDynamicsPhenomenon",
+      "label": "Cooperative Learning Dynamics Phenomenon",
+      "definition": "A phenomenon where agents iteratively improve their internal models through shared observations and mutual influence."
+    },
+    {
+      "id": "DataMismatchPhenomenon",
+      "label": "Data Mismatch Phenomenon",
+      "definition": "A phenomenon where heterogeneous or conflicting data sources lead to inconsistencies in system interpretation or decision-making."
+    },
+    {
+      "id": "DiagnosisAnchoringPhenomenon",
+      "label": "Diagnosis Anchoring Phenomenon",
+      "definition": "A phenomenon in which an agent prematurely fixates on an initial hypothesis or diagnosis, influencing subsequent reasoning."
+    },
+    {
+      "id": "EngagementShiftPhenomenon",
+      "label": "Engagement Shift Phenomenon",
+      "definition": "A variation in a human agent’s level of engagement due to changes in relevance, adaptivity, challenge, or quality of AI support."
+    },
+    {
+      "id": "ExplanationMessageFeedback",
+      "label": "Explanation Message Feedback",
+      "definition": "Feedback assessing the clarity, usefulness, or comprehensibility of explanation messages."
+    },
+    {
+      "id": "Feedback",
+      "label": "Feedback",
+      "definition": "Information exchanged between agents that reflects performance, intent, understanding, or preferences, shaping future interaction."
+    },
+    {
+      "id": "GroupThinkingPhenomenon",
+      "label": "Group Thinking Phenomenon",
+      "definition": "A phenomenon where group dynamics push agents toward consensus without sufficient critical evaluation."
+    },
+    {
+      "id": "InteractionPhenomenon",
+      "label": "Interaction Phenomenon",
+      "definition": "A phenomenon emerging from communication, coordination, negotiation, or feedback exchanges between agents."
+    },
+    {
+      "id": "InterventionRationaleFeedback",
+      "label": "Intervention Rationale Feedback",
+      "definition": "Feedback concerning the perceived validity or adequacy of the reasons behind an AI or human intervention."
+    },
+    {
+      "id": "KnowledgeMismatchPhenomenon",
+      "label": "Knowledge Mismatch Phenomenon",
+      "definition": "A discrepancy between the knowledge assumed by an agent and the actual knowledge possessed by another agent, leading to misunderstanding or misalignment."
+    },
+    {
+      "id": "LoadVariabilityPhenomenon",
+      "label": "Load Variability Phenomenon",
+      "definition": "Fluctuations in workload, energy demand, or system usage that impact prediction, allocation, or scheduling processes."
+    },
+    {
+      "id": "RecommendationRationaleFeedback",
+      "label": "Recommendation Rationale Feedback",
+      "definition": "Feedback addressing how understandable, persuasive, or appropriate the rationale of a recommendation is."
+    },
+    {
+      "id": "RiskExposurePhenomenon",
+      "label": "Risk Exposure Phenomenon",
+      "definition": "A phenomenon in which an agent becomes exposed to potential physical, cognitive, or ethical risks during task performance or system interaction."
+    },
+    {
+      "id": "SensorNoisePhenomenon",
+      "label": "Sensor Noise Phenomenon",
+      "definition": "A phenomenon resulting from random fluctuations or distortions in sensor readings, affecting perception or inference."
+    },
+    {
+      "id": "SkillsComplementarityPhenomenon",
+      "label": "Skills Complementarity Phenomenon",
+      "definition": "A phenomenon where agents compensate for each other’s limitations by contributing complementary skills, improving joint performance."
+    },
+    {
+      "id": "SystemPhenomenon",
+      "label": "System Phenomenon",
+      "definition": "A phenomenon that originates from system dynamics, environmental conditions, or properties of the data used within the HI system."
+    },
+    {
+      "id": "TrustReportFeedback",
+      "label": "Trust Report Feedback",
+      "definition": "Feedback in which agents explicitly express their trust or mistrust toward another agent or system."
+    },
+    {
+      "id": "TrustShiftPhenomenon",
+      "label": "Trust Shift Phenomenon",
+      "definition": "A change in the level of trust that a human or artificial agent has toward another agent or system, often influenced by transparency, performance, or explanation quality."
+    }
+  ],
+  "Constraint": [
+    {
+      "id": "AccessibilityConstraint",
+      "label": "Accessibility Constraint",
+      "definition": "A constraint that promotes user accessibility."
+    },
+    {
+      "id": "AutonomyConstraint",
+      "label": "Autonomy Constraint",
+      "definition": "A constraint that respects user autonomy and decision-making."
+    },
+    {
+      "id": "UndueInfluenceConstraint",
+      "label": "Avoid Undue Influence Constraint",
+      "definition": "A constraint that prevents the Hybrid Intelligence system from exerting undue influence over users."
+    },
+    {
+      "id": "EthicalConstraint",
+      "label": "Ethical Constraint",
+      "definition": "A constraint that ensures the ethical operation of a Hybrid Intelligence system."
+    },
+    {
+      "id": "FairnessConstraint",
+      "label": "Fairness Constraint",
+      "definition": "A constraint that promotes fairness and equity in the operation of the Hybrid Intelligence system."
+    },
+    {
+      "id": "PrivacyConstraint",
+      "label": "Privacy Constraint",
+      "definition": "A constraint that protects user privacy and data confidentiality."
+    },
+    {
+      "id": "SafetyConstraint",
+      "label": "Safety Constraint",
+      "definition": "A constraint that ensures the safety of users and the environment."
+    },
+    {
+      "id": "SustainabilityConstraint",
+      "label": "Sustainability Constraint",
+      "definition": "A constraint that promotes sustainability."
+    },
+    {
+      "id": "TransparencyConstraint",
+      "label": "Transparency Constraint",
+      "definition": "A constraint that ensures transparency in the operations and decisions of the Hybrid Intelligence system."
+    },
+    {
+      "id": "UserComfortConstraint",
+      "label": "User Comfort Constraint",
+      "definition": "A constraint that promotes user comfort."
+    }
   ]
 }

@@ -11,7 +11,7 @@ from .rdf import HINT, _thesaurus
 
 
 # Category used by each JSON field; agent concepts are derived from `kind`.
-CATEGORIES = ("UseCase", "Domain", "Goal", "Task", "Role")
+CATEGORIES = ("UseCase", "Domain", "Goal", "Task", "Role", "Context", "Phenomenon", "Constraint")
 
 
 def _text(term: URIRef, predicate: URIRef) -> str:

@@ -34,12 +34,12 @@ fieldset {
   padding: 1rem 1.25rem;
 }
 legend { font-weight: 600; padding: 0 0.25rem; }
-fieldset.roles { margin: 0.5rem 0 0; padding: 0.5rem 0.75rem; }
-fieldset.roles legend { font-weight: 500; font-size: 0.9rem; }
+fieldset.roles, fieldset.concepts { margin: 0.5rem 0 0; padding: 0.5rem 0.75rem; }
+fieldset.roles legend, fieldset.concepts legend { font-weight: 500; font-size: 0.9rem; }
 
 .field { margin-bottom: 0.85rem; }
 .field > label, .label { display: block; font-weight: 500; font-size: 0.9rem; margin-bottom: 0.2rem; }
-input:not([type]), select {
+input:not([type]), select, textarea {
   width: 100%;
   box-sizing: border-box;
   padding: 0.4rem 0.5rem;

@@ -48,18 +48,21 @@ def test_s1_reproduces_research_core_and_passes_shacl(payload):
         s1.TaskExplanation: URIRef(BASE + "task:explanation"),
         s1.HumanUser: URIRef(BASE + "agent:human-user"),
         s1.AIAssistant: URIRef(BASE + "agent:ai-assistant"),
+        s1.ContextHealthMonitoring: URIRef(BASE + "context"),
     }
     predicates = {
         RDF.type, HI.hasUseCaseConcept, HI.hasDomainConcept, HI.hasHITeam,
         HI.hasGoal, HI.hasMember, HI.hasGoalConcept, HI.requiresTask,
         HI.hasTaskConcept, HI.hasAgentConcept, HI.hasRoleConcept,
+        HI.hasContextConcept, HI.hasPhenomenonConcept, HI.hasConstraintConcept,
+        HI.operatesInContext, HI.hasInfluenceOn,
     }
     expected = {
         (identities[s], p, identities.get(o, o))
         for s, p, o in source
-        if s in identities and p in predicates
+        if s in identities and (p in predicates or (s == s1.ContextHealthMonitoring and p == RDFS.comment))
     }
-    assert len(expected) == 25
+    assert len(expected) == 36
     assert {(s, p, o) for s, p, o in graph if p != RDFS.label} == expected
     assert len(set(graph.subjects(RDF.type, HI.UseCase))) == 1
     assert len(set(graph.subjects(RDF.type, HI.Goal))) == 1
@@ -254,7 +257,7 @@ def test_cli_output_is_stable_across_processes_and_working_directories(tmp_path)
             env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONHASHSEED": seed},
             capture_output=True, text=True, check=True,
         )
-        assert "SHACL conforms: 32 triples" in result.stderr
+        assert "SHACL conforms: 43 triples" in result.stderr
         assert result.stdout == ""
         outputs.append(output.read_bytes())
     assert outputs[0] == outputs[1]

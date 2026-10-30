@@ -4,11 +4,12 @@ import vocabulary from './hint-vocabulary.json';
 
 /**
  * @typedef {{ id: string, label: string, definition: string }} Concept
- * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role'} Category
+ * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint'} Category
  * @typedef {{ id: string, name: string, concept: string }} Entity
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
  * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
- * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[] }} Scenario
+ * @typedef {{ concept: string, phenomena: string[], constraints: string[], description: string }} Context
+ * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -60,6 +61,11 @@ export function newAgent(kind, taken) {
   return { id: newId(taken), name: '', kind, roles: [] };
 }
 
+/** @returns {Context} */
+export function newContext() {
+  return { concept: '', phenomena: [], constraints: [], description: '' };
+}
+
 /** @returns {Scenario} */
 export function emptyScenario() {
   const human = newAgent('human');
@@ -69,6 +75,7 @@ export function emptyScenario() {
     goal: { id: newId(), name: '', concept: '' },
     tasks: [newTask()],
     agents: [human, newAgent('artificial', [human.id])],
+    context: null,
   };
 }
 
@@ -108,6 +115,13 @@ export function validate(scenario) {
   checkConcept('use_case.concept', 'UseCase', useCase.concept);
   if (useCase.domain) checkConcept('use_case.domain', 'Domain', useCase.domain);
 
+  if (scenario.context) {
+    const context = scenario.context;
+    checkConcept('context.concept', 'Context', context.concept);
+    context.phenomena.forEach((id) => checkConcept('context.phenomena', 'Phenomenon', id));
+    context.constraints.forEach((id) => checkConcept('context.constraints', 'Constraint', id));
+  }
+
   checkId('goal.id', goal.id);
   checkName('goal.name', goal.name);
   checkConcept('goal.concept', 'Goal', goal.concept);
@@ -137,11 +151,11 @@ export function validate(scenario) {
 
 /**
  * The canonical JSON object accepted by `Scenario.model_validate` (names trimmed,
- * optional domain omitted when empty).
+ * optional fields omitted when empty).
  * @param {Scenario} scenario
  */
 export function toContract(scenario) {
-  const { use_case: useCase } = scenario;
+  const { use_case: useCase, context } = scenario;
   /** @param {Entity} e */
   const entity = (e) => ({ id: e.id, name: e.name.trim(), concept: e.concept });
   return {
@@ -150,6 +164,12 @@ export function toContract(scenario) {
     goal: entity(scenario.goal),
     tasks: scenario.tasks.map(entity),
     agents: scenario.agents.map((a) => ({ id: a.id, name: a.name.trim(), kind: a.kind, roles: [...a.roles] })),
+    ...(context ? { context: {
+      concept: context.concept,
+      phenomena: [...context.phenomena],
+      constraints: [...context.constraints],
+      ...(context.description.trim() ? { description: context.description.trim() } : {}),
+    } } : {}),
   };
 }
 
@@ -217,12 +237,25 @@ export function fromContract(input) {
     return { id: string(e.id, `${path}.id`), name: string(e.name, `${path}.name`), concept: string(e.concept, `${path}.concept`) };
   };
 
-  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents']);
+  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context']);
   const uc = object(root.use_case, 'use_case', ['id', 'name', 'concept'], ['domain']);
   const domain = uc.domain == null ? '' : string(uc.domain, 'use_case.domain');
+  /** @type {Context | null} */
+  let context = null;
+  if (root.context != null) {
+    const c = object(root.context, 'context', ['concept'], ['phenomena', 'constraints', 'description']);
+    context = {
+      concept: string(c.concept, 'context.concept'),
+      phenomena: c.phenomena === undefined ? [] : array(c.phenomena, 'context.phenomena').map((id, i) => string(id, `context.phenomena.${i}`)),
+      constraints: c.constraints === undefined ? [] : array(c.constraints, 'context.constraints').map((id, i) => string(id, `context.constraints.${i}`)),
+      description: c.description == null ? '' : string(c.description, 'context.description'),
+    };
+    if (typeof c.description === 'string' && !c.description.trim()) problems.push('context.description: expected nonblank text.');
+  }
   /** @type {Scenario} */
   const scenario = {
     id: string(root.id, 'id'),
+    context,
     use_case: {
       id: string(uc.id, 'use_case.id'),
       name: string(uc.name, 'use_case.name'),
