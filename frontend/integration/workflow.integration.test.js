@@ -166,7 +166,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       data.agents.push({ id: 'second-human', name: 'Clinician', kind: 'human', roles: ['HumanUserRole', 'ClinicianRole'] });
     }));
     await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 38 triples');
+    expect(text()).toContain('Saved in GraphDB · repository hi · 49 triples');
     click('Show team composition (CQ1)');
     await until(() => text().includes('3 members'));
     expect(teamRows()).toEqual([
