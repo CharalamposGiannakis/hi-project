@@ -1,9 +1,82 @@
 import { describe, expect, it } from 'vitest';
 import example from '../../../examples/s1.json';
-import { emptyScenario, fromContract, newAgent, newCapability, newContext, newId, removeEntity, toContract, validate } from './scenario.js';
+import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newId, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const copy = () => structuredClone(example);
+
+describe('optional task executions', () => {
+  it('keeps legacy JSON compatible and omits an empty execution list', () => {
+    /** @type {any} */
+    const data = copy();
+    delete data.executions;
+    expect(toContract(fromContract(data))).toEqual(data);
+    data.executions = [];
+    expect(toContract(fromContract(data))).not.toHaveProperty('executions');
+    expect(emptyScenario().executions).toEqual([]);
+  });
+
+  it('round-trips repeated task/agent executions without merging their identities', () => {
+    const data = copy();
+    data.executions.push({ ...data.executions[0], id: 'repeat' });
+    const scenario = fromContract(JSON.stringify(data));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(data);
+    scenario.executions[0].concept = 'ExplanationTaskExecution';
+    expect(toContract(scenario).executions?.[0].id).toBe('data-collection');
+    expect(newExecution(scenario.executions.map((e) => e.id)).id).toMatch(ID);
+  });
+
+  it('accepts absent or null methods and omits unselected methods on export', () => {
+    /** @type {any} */
+    const data = copy();
+    delete data.executions[0].method;
+    data.executions[1].method = null;
+    const scenario = fromContract(data);
+    expect(scenario.executions[0].method).toBe('');
+    expect(scenario.executions[1].method).toBe('');
+    expect(toContract(scenario).executions?.[0]).not.toHaveProperty('method');
+  });
+
+  it.each([
+    ['concept', 'MadeUpExecution', 'not a HINT TaskExecution concept'],
+    ['concept', 'DataCollectionTask', 'not a HINT TaskExecution concept'],
+    ['method', 'MadeUpMethod', 'not a HINT Method concept'],
+    ['method', 'DataCollectionTaskExecution', 'not a HINT Method concept'],
+    ['agent', 'missing', 'Choose an existing agent'],
+    ['task', 'missing', 'Choose an existing task'],
+    ['id', 'explanation', 'Duplicate execution IDs'],
+  ])('rejects invalid execution %s', (field, value, message) => {
+    /** @type {any} */
+    const data = copy();
+    data.executions[0][field] = value;
+    expect(() => fromContract(data)).toThrow(message);
+  });
+
+  it.each([
+    null, {}, [{}], [{ ...example.executions[0], agent: ['human-user'] }],
+    [{ ...example.executions[0], task: null }], [{ ...example.executions[0], method: '' }],
+    [{ ...example.executions[0], goal: 'user-wellbeing' }],
+  ])('rejects malformed execution JSON: %j', (executions) => {
+    expect(() => fromContract({ ...copy(), executions })).toThrow();
+  });
+
+  it('preserves execution data after deleting references and requires explicit repair', () => {
+    const scenario = fromContract(copy());
+    const original = structuredClone(scenario.executions);
+    scenario.agents.push({ ...scenario.agents[0], id: 'replacement-human' });
+    removeEntity(scenario, 'agents', 'human-user');
+    removeEntity(scenario, 'tasks', 'data-collection');
+    expect(scenario.executions).toEqual(original);
+    expect(validate(scenario).map((issue) => issue.path)).toEqual(['executions.0.agent', 'executions.0.task']);
+    expect(toContract(scenario).executions?.[0]).toMatchObject(example.executions[0]);
+    scenario.executions[0].agent = 'replacement-human';
+    scenario.executions[0].task = 'explanation';
+    expect(validate(scenario)).toEqual([]);
+    expect(scenario.executions[0].id).toBe(original[0].id);
+    expect(scenario.executions[0].method).toBe(original[0].method);
+  });
+});
 
 describe('optional capabilities', () => {
   it('loads legacy JSON unchanged and omits an empty capabilities list on export', () => {
@@ -69,7 +142,7 @@ describe('optional capabilities', () => {
     scenario.agents.push({ ...scenario.agents[0], id: 'second-human' });
     removeEntity(scenario, 'agents', 'human-user');
     removeEntity(scenario, 'tasks', 'data-collection');
-    expect(validate(scenario)).toEqual([]);
+    expect(validate(scenario).map((issue) => issue.path)).toEqual(['executions.0.agent', 'executions.0.task']);
     expect(scenario.capabilities[0].agents).toEqual(['ai-assistant']);
     expect(scenario.capabilities[0].tasks).toEqual(['explanation']);
     expect(scenario.capabilities[1].agents).toEqual([]);

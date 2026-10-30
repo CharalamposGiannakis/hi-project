@@ -22,6 +22,7 @@ TEAM = URIRef("urn:hi-app:scenario:s1:team")
 def payload():
     data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
     data.pop("capabilities", None)  # Isolate the Context projection and legacy contract.
+    data.pop("executions", None)
     return data
 
 

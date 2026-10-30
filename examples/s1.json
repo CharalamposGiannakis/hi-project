@@ -60,6 +60,29 @@
       "tasks": ["explanation"]
     }
   ],
+  "executions": [
+    {
+      "id": "data-collection",
+      "concept": "DataCollectionTaskExecution",
+      "task": "data-collection",
+      "agent": "human-user",
+      "method": "DataCollectionMethod"
+    },
+    {
+      "id": "conflict-resolution",
+      "concept": "ConflictResolutionTaskExecution",
+      "task": "conflict-resolution",
+      "agent": "ai-assistant",
+      "method": "ArgumentationReasoningMethod"
+    },
+    {
+      "id": "explanation",
+      "concept": "ExplanationTaskExecution",
+      "task": "explanation",
+      "agent": "ai-assistant",
+      "method": "PostHocExplanationMethod"
+    }
+  ],
   "agents": [
     {
       "id": "human-user",

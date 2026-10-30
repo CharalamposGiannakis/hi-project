@@ -4,13 +4,14 @@ import vocabulary from './hint-vocabulary.json';
 
 /**
  * @typedef {{ id: string, label: string, definition: string }} Concept
- * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability'} Category
+ * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method'} Category
  * @typedef {{ id: string, name: string, concept: string }} Entity
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
  * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
  * @typedef {{ concept: string, phenomena: string[], constraints: string[], description: string }} Context
  * @typedef {{ id: string, concept: string, agents: string[], tasks: string[] }} Capability
- * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[] }} Scenario
+ * @typedef {{ id: string, concept: string, task: string, agent: string, method: string }} Execution
+ * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[] }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -72,7 +73,12 @@ export function newCapability(taken) {
   return { id: newId(taken), concept: '', agents: [], tasks: [] };
 }
 
-/** Remove an entity and its capability links, without changing other identities.
+/** @param {Iterable<string>} [taken] @returns {Execution} */
+export function newExecution(taken) {
+  return { id: newId(taken), concept: '', task: '', agent: '', method: '' };
+}
+
+/** Remove an entity and its capability links. Keep executions for explicit repair.
  * @param {Scenario} scenario
  * @param {'agents' | 'tasks'} field
  * @param {string} id
@@ -96,6 +102,7 @@ export function emptyScenario() {
     agents: [human, newAgent('artificial', [human.id])],
     context: null,
     capabilities: [],
+    executions: [],
   };
 }
 
@@ -178,6 +185,15 @@ export function validate(scenario) {
       }
     }
   });
+  checkUnique('executions', scenario.executions, 'execution');
+  scenario.executions.forEach((execution, i) => {
+    const path = `executions.${i}`;
+    checkId(`${path}.id`, execution.id);
+    checkConcept(`${path}.concept`, 'TaskExecution', execution.concept);
+    if (execution.method) checkConcept(`${path}.method`, 'Method', execution.method);
+    if (!agents.some((agent) => agent.id === execution.agent)) add(`${path}.agent`, 'Choose an existing agent.');
+    if (!tasks.some((task) => task.id === execution.task)) add(`${path}.task`, 'Choose an existing task.');
+  });
   return issues;
 }
 
@@ -198,6 +214,10 @@ export function toContract(scenario) {
     agents: scenario.agents.map((a) => ({ id: a.id, name: a.name.trim(), kind: a.kind, roles: [...a.roles] })),
     ...(scenario.capabilities.length ? { capabilities: scenario.capabilities.map((c) => ({
       id: c.id, concept: c.concept, agents: [...c.agents], tasks: [...c.tasks],
+    })) } : {}),
+    ...(scenario.executions.length ? { executions: scenario.executions.map((e) => ({
+      id: e.id, concept: e.concept, task: e.task, agent: e.agent,
+      ...(e.method ? { method: e.method } : {}),
     })) } : {}),
     ...(context ? { context: {
       concept: context.concept,
@@ -272,7 +292,7 @@ export function fromContract(input) {
     return { id: string(e.id, `${path}.id`), name: string(e.name, `${path}.name`), concept: string(e.concept, `${path}.concept`) };
   };
 
-  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities']);
+  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions']);
   const uc = object(root.use_case, 'use_case', ['id', 'name', 'concept'], ['domain']);
   const domain = uc.domain == null ? '' : string(uc.domain, 'use_case.domain');
   /** @type {Context | null} */
@@ -291,6 +311,16 @@ export function fromContract(input) {
   const scenario = {
     id: string(root.id, 'id'),
     context,
+    executions: root.executions === undefined ? [] : array(root.executions, 'executions').map((value, i) => {
+      const path = `executions.${i}`;
+      const e = object(value, path, ['id', 'concept', 'task', 'agent'], ['method']);
+      if (e.method === '') problems.push(`${path}.method: omit an unspecified method.`);
+      return {
+        id: string(e.id, `${path}.id`), concept: string(e.concept, `${path}.concept`),
+        task: string(e.task, `${path}.task`), agent: string(e.agent, `${path}.agent`),
+        method: e.method == null ? '' : string(e.method, `${path}.method`),
+      };
+    }),
     capabilities: root.capabilities === undefined ? [] : array(root.capabilities, 'capabilities').map((value, i) => {
       const path = `capabilities.${i}`;
       const c = object(value, path, ['id', 'concept'], ['agents', 'tasks']);

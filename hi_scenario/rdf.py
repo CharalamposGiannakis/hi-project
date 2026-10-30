@@ -99,6 +99,18 @@ def to_rdf(scenario: Scenario) -> Graph:
             graph.add((capability_node, HI.allowsTask, task_node))
             graph.add((task_node, HI.requiresCapability, capability_node))
 
+    for execution in scenario.executions:
+        execution_node = URIRef(f"{base}execution:{execution.id}")
+        agent_node = URIRef(f"{base}agent:{execution.agent}")
+        graph.add((execution_node, RDF.type, HI.TaskExecution))
+        graph.add((execution_node, HI.hasExecutionConcept, _concept(execution.concept, "TaskExecution")))
+        graph.add((execution_node, HI.realizesTask, URIRef(f"{base}task:{execution.task}")))
+        graph.add((execution_node, HI.performedBy, agent_node))
+        graph.add((agent_node, HI.performsExecution, execution_node))
+        graph.add((execution_node, HI.towardsGoal, goal))
+        if execution.method is not None:
+            graph.add((execution_node, HI.hasMethodConcept, _concept(execution.method, "Method")))
+
     return graph
 
 

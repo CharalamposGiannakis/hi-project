@@ -51,6 +51,14 @@ class Capability(Record):
     tasks: tuple[Identifier, ...] = ()
 
 
+class Execution(Record):
+    id: Identifier
+    concept: Concept
+    task: Identifier
+    agent: Identifier
+    method: Concept | None = None
+
+
 class Scenario(Record):
     # IDs are assigned by the application and retained across edits.
     id: Identifier
@@ -60,10 +68,14 @@ class Scenario(Record):
     agents: tuple[Agent, ...] = Field(min_length=2)
     context: Context | None = None
     capabilities: tuple[Capability, ...] = ()
+    executions: tuple[Execution, ...] = ()
 
     @model_validator(mode="after")
     def check_team_and_identities(self) -> Self:
-        for label, entities in (("task", self.tasks), ("agent", self.agents), ("capability", self.capabilities)):
+        for label, entities in (
+            ("task", self.tasks), ("agent", self.agents),
+            ("capability", self.capabilities), ("execution", self.executions),
+        ):
             ids = [entity.id for entity in entities]
             if len(ids) != len(set(ids)):
                 raise ValueError(f"Duplicate {label} IDs are not allowed")
@@ -77,4 +89,10 @@ class Scenario(Record):
                 unknown = set(references) - {entity.id for entity in entities}
                 if unknown:
                     raise ValueError(f"Capability {capability.id} references unknown {label} IDs: {', '.join(sorted(unknown))}")
+        for execution in self.executions:
+            for label, reference, entities in (
+                ("agent", execution.agent, self.agents), ("task", execution.task, self.tasks),
+            ):
+                if reference not in {entity.id for entity in entities}:
+                    raise ValueError(f"Execution {execution.id} references unknown {label} ID: {reference}")
         return self

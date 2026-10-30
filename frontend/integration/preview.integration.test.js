@@ -57,7 +57,75 @@ async function until(condition) {
   }, { timeout: 15_000, interval: 50 });
 }
 
+/** @param {ParentNode} root @param {string} label @param {string} value */
+function selectValue(root, label, value) {
+  const control = [...root.querySelectorAll('label')].find((l) => l.textContent?.trim() === label)?.control;
+  if (!(control instanceof HTMLSelectElement)) throw new Error(`No select "${label}"`);
+  control.value = value;
+  control.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+}
+
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('enters all S1 executions through the form and supports optional methods', async () => {
+    await mountApp();
+    clickButton('Load S1 example');
+    for (const _ of example.executions) clickButton('Remove execution');
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('executions');
+    for (const execution of example.executions) {
+      clickButton('Add execution');
+      const section = document.querySelectorAll('[data-execution-id]').item(document.querySelectorAll('[data-execution-id]').length - 1);
+      selectValue(section, 'Execution type', execution.concept);
+      selectValue(section, 'Task', execution.task);
+      selectValue(section, 'Agent', execution.agent);
+      selectValue(section, 'Method (optional)', execution.method);
+    }
+    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    expect(entered.executions.map(({ id, ...facts }) => facts)).toEqual(example.executions.map(({ id, ...facts }) => facts));
+    expect(new Set(entered.executions.map((e) => e.id)).size).toBe(3);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('84 triples · not saved');
+    selectValue(/** @type {Element} */ (document.querySelector('[data-execution-id]')), 'Method (optional)', '');
+    expect(document.querySelector('pre.rdf')).toBeNull();
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions[0]).not.toHaveProperty('method');
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('83 triples · not saved');
+  });
+
+  it.each(['agent', 'task'])('preserves executions after deleting a referenced %s and requires repair', async (kind) => {
+    await mountApp();
+    const data = structuredClone(example);
+    data.agents.push({ ...data.agents[0], id: 'replacement-human', name: 'Replacement human' });
+    const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
+    Object.defineProperty(input, 'files', { value: [{ name: 'executions.json', text: async () => JSON.stringify(data) }] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => text().includes('Loaded executions.json'));
+    const id = kind === 'agent' ? 'human-user' : 'data-collection';
+    const entity = document.querySelector(`#${kind}-${id}`)?.closest('section');
+    entity?.querySelector('button')?.click();
+    flushSync();
+    expect(text()).toContain(`"${id}" no longer exists`);
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions).toEqual(data.executions);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      clickButton('Validate & preview RDF');
+      clickButton('Save to GraphDB');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+    const execution = /** @type {Element} */ (document.querySelector('[data-execution-id="data-collection"]'));
+    selectValue(execution, kind === 'agent' ? 'Agent' : 'Task', kind === 'agent' ? 'replacement-human' : 'explanation');
+    expect(text()).not.toContain(`"${id}" no longer exists`);
+    const repaired = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions[0];
+    expect(repaired.id).toBe(data.executions[0].id);
+    expect(repaired.method).toBe(data.executions[0].method);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+  });
+
   it('enters all four S1 capabilities through the form and shares their references', async () => {
     await mountApp();
     clickButton('Load S1 example');
@@ -80,7 +148,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(new Set(entered.capabilities.map((c) => c.id)).size).toBe(4);
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('63 triples · not saved');
+    expect(text()).toContain('84 triples · not saved');
 
     const first = document.querySelector('[data-capability-id]');
     for (const id of ['human-user', 'conflict-resolution']) {
@@ -94,7 +162,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(document.querySelector('pre.rdf')).toBeNull();
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('66 triples · not saved');
+    expect(text()).toContain('87 triples · not saved');
   });
 
   it('enters the complete original S1 Context through the form', async () => {
@@ -126,7 +194,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('63 triples · not saved');
+    expect(text()).toContain('84 triples · not saved');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain('<urn:hi-app:scenario:s1:context>');
     expect(rdf).toContain(`"${example.context.description}"@en`);
@@ -159,7 +227,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Load S1 example');
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('63 triples · not saved');
+    expect(text()).toContain('84 triples · not saved');
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected);
 
     const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));

@@ -646,5 +646,199 @@
       "label": "Situational awareness capability",
       "definition": "Capability to perceive, comprehend, and project the status of the environment."
     }
+  ],
+  "TaskExecution": [
+    {
+      "id": "AssessAccuracyTaskExecution",
+      "label": "Assess Communication Accuracy Task Execution",
+      "definition": "The execution of an assess communication accuracy task."
+    },
+    {
+      "id": "BayesianModelingTaskExecution",
+      "label": "Bayesian Modeling Task Execution",
+      "definition": "The execution of a Bayesian modeling task."
+    },
+    {
+      "id": "CandidateHypothesisGenerationTaskExecution",
+      "label": "Candidate Hypothesis Generation Task Execution",
+      "definition": "The execution of a candidate hypothesis generation task."
+    },
+    {
+      "id": "ConfinedReachTaskExecution",
+      "label": "Confined Reach Task Execution",
+      "definition": "The execution of a confined reach task."
+    },
+    {
+      "id": "ConflictResolutionTaskExecution",
+      "label": "Conflict Resolution Task Execution",
+      "definition": "The execution of a conflict resolution task."
+    },
+    {
+      "id": "CoordinationTaskExecution",
+      "label": "Coordination Task Execution",
+      "definition": "The execution of a coordination task."
+    },
+    {
+      "id": "DataCollectionTaskExecution",
+      "label": "Data Collection Task Execution",
+      "definition": "The execution of a data collection task."
+    },
+    {
+      "id": "DecideInterventionTaskExecution",
+      "label": "Decide Intervention Task Execution",
+      "definition": "The execution of a decide intervention task."
+    },
+    {
+      "id": "ExplanationTaskExecution",
+      "label": "Explanation Task Execution",
+      "definition": "The execution of an explanation task."
+    },
+    {
+      "id": "HeavyLiftingTaskExecution",
+      "label": "Heavy Lifting Task Execution",
+      "definition": "The execution of a heavy lifting task."
+    },
+    {
+      "id": "HypothesisComparisonTaskExecution",
+      "label": "Hypothesis Comparison Task Execution",
+      "definition": "The execution of a hypothesis comparison task."
+    },
+    {
+      "id": "InterpretInputTaskExecution",
+      "label": "Interpret Input Task Execution",
+      "definition": "The execution of interpreting the input."
+    },
+    {
+      "id": "LearnEnergyBehaviorTaskExecution",
+      "label": "Learn Energy Behavior Task Execution",
+      "definition": "The execution of an energy behavior learning task."
+    },
+    {
+      "id": "LearnOccupancyTaskExecution",
+      "label": "Learn Occupancy Task Execution",
+      "definition": "The execution of an occupancy learning task."
+    },
+    {
+      "id": "NegotiationTaskExecution",
+      "label": "Negotiation Task Execution",
+      "definition": "The execution of a negotiation task."
+    },
+    {
+      "id": "OpenCabinetTaskExecution",
+      "label": "Open Cabinet Task Execution",
+      "definition": "The execution of an open cabinet task."
+    },
+    {
+      "id": "ProvideLearningHistoryTaskExecution",
+      "label": "Provide Learning History Task Execution",
+      "definition": "The execution of a provide learning history task."
+    },
+    {
+      "id": "ProvideProfileTaskExecution",
+      "label": "Provide Profile Task Execution",
+      "definition": "The execution of providing a profile."
+    },
+    {
+      "id": "ProvideStatementTaskExecution",
+      "label": "Provide Statement Task Execution",
+      "definition": "The execution of a provide statement task."
+    },
+    {
+      "id": "QuestionAnsweringTaskExecution",
+      "label": "Question Answering Task Execution",
+      "definition": "The execution of question answering."
+    },
+    {
+      "id": "RecommendResourcesTaskExecution",
+      "label": "Recommend Resources Task Execution",
+      "definition": "The execution of a recommend resources task."
+    },
+    {
+      "id": "ReconstructTrajectoryTaskExecution",
+      "label": "Reconstruct Trajectory Task Execution",
+      "definition": "The execution of a reconstruct trajectory task."
+    },
+    {
+      "id": "ReinforcementLearningExplanationTaskExecution",
+      "label": "Reinforcement Learning Task Execution",
+      "definition": "The execution of a reinforcement learning task."
+    },
+    {
+      "id": "SemanticEmbeddingTaskExecution",
+      "label": "Semantic Embedding Task Execution",
+      "definition": "The execution of a semantic embedding task."
+    },
+    {
+      "id": "SemanticReasoningTaskExecution",
+      "label": "Semantic Reasoning Task Execution",
+      "definition": "The execution of a semantic reasoning task."
+    },
+    {
+      "id": "UnlockCabinetTaskExecution",
+      "label": "Unlock Cabinet Task Execution",
+      "definition": "The execution of an unlock cabinet task."
+    }
+  ],
+  "Method": [
+    {
+      "id": "ArgumentationReasoningMethod",
+      "label": "Argumentation Reasoning Method",
+      "definition": "A reasoning method based on argumentation principles."
+    },
+    {
+      "id": "BayesianLogicMethod",
+      "label": "Bayesian Logic",
+      "definition": "A method that applies Bayesian logic for reasoning under uncertainty."
+    },
+    {
+      "id": "CooperativeLearningMethod",
+      "label": "Cooperative Learning Method",
+      "definition": "A method that involves cooperative learning."
+    },
+    {
+      "id": "DataCollectionMethod",
+      "label": "Data Collection Method",
+      "definition": "A method used to gather and record multimodal, self-reported, or sensor-based data."
+    },
+    {
+      "id": "KnowledgeGraphQueryMethod",
+      "label": "Knowledge Graph Query Method",
+      "definition": "A method that involves querying knowledge graphs for information retrieval."
+    },
+    {
+      "id": "MetaAnalysisScoringMethod",
+      "label": "Meta-Analysis Scoring Method",
+      "definition": "A method that uses meta-analysis techniques to score and evaluate information from multiple sources."
+    },
+    {
+      "id": "PostHocExplanationMethod",
+      "label": "Post-hoc Explanation Method",
+      "definition": "A method that provides explanations for decisions or actions after they have been made."
+    },
+    {
+      "id": "ProtocolNegotiationMethod",
+      "label": "Protocol Negotiation Method",
+      "definition": "A method that involves negotiation of protocols."
+    },
+    {
+      "id": "ReinforcementLearningMethod",
+      "label": "Reinforcement Learning Method",
+      "definition": "A method that uses reinforcement learning techniques to learn optimal policies."
+    },
+    {
+      "id": "SemanticEmbeddingMethod",
+      "label": "Semantic Embedding Method",
+      "definition": "A method that involves the use of semantic embeddings."
+    },
+    {
+      "id": "SemanticLinkingMethod",
+      "label": "Semantic Linking Method",
+      "definition": "A method that establishes semantic links between different pieces of information."
+    },
+    {
+      "id": "VirtualRealityInputParsingMethod",
+      "label": "Virtual Reality Input Parsinf Method",
+      "definition": "A method that involves parsing virtual reality input."
+    }
   ]
 }

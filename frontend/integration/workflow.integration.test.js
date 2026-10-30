@@ -139,9 +139,9 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(await storedTriples(id)).toBe(0); // Previewing stores nothing.
 
     await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 63 triples');
+    expect(text()).toContain('Saved in GraphDB · repository hi · 84 triples');
     expect(text()).toContain(graphIri(id));
-    expect(await storedTriples(id)).toBe(63);
+    expect(await storedTriples(id)).toBe(84);
 
     click('Show team composition (CQ1)');
     await until(() => text().includes('CQ1 over the saved graph'));
@@ -163,6 +163,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     const id = `${RUN}-shared-capability`;
     await mountApp(api);
     await openJson(scenario(id, (data) => {
+      delete data.executions; // Exercise the capability workflow without execution assignments.
       data.agents.forEach((/** @type {import('../src/lib/scenario.js').Agent} */ agent) => { agent.name = 'Same display name'; });
       data.capabilities = [{
         id: 'shared', concept: 'ReasoningCapability',
@@ -189,6 +190,39 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     ]));
   }, 60_000);
 
+  it('stores distinct executions for one task with explicit performers, goals, and optional methods', async () => {
+    const id = `${RUN}-executions`;
+    await mountApp(api);
+    await openJson(scenario(id, (data) => {
+      data.executions = [
+        { id: 'first', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'human-user', method: 'DataCollectionMethod' },
+        { id: 'second', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'ai-assistant' },
+        { id: 'repeat', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'human-user' },
+      ];
+    }));
+    await saveAndTrack(id);
+    expect(await storedTriples(id)).toBe(82);
+    const rows = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?agent ?task ?goal ?method WHERE { GRAPH <${graphIri(id)}> {
+        ?execution a hi:TaskExecution ; hi:hasExecutionConcept <https://w3id.org/hi-thesaurus/DataCollectionTaskExecution> ;
+          hi:realizesTask ?task ; hi:performedBy ?agent ; hi:towardsGoal ?goal .
+        ?agent hi:performsExecution ?execution .
+        OPTIONAL { ?execution hi:hasMethodConcept ?method }
+      } }
+    `);
+    const base = `urn:hi-app:scenario:${id}:`;
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((row) => row.execution.value))).toEqual(new Set(['first', 'second', 'repeat'].map((name) => `${base}execution:${name}`)));
+    expect(new Set(rows.map((row) => row.task.value))).toEqual(new Set([`${base}task:data-collection`]));
+    expect(new Set(rows.map((row) => row.agent.value))).toEqual(new Set([`${base}agent:human-user`, `${base}agent:ai-assistant`]));
+    expect(new Set(rows.map((row) => row.goal.value))).toEqual(new Set([`${base}goal:user-wellbeing`]));
+    expect(rows.filter((row) => row.method)).toEqual([expect.objectContaining({
+      execution: expect.objectContaining({ value: `${base}execution:first` }),
+      method: expect.objectContaining({ value: 'https://w3id.org/hi-thesaurus/DataCollectionMethod' }),
+    })]);
+  }, 60_000);
+
   it('three agents: CQ1 lists every member with its own roles', async () => {
     const id = `${RUN}-three`;
     await mountApp(api);
@@ -196,7 +230,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       data.agents.push({ id: 'second-human', name: 'Clinician', kind: 'human', roles: ['HumanUserRole', 'ClinicianRole'] });
     }));
     await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 69 triples');
+    expect(text()).toContain('Saved in GraphDB · repository hi · 90 triples');
     click('Show team composition (CQ1)');
     await until(() => text().includes('3 members'));
     expect(teamRows()).toEqual([
@@ -232,7 +266,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(text()).toContain(graphIri(newId));
     expect(await storedLabel(newId, 'human-user')).toEqual(['Renamed participant']);
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']); // Original untouched.
-    expect(await storedTriples(id)).toBe(63);
+    expect(await storedTriples(id)).toBe(84);
   }, 60_000);
 
   it('409: an existing ID is reported and never overwritten', async () => {
@@ -251,7 +285,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await until(() => text().includes('Not saved: this scenario ID already exists in GraphDB.'));
     expect(text()).not.toContain('Saved in GraphDB');
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']);
-    expect(await storedTriples(id)).toBe(63);
+    expect(await storedTriples(id)).toBe(84);
     expect(document.querySelector('.save button.primary')?.textContent?.trim()).toBe('Save as new scenario');
   }, 60_000);
 
@@ -279,6 +313,6 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await until(() => text().includes('The team query failed. The scenario is still saved.'));
     expect(text()).toContain('GraphDB is unavailable');
     expect(text()).toContain('Saved in GraphDB');
-    expect(await storedTriples(id)).toBe(63);
+    expect(await storedTriples(id)).toBe(84);
   }, 60_000);
 });
