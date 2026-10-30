@@ -19,7 +19,9 @@ BASE = "urn:hi-app:scenario:s1:"
 
 @pytest.fixture
 def payload():
-    return json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data.pop("executions", None)  # Isolate capabilities from execution assignments.
+    return data
 
 
 def test_s1_capabilities_reproduce_all_twenty_original_triples(payload):

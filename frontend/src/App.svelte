@@ -3,6 +3,7 @@
   import ConceptSelect from './lib/ConceptSelect.svelte';
   import ConceptChecklist from './lib/ConceptChecklist.svelte';
   import ReferenceChecklist from './lib/ReferenceChecklist.svelte';
+  import ReferenceSelect from './lib/ReferenceSelect.svelte';
   import RdfPreview from './lib/RdfPreview.svelte';
   import ScenarioSave from './lib/ScenarioSave.svelte';
   import {
@@ -13,6 +14,7 @@
     newAgent,
     newCapability,
     newContext,
+    newExecution,
     newTask,
     removeEntity,
     toContract,
@@ -259,6 +261,25 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.capabilities.push(newCapability(scenario.capabilities.map((c) => c.id)))}>Add capability</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Task executions (optional)</legend>
+      <p class="hint">Describe who performs each task and how, towards the team goal. Deleting an agent or task keeps these records for repair.</p>
+      {#if errorFor('executions')}<p class="error">{errorFor('executions')}</p>{/if}
+      {#each scenario.executions as execution, i (execution.id)}
+        <section class="item" data-execution-id={execution.id}>
+          <div class="item-head">
+            <h3>{findConcept('TaskExecution', execution.concept)?.label ?? `Execution ${i + 1}`}</h3>
+            <button type="button" class="link" onclick={() => scenario.executions.splice(i, 1)}>Remove execution</button>
+          </div>
+          <ConceptSelect label="Execution type" category="TaskExecution" bind:value={execution.concept} error={errorFor(`executions.${i}.concept`)} />
+          <ReferenceSelect label="Task" options={scenario.tasks} bind:value={execution.task} error={errorFor(`executions.${i}.task`)} />
+          <ReferenceSelect label="Agent" options={scenario.agents} bind:value={execution.agent} error={errorFor(`executions.${i}.agent`)} />
+          <ConceptSelect label="Method" category="Method" optional bind:value={execution.method} error={errorFor(`executions.${i}.method`)} />
+        </section>
+      {/each}
+      <button type="button" onclick={() => scenario.executions.push(newExecution(scenario.executions.map((e) => e.id)))}>Add execution</button>
     </fieldset>
   </form>
 

@@ -82,7 +82,7 @@ def test_save_s1_and_cq1_use_stored_rdf_and_reference_labels(client, database, p
     assert saved["workbench_graph_url"] == (
         "http://127.0.0.1:7200/resource?uri=urn%3Ahi-app%3Agraph%3Ascenario%3As1&role=context"
     )
-    assert saved["triple_count"] == 63
+    assert saved["triple_count"] == 84
     assert saved["validation"]["conforms"] is True
     stored = database["data"].graph(URIRef(saved["graph_iri"]))
     assert isomorphic(stored, to_rdf(Scenario.model_validate(payload)))
