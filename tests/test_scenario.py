@@ -49,6 +49,10 @@ def test_s1_reproduces_research_core_and_passes_shacl(payload):
         s1.HumanUser: URIRef(BASE + "agent:human-user"),
         s1.AIAssistant: URIRef(BASE + "agent:ai-assistant"),
         s1.ContextHealthMonitoring: URIRef(BASE + "context"),
+        s1.CapabilitySensing: URIRef(BASE + "capability:sensing"),
+        s1.CapabilitySelfReporting: URIRef(BASE + "capability:self-reporting"),
+        s1.CapabilityReasoning: URIRef(BASE + "capability:reasoning"),
+        s1.CapabilityExplanation: URIRef(BASE + "capability:explaining"),
     }
     predicates = {
         RDF.type, HI.hasUseCaseConcept, HI.hasDomainConcept, HI.hasHITeam,
@@ -56,13 +60,14 @@ def test_s1_reproduces_research_core_and_passes_shacl(payload):
         HI.hasTaskConcept, HI.hasAgentConcept, HI.hasRoleConcept,
         HI.hasContextConcept, HI.hasPhenomenonConcept, HI.hasConstraintConcept,
         HI.operatesInContext, HI.hasInfluenceOn,
+        HI.hasCapabilityConcept, HI.hasCapability, HI.allowsTask, HI.requiresCapability,
     }
     expected = {
         (identities[s], p, identities.get(o, o))
         for s, p, o in source
         if s in identities and (p in predicates or (s == s1.ContextHealthMonitoring and p == RDFS.comment))
     }
-    assert len(expected) == 36
+    assert len(expected) == 56
     assert {(s, p, o) for s, p, o in graph if p != RDFS.label} == expected
     assert len(set(graph.subjects(RDF.type, HI.UseCase))) == 1
     assert len(set(graph.subjects(RDF.type, HI.Goal))) == 1
@@ -105,6 +110,7 @@ def test_three_agents_preserve_identities_even_with_shared_names_and_roles(paylo
 
 
 def test_minimum_one_task_and_optional_domain(payload):
+    payload.pop("capabilities")  # Capabilities remain optional, including for tasks.
     payload["tasks"] = payload["tasks"][:1]
     del payload["use_case"]["domain"]
     graph = to_rdf(Scenario.model_validate(payload))
@@ -145,19 +151,25 @@ def test_names_and_roles_do_not_determine_identity(payload):
 
 
 def test_ids_are_scoped_by_entity_kind_and_scenario(payload):
+    original_task = payload["tasks"][0]["id"]
+    original_agent = payload["agents"][0]["id"]
     for field in ("use_case", "goal"):
         payload[field]["id"] = "same"
     payload["tasks"][0]["id"] = "same"
     payload["agents"][0]["id"] = "same"
+    payload["capabilities"][0]["id"] = "same"
+    for capability in payload["capabilities"]:
+        capability["agents"] = ["same" if id == original_agent else id for id in capability["agents"]]
+        capability["tasks"] = ["same" if id == original_task else id for id in capability["tasks"]]
     graph = to_rdf(Scenario.model_validate(payload))
-    assert {URIRef(BASE + kind + ":same") for kind in ("use-case", "goal", "task", "agent")} <= set(graph.subjects())
+    assert {URIRef(BASE + kind + ":same") for kind in ("use-case", "goal", "task", "agent", "capability")} <= set(graph.subjects())
     assert_conforms(graph)
     payload["id"] = "other-scenario"
     other = to_rdf(Scenario.model_validate(payload))
     assert set(graph.subjects()).isdisjoint(other.subjects())
 
 
-@pytest.mark.parametrize("field", ["agents", "tasks"])
+@pytest.mark.parametrize("field", ["agents", "tasks", "capabilities"])
 def test_duplicate_ids_are_rejected(payload, field):
     payload[field][1]["id"] = payload[field][0]["id"]
     with pytest.raises(ValidationError, match="Duplicate"):
@@ -257,7 +269,7 @@ def test_cli_output_is_stable_across_processes_and_working_directories(tmp_path)
             env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONHASHSEED": seed},
             capture_output=True, text=True, check=True,
         )
-        assert "SHACL conforms: 43 triples" in result.stderr
+        assert "SHACL conforms: 63 triples" in result.stderr
         assert result.stdout == ""
         outputs.append(output.read_bytes())
     assert outputs[0] == outputs[1]

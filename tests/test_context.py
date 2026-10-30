@@ -20,7 +20,9 @@ TEAM = URIRef("urn:hi-app:scenario:s1:team")
 
 @pytest.fixture
 def payload():
-    return json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data.pop("capabilities", None)  # Isolate the Context projection and legacy contract.
+    return data
 
 
 def test_complete_s1_context_is_exactly_the_original_eleven_triples(payload):

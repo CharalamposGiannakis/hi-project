@@ -2,6 +2,7 @@
   import example from '../../examples/s1.json';
   import ConceptSelect from './lib/ConceptSelect.svelte';
   import ConceptChecklist from './lib/ConceptChecklist.svelte';
+  import ReferenceChecklist from './lib/ReferenceChecklist.svelte';
   import RdfPreview from './lib/RdfPreview.svelte';
   import ScenarioSave from './lib/ScenarioSave.svelte';
   import {
@@ -10,8 +11,10 @@
     findConcept,
     fromContract,
     newAgent,
+    newCapability,
     newContext,
     newTask,
+    removeEntity,
     toContract,
     validate,
   } from './lib/scenario.js';
@@ -186,7 +189,7 @@
         <section class="item">
           <div class="item-head">
             <h3>Task {i + 1}</h3>
-            <button type="button" class="link" onclick={() => scenario.tasks.splice(i, 1)} disabled={scenario.tasks.length <= 1}>Remove</button>
+            <button type="button" class="link" onclick={() => removeEntity(scenario, 'tasks', task.id)} disabled={scenario.tasks.length <= 1}>Remove</button>
           </div>
           <div class="field">
             <label for="task-{task.id}">Description</label>
@@ -206,7 +209,7 @@
         <section class="item">
           <div class="item-head">
             <h3>Agent {i + 1}</h3>
-            <button type="button" class="link" onclick={() => scenario.agents.splice(i, 1)} disabled={scenario.agents.length <= 2}>Remove</button>
+            <button type="button" class="link" onclick={() => removeEntity(scenario, 'agents', agent.id)} disabled={scenario.agents.length <= 2}>Remove</button>
           </div>
           <div class="field">
             <label for="agent-{agent.id}">Name</label>
@@ -238,6 +241,24 @@
         <button type="button" onclick={() => addAgent('human')}>Add human agent</button>
         <button type="button" onclick={() => addAgent('artificial')}>Add artificial agent</button>
       </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Capabilities (optional)</legend>
+      <p class="hint">Define each capability once and link it to agents and tasks. Removing an agent or task removes its links here.</p>
+      {#if errorFor('capabilities')}<p class="error">{errorFor('capabilities')}</p>{/if}
+      {#each scenario.capabilities as capability, i (capability.id)}
+        <section class="item" data-capability-id={capability.id}>
+          <div class="item-head">
+            <h3>{findConcept('Capability', capability.concept)?.label ?? `Capability ${i + 1}`}</h3>
+            <button type="button" class="link" onclick={() => scenario.capabilities.splice(i, 1)}>Remove capability</button>
+          </div>
+          <ConceptSelect label="Capability type" category="Capability" bind:value={capability.concept} error={errorFor(`capabilities.${i}.concept`)} />
+          <ReferenceChecklist label="Possessed by agents" options={scenario.agents} bind:values={capability.agents} error={errorFor(`capabilities.${i}.agents`)} />
+          <ReferenceChecklist label="Enables tasks" options={scenario.tasks} bind:values={capability.tasks} error={errorFor(`capabilities.${i}.tasks`)} />
+        </section>
+      {/each}
+      <button type="button" onclick={() => scenario.capabilities.push(newCapability(scenario.capabilities.map((c) => c.id)))}>Add capability</button>
     </fieldset>
   </form>
 

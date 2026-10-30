@@ -87,6 +87,18 @@ def to_rdf(scenario: Scenario) -> Graph:
         for role in agent.roles:
             graph.add((agent_node, HI.hasRoleConcept, _concept(role, "Role")))
 
+    for capability in scenario.capabilities:
+        capability_node = URIRef(f"{base}capability:{capability.id}")
+        graph.add((capability_node, RDF.type, HI.Capability))
+        graph.add((capability_node, HI.hasCapabilityConcept, _concept(capability.concept, "Capability")))
+        for agent_id in capability.agents:
+            graph.add((URIRef(f"{base}agent:{agent_id}"), HI.hasCapability, capability_node))
+        for task_id in capability.tasks:
+            task_node = URIRef(f"{base}task:{task_id}")
+            # Both directions are explicit because application queries disable inference.
+            graph.add((capability_node, HI.allowsTask, task_node))
+            graph.add((task_node, HI.requiresCapability, capability_node))
+
     return graph
 
 

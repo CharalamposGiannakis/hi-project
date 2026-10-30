@@ -25,7 +25,7 @@
     {/each}
   </select>
   {#if selected}
-    <p class="hint"><code>hint:{selected.id}</code> — {selected.definition}</p>
+    <p class="hint"><code>hint:{selected.id}</code>{#if selected.definition} — {selected.definition}{/if}</p>
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
 </div>

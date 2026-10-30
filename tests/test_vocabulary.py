@@ -2,8 +2,9 @@ import json
 from pathlib import Path
 
 import pytest
+from rdflib.namespace import SKOS
 
-from hi_scenario.rdf import _concept
+from hi_scenario.rdf import HINT, _concept, _thesaurus
 from hi_scenario.vocabulary import CATEGORIES, export_vocabulary
 
 
@@ -21,4 +22,10 @@ def test_every_offered_concept_is_accepted_by_the_rdf_mapping(category):
     assert offered
     for concept in offered:
         _concept(concept["id"], category)
-        assert concept["label"] and concept["definition"]
+        assert concept["label"]
+        # Some capability category concepts have no definition in the source.
+        definitions = {str(value) for value in _thesaurus().objects(HINT[concept["id"]], SKOS.definition)}
+        if definitions:
+            assert concept["definition"] in definitions
+        else:
+            assert concept["definition"] == ""
