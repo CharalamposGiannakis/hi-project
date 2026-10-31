@@ -182,6 +182,8 @@
       {/if}
     </fieldset>
 
+    <ConceptChecklist label="Team constraints (optional)" category="Constraint" bind:values={scenario.team_constraints} error={errorFor('team_constraints')} />
+
     <fieldset>
       <legend>Team goal</legend>
       <div class="field">

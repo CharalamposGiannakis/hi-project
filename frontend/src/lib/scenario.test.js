@@ -5,11 +5,94 @@ import s3 from '../../../examples/s3.json';
 import s4 from '../../../examples/s4.json';
 import s5 from '../../../examples/s5.json';
 import s6 from '../../../examples/s6.json';
+import s7 from '../../../examples/s7.json';
 import { concepts, emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('independent Team constraints', () => {
+  it.each([example, s2, s3, s4, s5, s6])('keeps legacy $id JSON unchanged', (data) => {
+    const scenario = fromContract(data);
+    expect(scenario.team_constraints).toEqual([]);
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(data);
+  });
+
+  it('defaults to an empty selection and omits empty constraints from exported JSON', () => {
+    expect(emptyScenario().team_constraints).toEqual([]);
+    const scenario = fromContract({ ...copy(), team_constraints: [] });
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).not.toHaveProperty('team_constraints');
+  });
+
+  it('keeps selections independent through edits, Context removal, and JSON round-tripping', () => {
+    const scenario = fromContract({ ...copy(), team_constraints: ['PrivacyConstraint'] });
+    const originalContext = [...(scenario.context?.constraints ?? [])];
+    scenario.team_constraints.push('AccessibilityConstraint');
+    expect(scenario.context?.constraints).toEqual(originalContext);
+    if (!scenario.context) throw new Error('Expected Context');
+    scenario.context.constraints = ['FairnessConstraint'];
+    expect(scenario.team_constraints).toEqual(['PrivacyConstraint', 'AccessibilityConstraint']);
+    scenario.context = null;
+    expect(validate(scenario)).toEqual([]);
+    const exported = toContract(scenario);
+    expect(exported).not.toHaveProperty('context');
+    expect(exported.team_constraints).toEqual(['PrivacyConstraint', 'AccessibilityConstraint']);
+    expect(toContract(fromContract(JSON.stringify(exported)))).toEqual(exported);
+    exported.team_constraints?.push('TransparencyConstraint');
+    expect(scenario.team_constraints).toEqual(['PrivacyConstraint', 'AccessibilityConstraint']);
+  });
+
+  it.each([['MadeUpConstraint'], ['SensorNoisePhenomenon'], ['HumanUserRole']])('rejects invalid Constraint vocabulary: %j', (concept) => {
+    expect(() => fromContract({ ...copy(), team_constraints: [concept] })).toThrow('team_constraints');
+    const scenario = fromContract(copy());
+    scenario.team_constraints = [concept];
+    expect(validate(scenario).map((issue) => issue.path)).toContain('team_constraints');
+  });
+
+  it.each([{ value: null }, { value: 'PrivacyConstraint' }, { value: 123 }, { value: [123] }])('rejects malformed Team constraint JSON: $value', ({ value }) => {
+    expect(() => fromContract({ ...copy(), team_constraints: value })).toThrow('team_constraints');
+  });
+});
+
+describe('S7 reconstruction', () => {
+  it('round-trips separate constraints, repeated Task concepts, seven executions, and provisional vocabulary', () => {
+    const scenario = fromContract(JSON.stringify(s7));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(fromContract(JSON.stringify(toContract(scenario))))).toEqual(s7);
+    expect(scenario.team_constraints).toEqual(s7.team_constraints);
+    expect(scenario.context?.constraints).toEqual(s7.context.constraints);
+    expect(scenario.team_constraints).not.toBe(scenario.context?.constraints);
+    expect(scenario.tasks).toHaveLength(6);
+    expect(scenario.goal.required_tasks).toEqual(scenario.tasks.map((task) => task.id));
+    expect(scenario.tasks.filter((task) => task.concept === 'SemanticReasoningTask').map((task) => task.id)).toEqual(['semantic-retrieval', 'compute-similarity']);
+    expect(scenario.capabilities).toHaveLength(6);
+    expect(scenario.capabilities.filter((capability) => capability.tasks.includes('semantic-retrieval')).map((capability) => capability.id)).toEqual(['semantic-reasoning', 'kg-query']);
+    expect(scenario.executions).toHaveLength(7);
+    expect(scenario.executions.filter((execution) => execution.task === 'interpret-multimodal-input').map((execution) => execution.agent)).toEqual(['human-visitor', 'ai-virtual-guide']);
+    expect(scenario.executions[0].method).toBe('DataCollectionMethod');
+    expect(scenario.evaluations[0].executions).toEqual(scenario.executions.map((execution) => execution.id));
+    expect(scenario.evaluations[0].metrics).toHaveLength(4);
+    expect(scenario.experiments[0].hypothesis_language).toBe('en');
+    expect(scenario.interactions.map((interaction) => [interaction.intent, interaction.executions])).toEqual([
+      ['GuideIntent', ['recommend-artifacts']], ['AnswerIntent', ['answer-questions']],
+    ]);
+  });
+
+  it.each(['IntentGuide', 'IntentAnswer'])('does not accept the unresolved source name %s as an alias', (intent) => {
+    const data = structuredClone(s7);
+    data.interactions[0].intent = intent;
+    expect(() => fromContract(data)).toThrow('not a HINT InteractionIntent concept');
+  });
+
+  it('continues to reject the undefined source SelfReportingMethod', () => {
+    const data = structuredClone(s7);
+    data.executions[0].method = 'SelfReportingMethod';
+    expect(() => fromContract(data)).toThrow('not a HINT Method concept');
+  });
+});
 
 describe('S6 reconstruction', () => {
   it('round-trips shared entities, separate episodes, exact HINT identifiers, and plain hypotheses', () => {

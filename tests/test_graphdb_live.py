@@ -17,7 +17,7 @@ from rdflib.namespace import RDF
 from hi_scenario import api
 from hi_scenario.graphdb import scenario_graph_iri
 from hi_scenario.model import Scenario
-from hi_scenario.rdf import HI, to_rdf
+from hi_scenario.rdf import HI, HINT, to_rdf
 from infra.graphdb import BASE_URL, ROOT, check_references, check_repository, read_graph, wait_for_server
 
 
@@ -34,6 +34,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
     s4 = json.loads((ROOT / "examples" / "s4.json").read_text(encoding="utf-8"))
     s5 = json.loads((ROOT / "examples" / "s5.json").read_text(encoding="utf-8"))
     s6 = json.loads((ROOT / "examples" / "s6.json").read_text(encoding="utf-8"))
+    s7 = json.loads((ROOT / "examples" / "s7.json").read_text(encoding="utf-8"))
     owned_ids = []
     saved = []
 
@@ -48,7 +49,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
             check_repository(database)
             check_references(database)
             with TestClient(api.app) as client:
-                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3), ("s4", 2, s4), ("s5", 2, s5), ("s6", 2, s6)):
+                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3), ("s4", 2, s4), ("s5", 2, s5), ("s6", 2, s6), ("s7", 2, s7)):
                     payload = new_payload(label, template)
                     if label == "three":
                         payload["agents"][0]["name"] = 'Zoë "User"\n☃'
@@ -114,6 +115,29 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
                         for predicate in (HI.hasNullHypothesis, HI.hasAlternativeHypothesis):
                             literal = stored.value(experiment, predicate)
                             assert literal.language is None and literal.datatype is None
+                    if label == "s7":
+                        stored = read_graph(database, location["graph_iri"])
+                        assert len(stored) == 173
+                        assert set(stored) == set(graph)
+                        assert len(set(stored.subjects(RDF.type, None))) == 29
+                        base = f"urn:hi-app:scenario:{payload['id']}:"
+                        for subject in ("team", "context"):
+                            assert set(stored.objects(URIRef(base + subject), HI.hasConstraintConcept)) == {
+                                HINT.PrivacyConstraint, HINT.TransparencyConstraint, HINT.AccessibilityConstraint,
+                            }
+                        assert set(stored.subjects(HI.evaluatedBy, URIRef(base + "evaluation:vr-guide-impact"))) == {
+                            URIRef(base + "execution:" + execution["id"]) for execution in payload["executions"]
+                        }
+                        assert set(stored.triples((None, HI.hasInteractionEpisode, None))) == {
+                            (URIRef(base + "execution:recommend-artifacts"), HI.hasInteractionEpisode, URIRef(base + "interaction:vr-guided-tour")),
+                            (URIRef(base + "execution:answer-questions"), HI.hasInteractionEpisode, URIRef(base + "interaction:qa")),
+                        }
+                        assert set(stored.objects(URIRef(base + "task:semantic-retrieval"), HI.requiresCapability)) == {
+                            URIRef(base + "capability:semantic-reasoning"), URIRef(base + "capability:kg-query"),
+                        }
+                        assert stored.value(URIRef(base + "execution:provide-profile"), HI.hasMethodConcept) == HINT.DataCollectionMethod
+                        assert stored.value(URIRef(base + "interaction:vr-guided-tour"), HI.hasInteractionIntentConcept) == HINT.GuideIntent
+                        assert stored.value(URIRef(base + "interaction:qa"), HI.hasInteractionIntentConcept) == HINT.AnswerIntent
                     assert isomorphic(graph, read_graph(database, location["graph_iri"]))
                     response = client.get(f"/scenarios/{payload['id']}/team")
                     assert response.status_code == 200, response.text

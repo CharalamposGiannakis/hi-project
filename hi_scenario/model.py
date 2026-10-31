@@ -116,6 +116,7 @@ class Scenario(Record):
     goal: Goal
     tasks: tuple[Task, ...] = Field(min_length=1)
     agents: tuple[Agent, ...] = Field(min_length=2)
+    team_constraints: tuple[Concept, ...] = ()
     context: Context | None = None
     capabilities: tuple[Capability, ...] = ()
     executions: tuple[Execution, ...] = ()

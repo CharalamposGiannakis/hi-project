@@ -1,0 +1,157 @@
+{
+  "id": "s7",
+  "use_case": {
+    "id": "virtual-museum-guide",
+    "name": "Virtual museum guide",
+    "concept": "VirtualMuseumGuideUseCase",
+    "domain": "DigitalMuseumDomain"
+  },
+  "goal": {
+    "id": "enhanced-visitor-learning",
+    "name": "Enhanced visitor learning",
+    "concept": "EnhancedVisitorGoal",
+    "required_tasks": ["interpret-multimodal-input", "semantic-retrieval", "compute-similarity", "recommend-artifacts", "answer-questions", "explain-recommendations"]
+  },
+  "team_constraints": ["PrivacyConstraint", "TransparencyConstraint", "AccessibilityConstraint"],
+  "context": {
+    "concept": "VirtualExhibitionContext",
+    "phenomena": ["EngagementShiftPhenomenon", "KnowledgeMismatchPhenomenon"],
+    "constraints": ["PrivacyConstraint", "TransparencyConstraint", "AccessibilityConstraint"]
+  },
+  "tasks": [
+    { "id": "interpret-multimodal-input", "name": "Interpret multimodal input", "concept": "MultimodalInputInterpretationTask" },
+    { "id": "semantic-retrieval", "name": "Semantic retrieval", "concept": "SemanticReasoningTask" },
+    { "id": "compute-similarity", "name": "Compute similarity", "concept": "SemanticReasoningTask" },
+    { "id": "recommend-artifacts", "name": "Recommend artifacts", "concept": "RecommendResourcesTask" },
+    { "id": "answer-questions", "name": "Answer questions", "concept": "QuestionAnsweringTask" },
+    { "id": "explain-recommendations", "name": "Explain recommendations", "concept": "ExplanationTask" }
+  ],
+  "agents": [
+    { "id": "human-visitor", "name": "Human visitor", "kind": "human", "roles": ["VisitorRole"] },
+    { "id": "ai-virtual-guide", "name": "AI virtual guide", "kind": "artificial", "roles": ["VirtualGuideRole"] }
+  ],
+  "capabilities": [
+    {
+      "id": "multimodal-interpretation",
+      "concept": "MultimodalInterpretationCapability",
+      "agents": ["ai-virtual-guide"],
+      "tasks": ["interpret-multimodal-input"]
+    },
+    {
+      "id": "semantic-reasoning",
+      "concept": "SemanticReasoningCapability",
+      "agents": ["ai-virtual-guide"],
+      "tasks": ["semantic-retrieval", "recommend-artifacts", "answer-questions"]
+    },
+    {
+      "id": "kg-query",
+      "concept": "KnowledgeGraphQueryingCapability",
+      "agents": ["ai-virtual-guide"],
+      "tasks": ["semantic-retrieval"]
+    },
+    {
+      "id": "embedding-reasoning",
+      "concept": "EmbeddingReasoningCapability",
+      "agents": ["ai-virtual-guide"],
+      "tasks": ["compute-similarity"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["ai-virtual-guide"],
+      "tasks": ["explain-recommendations"]
+    },
+    {
+      "id": "self-reporting",
+      "concept": "SelfReportingCapability",
+      "agents": ["human-visitor"],
+      "tasks": ["interpret-multimodal-input"]
+    }
+  ],
+  "executions": [
+    {
+      "id": "provide-profile",
+      "concept": "ProvideProfileTaskExecution",
+      "task": "interpret-multimodal-input",
+      "agent": "human-visitor",
+      "method": "DataCollectionMethod"
+    },
+    {
+      "id": "interpret-input",
+      "concept": "InterpretInputTaskExecution",
+      "task": "interpret-multimodal-input",
+      "agent": "ai-virtual-guide",
+      "method": "VirtualRealityInputParsingMethod"
+    },
+    {
+      "id": "semantic-retrieval",
+      "concept": "SemanticReasoningTaskExecution",
+      "task": "semantic-retrieval",
+      "agent": "ai-virtual-guide",
+      "method": "KnowledgeGraphQueryMethod"
+    },
+    {
+      "id": "compute-similarity",
+      "concept": "SemanticEmbeddingTaskExecution",
+      "task": "compute-similarity",
+      "agent": "ai-virtual-guide",
+      "method": "SemanticEmbeddingMethod"
+    },
+    {
+      "id": "recommend-artifacts",
+      "concept": "RecommendResourcesTaskExecution",
+      "task": "recommend-artifacts",
+      "agent": "ai-virtual-guide",
+      "method": "SemanticLinkingMethod"
+    },
+    {
+      "id": "answer-questions",
+      "concept": "QuestionAnsweringTaskExecution",
+      "task": "answer-questions",
+      "agent": "ai-virtual-guide",
+      "method": "KnowledgeGraphQueryMethod"
+    },
+    {
+      "id": "explain-recommendations",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-recommendations",
+      "agent": "ai-virtual-guide",
+      "method": "SemanticLinkingMethod"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "vr-guide-effectiveness",
+      "concept": "VirtualRealityEffectivenessExperiment",
+      "metrics": ["RecommendationRelevanceMetric", "AnswerAccuracyMetric", "EngagementTimeMetric", "ExplanationClarityMetric"],
+      "null_hypothesis": "No improvement over a non-personalized baseline.",
+      "alternative_hypothesis": "Multimodal input + KG reasoning improves engagement and relevance.",
+      "hypothesis_language": "en"
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "vr-guide-impact",
+      "concept": "VirtualRealityImpactEvaluation",
+      "metrics": ["RecommendationRelevanceMetric", "AnswerAccuracyMetric", "EngagementTimeMetric", "ExplanationClarityMetric"],
+      "experiment": "vr-guide-effectiveness",
+      "executions": ["provide-profile", "interpret-input", "semantic-retrieval", "compute-similarity", "recommend-artifacts", "answer-questions", "explain-recommendations"]
+    }
+  ],
+  "interactions": [
+    {
+      "id": "vr-guided-tour",
+      "intent": "GuideIntent",
+      "modality": "VirtualRealityModality",
+      "agents": ["ai-virtual-guide", "human-visitor"],
+      "executions": ["recommend-artifacts"]
+    },
+    {
+      "id": "qa",
+      "intent": "AnswerIntent",
+      "modality": "VoiceChatModality",
+      "agents": ["ai-virtual-guide", "human-visitor"],
+      "executions": ["answer-questions"]
+    }
+  ]
+}
