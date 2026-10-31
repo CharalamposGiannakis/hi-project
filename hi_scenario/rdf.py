@@ -50,6 +50,8 @@ def to_rdf(scenario: Scenario) -> Graph:
         graph.add((use_case, HI.hasDomainConcept, _concept(scenario.use_case.domain, "Domain")))
     graph.add((use_case, HI.hasHITeam, team))
     graph.add((team, RDF.type, HI.HITeam))
+    for constraint in scenario.team_constraints:
+        graph.add((team, HI.hasConstraintConcept, _concept(constraint, "Constraint")))
     graph.add((team, HI.hasGoal, goal))
     graph.add((goal, RDF.type, HI.Goal))
     graph.add((goal, RDFS.label, Literal(scenario.goal.name)))

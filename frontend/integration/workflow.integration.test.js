@@ -10,6 +10,7 @@ import s3 from '../../examples/s3.json';
 import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
+import s7 from '../../examples/s7.json';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -135,6 +136,59 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Svelte', () => {
+  it('S7: saves 29 identities, separate Team/Context constraints, seven evaluation links, and both episodes', async () => {
+    const id = `${RUN}-s7`;
+    await mountApp(api);
+    await openJson({ ...structuredClone(s7), id });
+    click('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('173 triples · not saved');
+    expect(await storedTriples(id)).toBe(0);
+    await saveAndTrack(id);
+    expect(text()).toContain('Saved in GraphDB · repository hi · 173 triples');
+    expect(await storedTriples(id)).toBe(173);
+    const base = `urn:hi-app:scenario:${id}:`;
+    const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
+    const expected = [
+      'team', 'context', `use-case:${s7.use_case.id}`, `goal:${s7.goal.id}`,
+      ...s7.agents.map((agent) => `agent:${agent.id}`), ...s7.tasks.map((task) => `task:${task.id}`),
+      ...s7.capabilities.map((capability) => `capability:${capability.id}`), ...s7.executions.map((execution) => `execution:${execution.id}`),
+      ...s7.experiments.map((experiment) => `experiment:${experiment.id}`), ...s7.evaluations.map((evaluation) => `evaluation:${evaluation.id}`),
+      ...s7.interactions.map((interaction) => `interaction:${interaction.id}`),
+    ];
+    expect(typed).toHaveLength(29);
+    expect(new Set(typed.map((row) => row.entity.value))).toEqual(new Set(expected.map((entity) => base + entity)));
+    const constraints = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?subject ?constraint WHERE { GRAPH <${graphIri(id)}> { ?subject hi:hasConstraintConcept ?constraint } }
+    `);
+    expect(constraints).toHaveLength(6);
+    for (const subject of ['team', 'context']) {
+      expect(new Set(constraints.filter((row) => row.subject.value === base + subject).map((row) => row.constraint.value)))
+        .toEqual(new Set(s7.team_constraints.map((constraint) => `https://w3id.org/hi-thesaurus/${constraint}`)));
+    }
+    const evaluated = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?evaluation WHERE { GRAPH <${graphIri(id)}> { ?execution hi:evaluatedBy ?evaluation } }
+    `);
+    expect(evaluated).toHaveLength(7);
+    expect(new Set(evaluated.map((row) => row.execution.value))).toEqual(new Set(s7.executions.map((execution) => `${base}execution:${execution.id}`)));
+    expect(new Set(evaluated.map((row) => row.evaluation.value))).toEqual(new Set([`${base}evaluation:vr-guide-impact`]));
+    const episodes = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?interaction WHERE { GRAPH <${graphIri(id)}> { ?execution hi:hasInteractionEpisode ?interaction } }
+    `);
+    expect(episodes).toHaveLength(2);
+    expect(episodes.map((row) => [row.execution.value, row.interaction.value])).toEqual(expect.arrayContaining([
+      [`${base}execution:recommend-artifacts`, `${base}interaction:vr-guided-tour`],
+      [`${base}execution:answer-questions`, `${base}interaction:qa`],
+    ]));
+    click('Show team composition (CQ1)');
+    await until(() => text().includes('CQ1 over the saved graph'));
+    expect(teamRows()).toHaveLength(2);
+    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s7.agents.map((agent) => agent.name)));
+  }, 60_000);
+
   it('S6: saves shared Explanation, six evaluation links, and distinct episodes without linking the human explanation', async () => {
     const id = `${RUN}-s6`;
     await mountApp(api);

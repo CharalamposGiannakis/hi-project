@@ -16,7 +16,7 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {{ id: string, concept: string, metrics: string[], null_hypothesis: string, alternative_hypothesis: string, hypothesis_language: '' | 'en', description: string }} Experiment
  * @typedef {{ id: string, concept: string, metrics: string[], experiment: string, executions: string[], description: string }} Evaluation
  * @typedef {{ id: string, intent: string, modality: string, agents: string[], executions: string[], description: string }} Interaction
- * @typedef {{ id: string, use_case: UseCase, goal: Goal, tasks: DescribedEntity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
+ * @typedef {{ id: string, use_case: UseCase, goal: Goal, tasks: DescribedEntity[], agents: Agent[], team_constraints: string[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -124,6 +124,7 @@ export function emptyScenario() {
     goal: { id: newId(), name: '', concept: '', description: '', required_tasks: [task.id] },
     tasks: [task],
     agents: [human, newAgent('artificial', [human.id])],
+    team_constraints: [],
     context: null,
     capabilities: [],
     executions: [],
@@ -168,6 +169,7 @@ export function validate(scenario) {
   checkName('use_case.name', useCase.name);
   checkConcept('use_case.concept', 'UseCase', useCase.concept);
   if (useCase.domain) checkConcept('use_case.domain', 'Domain', useCase.domain);
+  scenario.team_constraints.forEach((id) => checkConcept('team_constraints', 'Constraint', id));
 
   if (scenario.context) {
     const context = scenario.context;
@@ -283,6 +285,7 @@ export function toContract(scenario) {
     goal: { ...describedEntity(scenario.goal), required_tasks: [...scenario.goal.required_tasks] },
     tasks: scenario.tasks.map(describedEntity),
     agents: scenario.agents.map((a) => ({ id: a.id, name: a.name.trim(), kind: a.kind, roles: [...a.roles] })),
+    ...(scenario.team_constraints.length ? { team_constraints: [...scenario.team_constraints] } : {}),
     ...(scenario.capabilities.length ? { capabilities: scenario.capabilities.map((c) => ({
       id: c.id, concept: c.concept, agents: [...c.agents], tasks: [...c.tasks],
     })) } : {}),
@@ -388,7 +391,7 @@ export function fromContract(input) {
     };
   };
 
-  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions', 'experiments', 'evaluations', 'interactions']);
+  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['team_constraints', 'context', 'capabilities', 'executions', 'experiments', 'evaluations', 'interactions']);
   const uc = object(root.use_case, 'use_case', ['id', 'name', 'concept'], ['domain']);
   const domain = uc.domain == null ? '' : string(uc.domain, 'use_case.domain');
   /** @type {Context | null} */
@@ -406,6 +409,7 @@ export function fromContract(input) {
   /** @type {Scenario} */
   const scenario = {
     id: string(root.id, 'id'),
+    team_constraints: root.team_constraints === undefined ? [] : array(root.team_constraints, 'team_constraints').map((id, i) => string(id, `team_constraints.${i}`)),
     context,
     interactions: root.interactions === undefined ? [] : array(root.interactions, 'interactions').map((value, i) => {
       const path = `interactions.${i}`;

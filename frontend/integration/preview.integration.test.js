@@ -13,6 +13,7 @@ import s3 from '../../examples/s3.json';
 import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
+import s7 from '../../examples/s7.json';
 import { requestPreview } from '../src/lib/api.js';
 import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
@@ -24,6 +25,7 @@ const reconstructions = [
   { label: 'S4', canonical: s4, triples: 154 },
   { label: 'S5', canonical: s5, triples: 139 },
   { label: 'S6', canonical: s6, triples: 150 },
+  { label: 'S7', canonical: s7, triples: 173 },
 ];
 
 /** @type {{ url: string, stop: () => void } | undefined} */
@@ -163,6 +165,9 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
     enterText(goal, 'Name', canonical.goal.name);
     selectValue(goal, 'Goal type', canonical.goal.concept);
+    if ('team_constraints' in canonical && Array.isArray(canonical.team_constraints)) {
+      selectChecks(document, 'Team constraints (optional)', canonical.team_constraints);
+    }
     clickButton('Add context');
     selectValue(document, 'Context type', canonical.context.concept);
     selectChecks(document, 'Phenomena', canonical.context.phenomena);
@@ -280,6 +285,41 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     if (preview.kind !== 'ok') throw new Error(JSON.stringify(preview));
     expect(rdf).toBe(preview.preview.rdf);
   }, 60_000);
+
+  it('keeps Team constraints separate from Context edits and previews them without a Context', async () => {
+    await mountApp();
+    clickButton('Load S1 example');
+    /** @param {string} label */
+    const checklist = (label) => {
+      const fieldset = [...document.querySelectorAll('fieldset')].find((f) => f.querySelector('legend')?.textContent?.trim() === label);
+      if (!fieldset) throw new Error(`No checklist ${label}`);
+      return fieldset;
+    };
+    /** @param {string} label @param {string} concept */
+    const toggle = (label, concept) => {
+      const control = /** @type {HTMLInputElement} */ (checklist(label).querySelector(`input[value="${concept}"]`));
+      control.click();
+      flushSync();
+    };
+    const draft = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
+    expect(checklist('Team constraints (optional)').querySelectorAll('input:checked')).toHaveLength(0);
+    toggle('Team constraints (optional)', 'AccessibilityConstraint');
+    expect(draft().context.constraints).toEqual(example.context.constraints);
+    toggle('Constraints', 'FairnessConstraint');
+    expect(draft().team_constraints).toEqual(['AccessibilityConstraint']);
+    toggle('Team constraints (optional)', 'AccessibilityConstraint');
+    toggle('Team constraints (optional)', 'PrivacyConstraint');
+    expect(draft().context.constraints).toEqual([...example.context.constraints, 'FairnessConstraint']);
+    clickButton('Remove context');
+    expect(draft()).not.toHaveProperty('context');
+    expect(draft().team_constraints).toEqual(['PrivacyConstraint']);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('117 triples · not saved');
+    const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
+    expect(rdf).toContain('<urn:hi-app:scenario:s1:team> <https://w3id.org/hi-ontology#hasConstraintConcept> <https://w3id.org/hi-thesaurus/PrivacyConstraint> .');
+    expect(rdf).not.toContain('<urn:hi-app:scenario:s1:context>');
+  });
 
   it('selects goal requirements explicitly and previews added tasks without requiring them', async () => {
     await mountApp();
