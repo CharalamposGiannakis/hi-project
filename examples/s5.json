@@ -1,0 +1,142 @@
+{
+  "id": "s5",
+  "use_case": {
+    "id": "hybrid-medical-diagnosis",
+    "name": "Hybrid medical diagnosis",
+    "concept": "MedicalDiagnosisUseCase",
+    "domain": "MedicalDomain"
+  },
+  "goal": {
+    "id": "accurate-trustworthy-diagnosis",
+    "name": "Accurate and trustworthy diagnosis",
+    "concept": "AccurateTrustworthyDiagnosisGoal",
+    "required_tasks": ["symptom-analysis", "candidate-generation", "hypothesis-comparison", "explain-reasoning"]
+  },
+  "context": {
+    "concept": "ClinicalConsultationContext",
+    "phenomena": ["DataMismatchPhenomenon", "TrustShiftPhenomenon"],
+    "constraints": ["PrivacyConstraint", "FairnessConstraint", "TransparencyConstraint"],
+    "description": "Clinical consultation using patient history and symptom data stored in a knowledge graph."
+  },
+  "tasks": [
+    { "id": "symptom-analysis", "name": "Symptom analysis", "concept": "SymptomAnalysisTask" },
+    { "id": "candidate-generation", "name": "Generate candidate hypotheses", "concept": "CandidateHypothesisGenerationTask" },
+    { "id": "hypothesis-comparison", "name": "Compare hypotheses", "concept": "HypothesisComparisonTask" },
+    { "id": "explain-reasoning", "name": "Explain reasoning", "concept": "ExplanationTask" }
+  ],
+  "agents": [
+    { "id": "human-clinician", "name": "Human clinician", "kind": "human", "roles": ["ClinicianRole"] },
+    { "id": "ai-diagnostic-assistant", "name": "AI diagnostic assistant", "kind": "artificial", "roles": ["AIAdvisorRole"] }
+  ],
+  "capabilities": [
+    {
+      "id": "embedding-reasoning",
+      "concept": "EmbeddingReasoningCapability",
+      "agents": ["ai-diagnostic-assistant"],
+      "tasks": ["symptom-analysis", "candidate-generation"]
+    },
+    {
+      "id": "kg-query",
+      "concept": "KnowledgeGraphQueryingCapability",
+      "agents": ["ai-diagnostic-assistant"],
+      "tasks": ["symptom-analysis"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["ai-diagnostic-assistant", "human-clinician"],
+      "tasks": ["explain-reasoning"]
+    },
+    {
+      "id": "clinical-judgment",
+      "concept": "ClinicalJudgmentCapability",
+      "agents": ["human-clinician"],
+      "tasks": ["hypothesis-comparison"]
+    }
+  ],
+  "executions": [
+    {
+      "id": "symptom-embedding",
+      "concept": "SemanticEmbeddingTaskExecution",
+      "task": "symptom-analysis",
+      "agent": "ai-diagnostic-assistant",
+      "method": "SemanticEmbeddingMethod"
+    },
+    {
+      "id": "candidate-generation",
+      "concept": "CandidateHypothesisGenerationTaskExecution",
+      "task": "candidate-generation",
+      "agent": "ai-diagnostic-assistant",
+      "method": "SemanticLinkingMethod"
+    },
+    {
+      "id": "hypothesis-comparison",
+      "concept": "HypothesisComparisonTaskExecution",
+      "task": "hypothesis-comparison",
+      "agent": "human-clinician",
+      "method": "BayesianLogicMethod"
+    },
+    {
+      "id": "explain-ai",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-reasoning",
+      "agent": "ai-diagnostic-assistant",
+      "method": "PostHocExplanationMethod"
+    },
+    {
+      "id": "explain-human",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-reasoning",
+      "agent": "human-clinician",
+      "method": "PostHocExplanationMethod"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "diagnosis-accuracy",
+      "concept": "DiagnosisExperiment",
+      "metrics": ["DiagnosisAccuracyMetric"],
+      "null_hypothesis": "AI–human collaborative diagnosis does not significantly improve diagnostic accuracy compared to clinician-only assessment.",
+      "alternative_hypothesis": "Embedding-based reasoning combined with clinician judgment significantly increases diagnostic accuracy.",
+      "hypothesis_language": "en",
+      "description": "Experiment measuring diagnostic accuracy from hybrid clinician–AI collaboration under clinical consultation conditions."
+    },
+    {
+      "id": "explanation-clarity",
+      "concept": "TransparencyTrustExperiment",
+      "metrics": ["ExplanationClarityMetric"],
+      "null_hypothesis": "Providing explanations does not significantly improve clinician trust or decision justification quality.",
+      "alternative_hypothesis": "Clear post-hoc explanations from the AI assistant improve clinician understanding and trust.",
+      "hypothesis_language": "en",
+      "description": "Experiment assessing the clarity and trust impact of AI-generated explanations in hybrid diagnosis."
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "diagnosis-accuracy",
+      "concept": "Evaluation",
+      "metrics": ["DiagnosisAccuracyMetric"],
+      "experiment": "diagnosis-accuracy",
+      "executions": ["symptom-embedding", "candidate-generation", "hypothesis-comparison"],
+      "description": "Evaluation of the accuracy of diagnostic recommendations and hypothesis selection."
+    },
+    {
+      "id": "explanation-clarity",
+      "concept": "Evaluation",
+      "metrics": ["ExplanationClarityMetric"],
+      "experiment": "explanation-clarity",
+      "executions": ["explain-ai", "explain-human"],
+      "description": "Evaluation of whether AI and clinician explanations are clear, structured, and clinically informative."
+    }
+  ],
+  "interactions": [
+    {
+      "id": "clinical-dialogue",
+      "intent": "ExplanationIntent",
+      "modality": "VerbalDialogueModality",
+      "agents": ["human-clinician", "ai-diagnostic-assistant"],
+      "executions": ["explain-ai", "explain-human"],
+      "description": "Dialogue between clinician and AI assistant during diagnostic explanation."
+    }
+  ]
+}

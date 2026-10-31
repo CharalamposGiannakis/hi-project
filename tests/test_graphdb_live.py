@@ -32,6 +32,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
     s2 = json.loads((ROOT / "examples" / "s2.json").read_text(encoding="utf-8"))
     s3 = json.loads((ROOT / "examples" / "s3.json").read_text(encoding="utf-8"))
     s4 = json.loads((ROOT / "examples" / "s4.json").read_text(encoding="utf-8"))
+    s5 = json.loads((ROOT / "examples" / "s5.json").read_text(encoding="utf-8"))
     owned_ids = []
     saved = []
 
@@ -46,7 +47,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
             check_repository(database)
             check_references(database)
             with TestClient(api.app) as client:
-                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3), ("s4", 2, s4)):
+                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3), ("s4", 2, s4), ("s5", 2, s5)):
                     payload = new_payload(label, template)
                     if label == "three":
                         payload["agents"][0]["name"] = 'Zoë "User"\n☃'
@@ -73,6 +74,23 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
                         }
                         assert set(stored.subjects(HI.evaluatedBy, URIRef(base + "evaluation:tutor-impact"))) == {
                             URIRef(base + "execution:" + execution["id"]) for execution in payload["executions"]
+                        }
+                    if label == "s5":
+                        stored = read_graph(database, location["graph_iri"])
+                        assert len(stored) == 139
+                        assert set(stored) == set(graph)
+                        assert len(set(stored.subjects(RDF.type, None))) == 24
+                        base = f"urn:hi-app:scenario:{payload['id']}:"
+                        assert set(stored.subjects(HI.hasCapability, URIRef(base + "capability:explaining"))) == {
+                            URIRef(base + "agent:" + agent["id"]) for agent in payload["agents"]
+                        }
+                        for evaluation in payload["evaluations"]:
+                            assert set(stored.subjects(HI.evaluatedBy, URIRef(base + "evaluation:" + evaluation["id"]))) == {
+                                URIRef(base + "execution:" + execution) for execution in evaluation["executions"]
+                            }
+                        assert set(stored.triples((None, HI.hasInteractionEpisode, None))) == {
+                            (URIRef(base + "execution:" + execution), HI.hasInteractionEpisode, URIRef(base + "interaction:clinical-dialogue"))
+                            for execution in ("explain-ai", "explain-human")
                         }
                     assert isomorphic(graph, read_graph(database, location["graph_iri"]))
                     response = client.get(f"/scenarios/{payload['id']}/team")

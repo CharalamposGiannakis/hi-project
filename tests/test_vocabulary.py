@@ -16,6 +16,22 @@ def test_frontend_vocabulary_matches_thesaurus():
     assert FRONTEND_VOCABULARY.read_text(encoding="utf-8") == export_vocabulary()
 
 
+def test_generic_evaluation_is_offered_without_exposing_other_roots_or_losing_specific_choices():
+    vocabulary = json.loads(export_vocabulary())
+    roots = {
+        category for category, choices in vocabulary.items()
+        if any(choice["id"] == category for choice in choices)
+    }
+    assert roots == {"Evaluation"}
+    assert _concept("Evaluation", "Evaluation") == HINT.Evaluation
+    specific = {
+        str(term).removeprefix(str(HINT))
+        for term in _thesaurus().transitive_subjects(SKOS.broader, HINT.Evaluation)
+        if term != HINT.Evaluation
+    }
+    assert {choice["id"] for choice in vocabulary["Evaluation"]} == specific | {"Evaluation"}
+
+
 @pytest.mark.parametrize("category", CATEGORIES)
 def test_every_offered_concept_is_accepted_by_the_rdf_mapping(category):
     offered = json.loads(export_vocabulary())[category]
