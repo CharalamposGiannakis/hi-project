@@ -52,7 +52,7 @@ def test_authenticated_container_workflow_and_restart():
         scenario["id"] = scenario_id
         assert app.post("/api/scenarios/preview", json={"id": scenario_id}).status_code == 422
         preview = app.post("/api/scenarios/preview", json=scenario)
-        assert preview.status_code == 200 and preview.json()["triple_count"] == 117
+        assert preview.status_code == 200 and preview.json()["triple_count"] == 123
 
         saved = app.post("/api/scenarios", json=scenario)
         assert saved.status_code == 201, saved.text
@@ -71,7 +71,7 @@ def test_authenticated_container_workflow_and_restart():
                 response.raise_for_status()
                 return int(response.json()["results"]["bindings"][0]["n"]["value"])
 
-            assert query_count() == 117
+            assert query_count() == 123
             team = app.get(f"/api/scenarios/{scenario_id}/team")
             assert team.status_code == 200, team.text
             before = team.json()
@@ -88,7 +88,7 @@ def test_authenticated_container_workflow_and_restart():
             deadline = time.monotonic() + 120
             while time.monotonic() < deadline:
                 try:
-                    if query_count() == 117:
+                    if query_count() == 123:
                         break
                 except httpx.HTTPError:
                     pass

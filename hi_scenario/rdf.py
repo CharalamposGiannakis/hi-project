@@ -134,6 +134,18 @@ def to_rdf(scenario: Scenario) -> Graph:
         if evaluation.description is not None:
             graph.add((node, RDFS.comment, Literal(evaluation.description, lang="en")))
 
+    for interaction in scenario.interactions:
+        node = URIRef(f"{base}interaction:{interaction.id}")
+        graph.add((node, RDF.type, HI.Interaction))
+        graph.add((node, HI.hasInteractionIntentConcept, _concept(interaction.intent, "InteractionIntent")))
+        graph.add((node, HI.hasInteractionModalityConcept, _concept(interaction.modality, "InteractionModality")))
+        for agent_id in interaction.agents:
+            graph.add((node, HI.hasAgentInvolved, URIRef(f"{base}agent:{agent_id}")))
+        for execution_id in interaction.executions:
+            graph.add((URIRef(f"{base}execution:{execution_id}"), HI.hasInteractionEpisode, node))
+        if interaction.description is not None:
+            graph.add((node, RDFS.comment, Literal(interaction.description, lang="en")))
+
     return graph
 
 

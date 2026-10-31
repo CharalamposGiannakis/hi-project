@@ -1,9 +1,91 @@
 import { describe, expect, it } from 'vitest';
 import example from '../../../examples/s1.json';
-import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newId, removeEntity, toContract, validate } from './scenario.js';
+import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const copy = () => structuredClone(example);
+
+describe('optional interactions', () => {
+  it('keeps legacy JSON compatible and omits empty interaction collections', () => {
+    /** @type {any} */
+    const data = copy();
+    delete data.interactions;
+    expect(toContract(fromContract(data))).toEqual(data);
+    data.interactions = [];
+    expect(toContract(fromContract(data))).not.toHaveProperty('interactions');
+    expect(emptyScenario().interactions).toEqual([]);
+  });
+
+  it('round-trips three participants, multiple interactions, execution sharing, and descriptions', () => {
+    const data = copy();
+    data.agents.push({ ...data.agents[0], id: 'third-agent' });
+    data.interactions[0].agents.push('third-agent');
+    data.interactions[0].executions.push('conflict-resolution');
+    const withDescription = { ...data.interactions[0], id: 'another', description: 'English description.' };
+    const scenario = fromContract({ ...data, interactions: [data.interactions[0], withDescription] });
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual({ ...data, interactions: [data.interactions[0], withDescription] });
+    scenario.interactions[0].intent = 'NegotiationIntent';
+    expect(toContract(scenario).interactions?.[0].id).toBe(data.interactions[0].id);
+    expect(newInteraction(scenario.interactions.map((i) => i.id)).id).toMatch(ID);
+  });
+
+  it('accepts interactions without execution links and never derives participants', () => {
+    const data = { ...copy(), interactions: [{ id: 'unlinked', intent: 'ExplanationIntent', modality: 'TextChatModality', agents: ['human-user', 'ai-assistant'], description: null }] };
+    const scenario = fromContract(data);
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario).interactions?.[0]).toMatchObject({ executions: [] });
+    expect(toContract(scenario).interactions?.[0]).not.toHaveProperty('description');
+    scenario.interactions[0] = { ...newInteraction(), intent: 'ExplanationIntent', modality: 'TextChatModality', executions: ['explanation'] };
+    expect(validate(scenario).map((i) => i.path)).toContain('interactions.0.agents');
+    expect(scenario.interactions[0].agents).toEqual([]);
+  });
+
+  it.each([
+    ['intent', 'MadeUpIntent'], ['intent', 'VerbalDialogueModality'],
+    ['modality', 'MadeUpModality'], ['modality', 'ExplanationIntent'],
+    ['agents', []], ['agents', ['human-user']], ['agents', ['human-user', 'human-user']],
+    ['agents', ['human-user', 'ai-assistant', 'human-user']], ['agents', ['human-user', 'missing']],
+    ['executions', ['missing']], ['executions', ['explanation', 'explanation']],
+    ['description', ' '], ['description', 123],
+  ])('rejects invalid interaction field %s', (field, value) => {
+    /** @type {any} */
+    const data = copy();
+    data.interactions[0][field] = value;
+    expect(() => fromContract(data)).toThrow();
+  });
+
+  it('rejects duplicate interaction IDs and scenario-local intent IRIs', () => {
+    const data = copy();
+    data.interactions.push({ ...data.interactions[0] });
+    expect(() => fromContract(data)).toThrow('Duplicate interaction IDs');
+    data.interactions.pop();
+    data.interactions[0].intent = 'https://w3id.org/hi-ontology/scenarios/7/IntentGuide';
+    expect(() => fromContract(data)).toThrow('not a HINT InteractionIntent concept');
+  });
+
+  it.each([null, {}, [{}]])('rejects malformed interaction collections: %j', (interactions) => {
+    expect(() => fromContract({ ...copy(), interactions })).toThrow();
+  });
+
+  it('preserves interactions when an agent or execution is deleted and requires repair', () => {
+    const scenario = fromContract({
+      ...copy(), capabilities: [], evaluations: [], experiments: [],
+      executions: example.executions.filter((e) => e.agent === 'ai-assistant'),
+      agents: [...example.agents, { ...example.agents[0], id: 'replacement-human' }],
+    });
+    const original = structuredClone(scenario.interactions);
+    removeEntity(scenario, 'agents', 'human-user');
+    scenario.executions = scenario.executions.filter((e) => e.id !== 'explanation');
+    expect(scenario.interactions).toEqual(original);
+    expect(validate(scenario).map((i) => i.path)).toEqual(['interactions.0.agents', 'interactions.0.executions']);
+    expect(toContract(scenario).interactions?.[0]).toMatchObject(example.interactions[0]);
+    scenario.interactions[0].agents = ['ai-assistant', 'replacement-human'];
+    scenario.interactions[0].executions = ['conflict-resolution'];
+    expect(validate(scenario)).toEqual([]);
+    expect(scenario.interactions[0].id).toBe(original[0].id);
+  });
+});
 
 describe('optional experiments and evaluations', () => {
   it('loads legacy JSON unchanged and omits empty collections on export', () => {
@@ -84,6 +166,7 @@ describe('optional task executions', () => {
   it('keeps legacy JSON compatible and omits an empty execution list', () => {
     /** @type {any} */
     const data = copy();
+    delete data.interactions;
     delete data.evaluations;
     delete data.experiments;
     delete data.executions;
@@ -140,6 +223,7 @@ describe('optional task executions', () => {
 
   it('preserves execution data after deleting references and requires explicit repair', () => {
     const scenario = fromContract(copy());
+    scenario.interactions = []; // Isolate the earlier execution repair contract.
     const original = structuredClone(scenario.executions);
     scenario.agents.push({ ...scenario.agents[0], id: 'replacement-human' });
     removeEntity(scenario, 'agents', 'human-user');
@@ -213,6 +297,7 @@ describe('optional capabilities', () => {
 
   it('removes only the deleted entity links and keeps capability identities', () => {
     const scenario = fromContract(copy());
+    scenario.interactions = [];
     const ids = scenario.capabilities.map((c) => c.id);
     scenario.capabilities[0].agents.push('human-user');
     scenario.capabilities[0].tasks.push('explanation');

@@ -17,6 +17,7 @@
     newExecution,
     newExperiment,
     newEvaluation,
+    newInteraction,
     newTask,
     removeEntity,
     toContract,
@@ -347,6 +348,29 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.evaluations.push(newEvaluation(scenario.evaluations.map((e) => e.id)))}>Add evaluation</button>
+    </fieldset>
+
+    <fieldset>
+      <legend>Interactions (optional)</legend>
+      <p class="hint">Select at least two participants explicitly; performers are not added automatically. Related executions are optional. Deleting a referenced record keeps the interaction for repair.</p>
+      {#if errorFor('interactions')}<p class="error">{errorFor('interactions')}</p>{/if}
+      {#each scenario.interactions as interaction, i (interaction.id)}
+        <section class="item" data-interaction-id={interaction.id}>
+          <div class="item-head">
+            <h3>{findConcept('InteractionIntent', interaction.intent)?.label ?? `Interaction ${i + 1}`}</h3>
+            <button type="button" class="link" onclick={() => scenario.interactions.splice(i, 1)}>Remove interaction</button>
+          </div>
+          <ConceptSelect label="Interaction intent" category="InteractionIntent" bind:value={interaction.intent} error={errorFor(`interactions.${i}.intent`)} />
+          <ConceptSelect label="Interaction modality" category="InteractionModality" bind:value={interaction.modality} error={errorFor(`interactions.${i}.modality`)} />
+          <ReferenceChecklist label="Participating agents" options={scenario.agents} bind:values={interaction.agents} error={errorFor(`interactions.${i}.agents`)} />
+          <ReferenceChecklist label="Related executions (optional)" options={executionOptions} bind:values={interaction.executions} error={errorFor(`interactions.${i}.executions`)} />
+          <div class="field">
+            <label for="interaction-description-{interaction.id}">Description in English (optional)</label>
+            <textarea id="interaction-description-{interaction.id}" rows="2" bind:value={interaction.description}></textarea>
+          </div>
+        </section>
+      {/each}
+      <button type="button" onclick={() => scenario.interactions.push(newInteraction(scenario.interactions.map((interaction) => interaction.id)))}>Add interaction</button>
     </fieldset>
   </form>
 

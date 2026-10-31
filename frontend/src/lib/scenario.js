@@ -4,7 +4,7 @@ import vocabulary from './hint-vocabulary.json';
 
 /**
  * @typedef {{ id: string, label: string, definition: string }} Concept
- * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method' | 'Experiment' | 'Evaluation' | 'Metric'} Category
+ * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method' | 'Experiment' | 'Evaluation' | 'Metric' | 'InteractionIntent' | 'InteractionModality'} Category
  * @typedef {{ id: string, name: string, concept: string }} Entity
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
  * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
@@ -13,7 +13,8 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {{ id: string, concept: string, task: string, agent: string, method: string }} Execution
  * @typedef {{ id: string, concept: string, metrics: string[], null_hypothesis: string, alternative_hypothesis: string, hypothesis_language: '' | 'en', description: string }} Experiment
  * @typedef {{ id: string, concept: string, metrics: string[], experiment: string, executions: string[], description: string }} Evaluation
- * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[] }} Scenario
+ * @typedef {{ id: string, intent: string, modality: string, agents: string[], executions: string[], description: string }} Interaction
+ * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -90,6 +91,11 @@ export function newEvaluation(taken) {
   return { id: newId(taken), concept: '', metrics: [], experiment: '', executions: [], description: '' };
 }
 
+/** @param {Iterable<string>} [taken] @returns {Interaction} */
+export function newInteraction(taken) {
+  return { id: newId(taken), intent: '', modality: '', agents: [], executions: [], description: '' };
+}
+
 /** Remove an entity and its capability links. Keep executions for explicit repair.
  * @param {Scenario} scenario
  * @param {'agents' | 'tasks'} field
@@ -117,6 +123,7 @@ export function emptyScenario() {
     executions: [],
     experiments: [],
     evaluations: [],
+    interactions: [],
   };
 }
 
@@ -229,6 +236,22 @@ export function validate(scenario) {
       if (!scenario.executions.some((execution) => execution.id === id)) add(`${path}.executions`, `Unknown execution ID: ${id}.`);
     });
   });
+  checkUnique('interactions', scenario.interactions, 'interaction');
+  scenario.interactions.forEach((interaction, i) => {
+    const path = `interactions.${i}`;
+    checkId(`${path}.id`, interaction.id);
+    checkConcept(`${path}.intent`, 'InteractionIntent', interaction.intent);
+    checkConcept(`${path}.modality`, 'InteractionModality', interaction.modality);
+    if (new Set(interaction.agents).size < 2) add(`${path}.agents`, 'Choose at least two distinct agents.');
+    for (const field of /** @type {const} */ (['agents', 'executions'])) {
+      const references = interaction[field];
+      if (new Set(references).size !== references.length) add(`${path}.${field}`, `Duplicate interaction ${field === 'agents' ? 'agent' : 'execution'} references.`);
+      const known = new Set(scenario[field].map((entity) => entity.id));
+      for (const id of references) {
+        if (!known.has(id)) add(`${path}.${field}`, `Unknown ${field === 'agents' ? 'agent' : 'execution'} ID: ${id}.`);
+      }
+    }
+  });
   return issues;
 }
 
@@ -263,6 +286,11 @@ export function toContract(scenario) {
     ...(scenario.evaluations.length ? { evaluations: scenario.evaluations.map((e) => ({
       id: e.id, concept: e.concept, metrics: [...e.metrics], experiment: e.experiment, executions: [...e.executions],
       ...(e.description.trim() ? { description: e.description.trim() } : {}),
+    })) } : {}),
+    ...(scenario.interactions.length ? { interactions: scenario.interactions.map((interaction) => ({
+      id: interaction.id, intent: interaction.intent, modality: interaction.modality,
+      agents: [...interaction.agents], executions: [...interaction.executions],
+      ...(interaction.description.trim() ? { description: interaction.description.trim() } : {}),
     })) } : {}),
     ...(context ? { context: {
       concept: context.concept,
@@ -345,7 +373,7 @@ export function fromContract(input) {
     return text;
   };
 
-  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions', 'experiments', 'evaluations']);
+  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions', 'experiments', 'evaluations', 'interactions']);
   const uc = object(root.use_case, 'use_case', ['id', 'name', 'concept'], ['domain']);
   const domain = uc.domain == null ? '' : string(uc.domain, 'use_case.domain');
   /** @type {Context | null} */
@@ -364,6 +392,17 @@ export function fromContract(input) {
   const scenario = {
     id: string(root.id, 'id'),
     context,
+    interactions: root.interactions === undefined ? [] : array(root.interactions, 'interactions').map((value, i) => {
+      const path = `interactions.${i}`;
+      const interaction = object(value, path, ['id', 'intent', 'modality', 'agents'], ['executions', 'description']);
+      return {
+        id: string(interaction.id, `${path}.id`), intent: string(interaction.intent, `${path}.intent`),
+        modality: string(interaction.modality, `${path}.modality`),
+        agents: array(interaction.agents, `${path}.agents`).map((id, j) => string(id, `${path}.agents.${j}`)),
+        executions: interaction.executions === undefined ? [] : array(interaction.executions, `${path}.executions`).map((id, j) => string(id, `${path}.executions.${j}`)),
+        description: description(interaction.description, `${path}.description`),
+      };
+    }),
     experiments: root.experiments === undefined ? [] : array(root.experiments, 'experiments').map((value, i) => {
       const path = `experiments.${i}`;
       const e = object(value, path, ['id', 'concept', 'null_hypothesis', 'alternative_hypothesis'], ['metrics', 'hypothesis_language', 'description']);

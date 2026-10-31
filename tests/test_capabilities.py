@@ -23,6 +23,7 @@ def payload():
     data.pop("executions", None)  # Isolate capabilities from execution assignments.
     data.pop("experiments", None)
     data.pop("evaluations", None)
+    data.pop("interactions", None)
     return data
 
 

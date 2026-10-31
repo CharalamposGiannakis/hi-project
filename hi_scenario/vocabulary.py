@@ -14,6 +14,7 @@ from .rdf import HINT, _thesaurus
 CATEGORIES = (
     "UseCase", "Domain", "Goal", "Task", "Role", "Context", "Phenomenon", "Constraint",
     "Capability", "TaskExecution", "Method", "Experiment", "Evaluation", "Metric",
+    "InteractionIntent", "InteractionModality",
 )
 
 
