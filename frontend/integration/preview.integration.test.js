@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import legacyExample from '../../examples/s1.json';
+import s2 from '../../examples/s2.json';
 import { requestPreview } from '../src/lib/api.js';
 import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
@@ -78,6 +79,166 @@ function enterText(root, label, value) {
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('imports S2, exports it through Copy, reimports it, and previews identical RDF', async () => {
+    await mountApp();
+    /** @param {string} json */
+    async function importJson(json) {
+      const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
+      Object.defineProperty(input, 'files', { value: [{ name: 's2.json', text: async () => json }], configurable: true });
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      await until(() => text().includes('Loaded s2.json'));
+    }
+    await importJson(JSON.stringify(s2));
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(s2);
+    const expected = await requestPreview(s2, { baseUrl });
+    expect(expected.kind).toBe('ok');
+    if (expected.kind !== 'ok') throw new Error(JSON.stringify(expected));
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('195 triples · not saved');
+    expect(document.querySelector('pre.rdf')?.textContent).toBe(expected.preview.rdf);
+
+    let exported = '';
+    const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (/** @type {string} */ value) => { exported = value; } } });
+    try {
+      clickButton('Copy');
+      await until(() => text().includes('JSON copied to the clipboard.'));
+    } finally {
+      if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+      else Reflect.deleteProperty(navigator, 'clipboard');
+    }
+    expect(JSON.parse(exported)).toEqual(s2);
+    unmount(/** @type {Record<string, any>} */ (app));
+    app = undefined;
+    await mountApp();
+    await importJson(exported);
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(s2);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(document.querySelector('pre.rdf')?.textContent).toBe(expected.preview.rdf);
+  });
+
+  it('enters the complete S2 through the form with independent entities and source relationships', async () => {
+    await mountApp(); // Start with a blank form; do not load or inject scenario JSON.
+    const draft = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
+    /** @type {Record<string, Record<string, string>>} */
+    const ids = { tasks: {}, agents: {}, capabilities: {}, executions: {}, experiments: {}, evaluations: {}, interactions: {} };
+    /** @param {ParentNode} root @param {string} label @param {string[]} values */
+    function selectChecks(root, label, values) {
+      const fieldset = [...root.querySelectorAll('fieldset')].find((f) => f.querySelector('legend')?.textContent?.trim() === label);
+      if (!fieldset) throw new Error(`No checklist ${label}`);
+      const controls = [...fieldset.querySelectorAll('input[type=checkbox]')].map((input) => /** @type {HTMLInputElement} */ (input));
+      for (const input of controls) {
+        if (input.checked && !values.includes(input.value)) { input.click(); flushSync(); }
+      }
+      for (const value of values) {
+        const input = controls.find((control) => control.value === value);
+        if (!input) throw new Error(`No ${label} option ${value}`);
+        if (!input.checked) { input.click(); flushSync(); }
+      }
+    }
+    /** @param {string} kind @param {string} collection @param {string} sourceId */
+    function addRecord(kind, collection, sourceId) {
+      clickButton(`Add ${kind}`);
+      const section = /** @type {Element} */ ([...document.querySelectorAll(`[data-${kind}-id]`)].at(-1));
+      ids[collection][sourceId] = draft()[collection].at(-1).id;
+      return section;
+    }
+    const useCase = /** @type {Element} */ (document.querySelector('form > fieldset'));
+    enterText(useCase, 'Name', s2.use_case.name);
+    selectValue(useCase, 'Use case type', s2.use_case.concept);
+    selectValue(useCase, 'Domain (optional)', s2.use_case.domain);
+    const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
+    enterText(goal, 'Name', s2.goal.name);
+    selectValue(goal, 'Goal type', s2.goal.concept);
+    clickButton('Add context');
+    selectValue(document, 'Context type', s2.context.concept);
+    selectChecks(document, 'Phenomena', s2.context.phenomena);
+    selectChecks(document, 'Constraints', s2.context.constraints);
+    s2.tasks.forEach((task, i) => {
+      if (i > 0) clickButton('Add task');
+      const id = draft().tasks[i].id;
+      ids.tasks[task.id] = id;
+      const section = /** @type {Element} */ (document.querySelector(`#task-${id}`)?.closest('section'));
+      enterText(section, 'Name', task.name);
+      selectValue(section, 'Task type', task.concept);
+    });
+    selectChecks(goal, 'Tasks required by this goal', s2.goal.required_tasks.map((id) => ids.tasks[id]));
+    for (const agent of s2.agents) {
+      const id = draft().agents.find((/** @type {any} */ a) => a.kind === agent.kind).id;
+      ids.agents[agent.id] = id;
+      const section = /** @type {Element} */ (document.querySelector(`#agent-${id}`)?.closest('section'));
+      enterText(section, 'Name', agent.name);
+      for (const role of agent.roles) {
+        const label = concepts.Role.find((concept) => concept.id === role)?.label;
+        const control = [...section.querySelectorAll('fieldset.roles label')].find((element) => element.textContent?.trim() === label)?.querySelector('input');
+        if (!control) throw new Error(`No role ${role}`);
+        control.click();
+        flushSync();
+      }
+    }
+    for (const capability of s2.capabilities) {
+      const section = addRecord('capability', 'capabilities', capability.id);
+      selectValue(section, 'Capability type', capability.concept);
+      selectChecks(section, 'Possessed by agents', capability.agents.map((id) => ids.agents[id]));
+      selectChecks(section, 'Enables tasks', capability.tasks.map((id) => ids.tasks[id]));
+    }
+    for (const execution of s2.executions) {
+      const section = addRecord('execution', 'executions', execution.id);
+      selectValue(section, 'Execution type', execution.concept);
+      selectValue(section, 'Task', ids.tasks[execution.task]);
+      selectValue(section, 'Agent', ids.agents[execution.agent]);
+      if (execution.method) selectValue(section, 'Method (optional)', execution.method);
+    }
+    for (const experiment of s2.experiments) {
+      const section = addRecord('experiment', 'experiments', experiment.id);
+      selectValue(section, 'Experiment type', experiment.concept);
+      selectChecks(section, 'Metrics', experiment.metrics);
+      enterText(section, 'Null hypothesis', experiment.null_hypothesis);
+      enterText(section, 'Alternative hypothesis', experiment.alternative_hypothesis);
+    }
+    for (const evaluation of s2.evaluations) {
+      const section = addRecord('evaluation', 'evaluations', evaluation.id);
+      selectValue(section, 'Evaluation type', evaluation.concept);
+      selectChecks(section, 'Metrics', evaluation.metrics);
+      selectValue(section, 'Experiment', ids.experiments[evaluation.experiment]);
+      selectChecks(section, 'Evaluated executions', evaluation.executions.map((id) => ids.executions[id]));
+    }
+    for (const interaction of s2.interactions) {
+      const section = addRecord('interaction', 'interactions', interaction.id);
+      selectValue(section, 'Interaction intent', interaction.intent);
+      selectValue(section, 'Interaction modality', interaction.modality);
+      selectChecks(section, 'Participating agents', interaction.agents.map((id) => ids.agents[id]));
+      selectChecks(section, 'Related executions (optional)', []);
+    }
+    const entered = draft();
+    // Every field and relationship must match the canonical example modulo app-assigned IDs.
+    const expected = {
+      ...s2, id: entered.id,
+      use_case: { ...s2.use_case, id: entered.use_case.id },
+      goal: { ...s2.goal, id: entered.goal.id, required_tasks: s2.goal.required_tasks.map((id) => ids.tasks[id]) },
+      tasks: s2.tasks.map((task) => ({ ...task, id: ids.tasks[task.id] })),
+      agents: s2.agents.map((agent) => ({ ...agent, id: ids.agents[agent.id] })),
+      capabilities: s2.capabilities.map((capability) => ({ ...capability, id: ids.capabilities[capability.id], agents: capability.agents.map((id) => ids.agents[id]), tasks: capability.tasks.map((id) => ids.tasks[id]) })),
+      executions: s2.executions.map((execution) => ({ ...execution, id: ids.executions[execution.id], task: ids.tasks[execution.task], agent: ids.agents[execution.agent] })),
+      experiments: s2.experiments.map((experiment) => ({ ...experiment, id: ids.experiments[experiment.id] })),
+      evaluations: s2.evaluations.map((evaluation) => ({ ...evaluation, id: ids.evaluations[evaluation.id], experiment: ids.experiments[evaluation.experiment], executions: evaluation.executions.map((id) => ids.executions[id]) })),
+      interactions: s2.interactions.map((interaction) => ({ ...interaction, id: ids.interactions[interaction.id], agents: interaction.agents.map((id) => ids.agents[id]) })),
+    };
+    expect(entered).toEqual(expected);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('195 triples · not saved');
+    const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
+    expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(3);
+    expect(rdf).not.toContain('<https://w3id.org/hi-ontology#hasInteractionEpisode>');
+    const preview = await requestPreview(expected, { baseUrl });
+    expect(preview.kind).toBe('ok');
+    if (preview.kind !== 'ok') throw new Error(JSON.stringify(preview));
+    expect(rdf).toBe(preview.preview.rdf);
+  }, 60_000);
+
   it('selects goal requirements explicitly and previews added tasks without requiring them', async () => {
     await mountApp();
     clickButton('Load S1 example'); // Legacy JSON initializes all three requirements.
