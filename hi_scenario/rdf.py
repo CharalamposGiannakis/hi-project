@@ -72,9 +72,14 @@ def to_rdf(scenario: Scenario) -> Graph:
         if context.description is not None:
             graph.add((context_node, RDFS.comment, Literal(context.description, lang="en")))
 
+    required_tasks = scenario.goal.required_tasks
+    if required_tasks is None:
+        required_tasks = tuple(task.id for task in scenario.tasks)
+    for task_id in required_tasks:
+        graph.add((goal, HI.requiresTask, URIRef(f"{base}task:{task_id}")))
+
     for task in scenario.tasks:
         task_node = URIRef(f"{base}task:{task.id}")
-        graph.add((goal, HI.requiresTask, task_node))
         graph.add((task_node, RDF.type, HI.Task))
         graph.add((task_node, RDFS.label, Literal(task.name)))
         graph.add((task_node, HI.hasTaskConcept, _concept(task.concept, "Task")))

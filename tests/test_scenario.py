@@ -31,7 +31,10 @@ def assert_conforms(graph):
     assert set(graph) == before  # Validation must not materialize facts in the ABox.
 
 
-def test_s1_preserves_every_research_triple_plus_only_seven_labels_and_passes_shacl(payload):
+@pytest.mark.parametrize("explicit_requirements", [False, True])
+def test_s1_preserves_every_research_triple_plus_only_seven_labels_and_passes_shacl(payload, explicit_requirements):
+    if explicit_requirements:
+        payload["goal"]["required_tasks"] = [task["id"] for task in payload["tasks"]]
     scenario = Scenario.model_validate(payload)
     graph = to_rdf(scenario)
     assert_conforms(graph)

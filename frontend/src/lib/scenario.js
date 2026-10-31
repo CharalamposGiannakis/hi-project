@@ -7,6 +7,7 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method' | 'Experiment' | 'Evaluation' | 'Metric' | 'InteractionIntent' | 'InteractionModality'} Category
  * @typedef {{ id: string, name: string, concept: string }} Entity
  * @typedef {Entity & { description: string }} DescribedEntity
+ * @typedef {DescribedEntity & { required_tasks: string[] }} Goal
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
  * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
  * @typedef {{ concept: string, phenomena: string[], constraints: string[], description: string }} Context
@@ -15,7 +16,7 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {{ id: string, concept: string, metrics: string[], null_hypothesis: string, alternative_hypothesis: string, hypothesis_language: '' | 'en', description: string }} Experiment
  * @typedef {{ id: string, concept: string, metrics: string[], experiment: string, executions: string[], description: string }} Evaluation
  * @typedef {{ id: string, intent: string, modality: string, agents: string[], executions: string[], description: string }} Interaction
- * @typedef {{ id: string, use_case: UseCase, goal: DescribedEntity, tasks: DescribedEntity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
+ * @typedef {{ id: string, use_case: UseCase, goal: Goal, tasks: DescribedEntity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -97,14 +98,17 @@ export function newInteraction(taken) {
   return { id: newId(taken), intent: '', modality: '', agents: [], executions: [], description: '' };
 }
 
-/** Remove an entity and its capability links. Keep executions for explicit repair.
+/** Remove an entity and its goal/capability links. Keep executions for explicit repair.
  * @param {Scenario} scenario
  * @param {'agents' | 'tasks'} field
  * @param {string} id
  */
 export function removeEntity(scenario, field, id) {
   if (field === 'agents') scenario.agents = scenario.agents.filter((entity) => entity.id !== id);
-  else scenario.tasks = scenario.tasks.filter((entity) => entity.id !== id);
+  else {
+    scenario.tasks = scenario.tasks.filter((entity) => entity.id !== id);
+    scenario.goal.required_tasks = scenario.goal.required_tasks.filter((reference) => reference !== id);
+  }
   for (const capability of scenario.capabilities) {
     capability[field] = capability[field].filter((reference) => reference !== id);
   }
@@ -113,11 +117,12 @@ export function removeEntity(scenario, field, id) {
 /** @returns {Scenario} */
 export function emptyScenario() {
   const human = newAgent('human');
+  const task = newTask();
   return {
     id: crypto.randomUUID(),
     use_case: { id: newId(), name: '', concept: '', domain: '' },
-    goal: { id: newId(), name: '', concept: '', description: '' },
-    tasks: [newTask()],
+    goal: { id: newId(), name: '', concept: '', description: '', required_tasks: [task.id] },
+    tasks: [task],
     agents: [human, newAgent('artificial', [human.id])],
     context: null,
     capabilities: [],
@@ -174,6 +179,11 @@ export function validate(scenario) {
   checkId('goal.id', goal.id);
   checkName('goal.name', goal.name);
   checkConcept('goal.concept', 'Goal', goal.concept);
+  if (goal.required_tasks.length < 1) add('goal.required_tasks', 'Choose at least one required task.');
+  if (new Set(goal.required_tasks).size !== goal.required_tasks.length) add('goal.required_tasks', 'Duplicate required task references.');
+  for (const id of goal.required_tasks) {
+    if (!tasks.some((task) => task.id === id)) add('goal.required_tasks', `Unknown task ID: ${id}.`);
+  }
 
   if (tasks.length < 1) add('tasks', 'Add at least one task.');
   checkUnique('tasks', tasks, 'task');
@@ -270,7 +280,7 @@ export function toContract(scenario) {
   return {
     id: scenario.id,
     use_case: { ...entity(useCase), ...(useCase.domain ? { domain: useCase.domain } : {}) },
-    goal: describedEntity(scenario.goal),
+    goal: { ...describedEntity(scenario.goal), required_tasks: [...scenario.goal.required_tasks] },
     tasks: scenario.tasks.map(describedEntity),
     agents: scenario.agents.map((a) => ({ id: a.id, name: a.name.trim(), kind: a.kind, roles: [...a.roles] })),
     ...(scenario.capabilities.length ? { capabilities: scenario.capabilities.map((c) => ({
@@ -369,9 +379,9 @@ export function fromContract(input) {
     if (typeof value === 'string' && !text.trim()) problems.push(`${path}: expected nonblank text.`);
     return text;
   };
-  /** @param {unknown} value @param {string} path @returns {DescribedEntity} */
-  const describedEntity = (value, path) => {
-    const e = object(value, path, ['id', 'name', 'concept'], ['description']);
+  /** @param {unknown} value @param {string} path @param {string[]} [optional] @returns {DescribedEntity} */
+  const describedEntity = (value, path, optional = []) => {
+    const e = object(value, path, ['id', 'name', 'concept'], ['description', ...optional]);
     return {
       id: string(e.id, `${path}.id`), name: string(e.name, `${path}.name`), concept: string(e.concept, `${path}.concept`),
       description: description(e.description, `${path}.description`),
@@ -457,7 +467,7 @@ export function fromContract(input) {
       concept: string(uc.concept, 'use_case.concept'),
       domain,
     },
-    goal: describedEntity(root.goal, 'goal'),
+    goal: { ...describedEntity(root.goal, 'goal', ['required_tasks']), required_tasks: [] },
     tasks: array(root.tasks, 'tasks').map((t, i) => describedEntity(t, `tasks.${i}`)),
     agents: array(root.agents, 'agents').map((value, i) => {
       const path = `agents.${i}`;
@@ -468,6 +478,11 @@ export function fromContract(input) {
       return { id: string(a.id, `${path}.id`), name: string(a.name, `${path}.name`), kind, roles };
     }),
   };
+
+  // Legacy JSON starts with all tasks selected; form state and exports are always explicit.
+  scenario.goal.required_tasks = isObject(root.goal) && 'required_tasks' in root.goal
+    ? array(root.goal.required_tasks, 'goal.required_tasks').map((id, i) => string(id, `goal.required_tasks.${i}`))
+    : scenario.tasks.map((task) => task.id);
 
   if (problems.length === 0) problems.push(...validate(scenario).map((i) => `${i.path}: ${i.message}`));
   if (problems.length) throw new Error(problems.join('\n'));

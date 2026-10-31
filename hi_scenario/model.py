@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 Identifier = Annotated[str, StringConstraints(strict=True, pattern=r"^[a-z0-9][a-z0-9_-]*$")]
@@ -27,6 +27,19 @@ class UseCase(NamedEntity):
 class Goal(NamedEntity):
     concept: Concept
     description: Name | None = None
+    # None denotes omission only; keep legacy JSON serializable without emitting invalid null.
+    required_tasks: tuple[Identifier, ...] | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None,
+    )
+
+    @field_validator("required_tasks")
+    @classmethod
+    def check_required_tasks(cls, references: tuple[Identifier, ...] | None) -> tuple[Identifier, ...]:
+        if references is None:
+            raise ValueError("required_tasks must be a nonempty list; omit it to require all tasks")
+        if len(references) != len(set(references)):
+            raise ValueError("Duplicate required task references are not allowed")
+        return references
 
 
 class Task(NamedEntity):
@@ -123,6 +136,10 @@ class Scenario(Record):
                 raise ValueError(f"Duplicate {label} IDs are not allowed")
         if {agent.kind for agent in self.agents} != {"human", "artificial"}:
             raise ValueError("A team must include a human and an artificial agent")
+        if self.goal.required_tasks is not None:
+            unknown = set(self.goal.required_tasks) - {task.id for task in self.tasks}
+            if unknown:
+                raise ValueError(f"Goal references unknown task IDs: {', '.join(sorted(unknown))}")
         for capability in self.capabilities:
             for label, references, entities in (
                 ("agent", capability.agents, self.agents),
