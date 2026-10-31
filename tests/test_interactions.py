@@ -38,7 +38,7 @@ def test_s1_adds_exactly_six_original_interaction_triples(payload):
     graph = to_rdf(Scenario.model_validate(payload))
     payload.pop("interactions")
     legacy = to_rdf(Scenario.model_validate(payload))
-    assert len(expected) == 6 and len(graph) == 123
+    assert len(expected) == 6 and len(graph) == 127
     assert set(graph) - set(legacy) == expected and set(legacy) <= set(graph)
     conforms, _, report = validate_rdf(graph)
     assert conforms, report
@@ -148,10 +148,10 @@ def test_optional_collection_execution_links_and_descriptions(payload):
     payload.pop("interactions")
     legacy = to_rdf(Scenario.model_validate(payload))
     payload["interactions"] = []
-    assert len(legacy) == 117 and set(to_rdf(Scenario.model_validate(payload))) == set(legacy)
+    assert len(legacy) == 121 and set(to_rdf(Scenario.model_validate(payload))) == set(legacy)
     payload["interactions"] = [{"id": "unlinked", "intent": "ExplanationIntent", "modality": "TextChatModality", "agents": ["human-user", "ai-assistant"], "description": None}]
     graph = to_rdf(Scenario.model_validate(payload))
-    assert len(graph) == 122 and not list(graph.triples((None, HI.hasInteractionEpisode, None)))
+    assert len(graph) == 126 and not list(graph.triples((None, HI.hasInteractionEpisode, None)))
     payload["interactions"][0]["description"] = 'An English "description".\nSecond line.'
     assert (URIRef(BASE + "interaction:unlinked"), RDFS.comment, Literal(payload["interactions"][0]["description"], lang="en")) in to_rdf(Scenario.model_validate(payload))
 

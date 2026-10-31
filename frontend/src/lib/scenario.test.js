@@ -5,6 +5,59 @@ import { emptyScenario, fromContract, newAgent, newCapability, newContext, newEx
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const copy = () => structuredClone(example);
 
+describe('optional goal and task descriptions', () => {
+  it('round-trips S1 descriptions separately from names and identities', () => {
+    const scenario = fromContract(JSON.stringify(example));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(example);
+    scenario.goal.description = ' Updated goal description ';
+    scenario.tasks[0].description = ' Updated task description ';
+    expect(toContract(scenario).goal).toEqual({ ...example.goal, description: 'Updated goal description' });
+    expect(toContract(scenario).tasks[0]).toEqual({ ...example.tasks[0], description: 'Updated task description' });
+  });
+
+  it('accepts legacy and null descriptions, and omits cleared form descriptions', () => {
+    /** @type {any} */
+    const legacy = copy();
+    delete legacy.goal.description;
+    legacy.tasks.forEach((/** @type {any} */ task) => { delete task.description; });
+    const scenario = fromContract(legacy);
+    expect(scenario.goal.description).toBe('');
+    expect(scenario.tasks.every((task) => task.description === '')).toBe(true);
+    expect(toContract(scenario)).toEqual(legacy);
+    const nullable = structuredClone(legacy);
+    nullable.goal.description = null;
+    nullable.tasks.forEach((/** @type {any} */ task) => { task.description = null; });
+    expect(toContract(fromContract(nullable))).toEqual(legacy);
+    scenario.goal.description = ' \n ';
+    scenario.tasks[0].description = ' ';
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(legacy);
+    expect(emptyScenario().goal.description).toBe('');
+    expect(emptyScenario().tasks[0].description).toBe('');
+  });
+
+  it.each(['goal', 'task'])('rejects blank or non-text %s descriptions on import', (kind) => {
+    for (const value of ['', ' \n ', 123, false, {}]) {
+      /** @type {any} */
+      const data = copy();
+      const entity = kind === 'goal' ? data.goal : data.tasks[0];
+      entity.description = value;
+      expect(() => fromContract(data)).toThrow(`${kind === 'goal' ? 'goal' : 'tasks.0'}.description:`);
+    }
+  });
+
+  it('does not allow descriptions on use cases or agents', () => {
+    for (const kind of ['use_case', 'agent']) {
+      /** @type {any} */
+      const data = copy();
+      const entity = kind === 'use_case' ? data.use_case : data.agents[0];
+      entity.description = 'Outside this increment';
+      expect(() => fromContract(data)).toThrow('description: unexpected field');
+    }
+  });
+});
+
 describe('optional interactions', () => {
   it('keeps legacy JSON compatible and omits empty interaction collections', () => {
     /** @type {any} */

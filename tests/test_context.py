@@ -44,7 +44,7 @@ def test_complete_s1_context_is_exactly_the_original_eleven_triples(payload):
     assert len(expected) == 11
     assert set(graph) - set(legacy) == expected
     assert set(legacy) <= set(graph)
-    assert len(graph) == 43 and len(legacy) == 32
+    assert len(graph) == 47 and len(legacy) == 36
     assert next(graph.objects(CONTEXT, RDFS.comment)).language == "en"
     assert (TEAM, RDF.type, HI.Agent) not in graph
     conforms, _, report = validate_rdf(graph)
@@ -110,7 +110,7 @@ def test_context_preview_returns_original_comment(payload):
     with TestClient(app) as client:
         response = client.post("/scenarios/preview", json=payload)
     assert response.status_code == 200
-    assert response.json()["triple_count"] == 43
+    assert response.json()["triple_count"] == 47
     graph = Graph().parse(data=response.json()["rdf"], format="nt")
     comment = next(graph.objects(CONTEXT, RDFS.comment))
     assert str(comment) == payload["context"]["description"] and comment.language == "en"

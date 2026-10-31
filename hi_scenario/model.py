@@ -26,10 +26,12 @@ class UseCase(NamedEntity):
 
 class Goal(NamedEntity):
     concept: Concept
+    description: Name | None = None
 
 
 class Task(NamedEntity):
     concept: Concept
+    description: Name | None = None
 
 
 class Agent(NamedEntity):

@@ -51,7 +51,7 @@ def test_s1_capabilities_reproduce_all_twenty_original_triples(payload):
     legacy = to_rdf(Scenario.model_validate(payload))
     assert len(expected) == 20
     assert set(graph) - set(legacy) == expected
-    assert set(legacy) <= set(graph) and len(graph) == 63
+    assert set(legacy) <= set(graph) and len(graph) == 67
     assert not list(graph.triples((None, HI.isEligibleForTask, None)))
     assert not list(graph.triples((None, HI.performsExecution, None)))
     conforms, _, report = validate_rdf(graph)
@@ -74,7 +74,7 @@ def test_shared_capability_has_one_identity_and_both_task_directions(payload):
     assert set(graph.objects(capability, HI.allowsTask)) == tasks
     assert set(graph.subjects(HI.requiresCapability, capability)) == tasks
     assert not list(graph.objects(capability, RDFS.label))
-    assert len(graph) == 51
+    assert len(graph) == 55
 
 
 def test_capability_identity_round_trip_and_deterministic_rdf(payload):
@@ -103,12 +103,12 @@ def test_capability_identity_round_trip_and_deterministic_rdf(payload):
 def test_capabilities_are_optional_and_can_be_unassigned(payload):
     payload.pop("capabilities")
     legacy = Scenario.model_validate(payload)
-    assert legacy.capabilities == () and len(to_rdf(legacy)) == 43
+    assert legacy.capabilities == () and len(to_rdf(legacy)) == 47
     payload["capabilities"] = []
     assert to_ntriples(to_rdf(Scenario.model_validate(payload))) == to_ntriples(to_rdf(legacy))
     payload["capabilities"] = [{"id": "unassigned", "concept": "SensingCapability"}]
     graph = to_rdf(Scenario.model_validate(payload))
-    assert len(graph) == 45
+    assert len(graph) == 49
     assert not list(graph.triples((None, HI.hasCapability, None)))
     assert not list(graph.triples((None, HI.allowsTask, None)))
 

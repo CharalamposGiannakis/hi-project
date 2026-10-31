@@ -31,12 +31,12 @@ def assert_conforms(graph):
     assert set(graph) == before  # Validation must not materialize facts in the ABox.
 
 
-def test_s1_reproduces_research_core_and_passes_shacl(payload):
+def test_s1_preserves_every_research_triple_plus_only_seven_labels_and_passes_shacl(payload):
     scenario = Scenario.model_validate(payload)
     graph = to_rdf(scenario)
     assert_conforms(graph)
 
-    # Compare the entire supported projection with S1 in the research artefact.
+    # Extract all S1 assertions, including incoming links and every predicate.
     source = Graph().parse(ONTOLOGY_DIR / "scenarios_kgs.ttl", format="turtle")
     s1 = Namespace("https://w3id.org/hi-ontology/scenarios/1/")
     identities = {
@@ -64,29 +64,41 @@ def test_s1_reproduces_research_core_and_passes_shacl(payload):
         s1.EvaluationTransparencyImpact: URIRef(BASE + "evaluation:transparency-impact"),
         s1.InteractionExplainDecision: URIRef(BASE + "interaction:explain-decision"),
     }
-    predicates = {
-        RDF.type, HI.hasUseCaseConcept, HI.hasDomainConcept, HI.hasHITeam,
-        HI.hasGoal, HI.hasMember, HI.hasGoalConcept, HI.requiresTask,
-        HI.hasTaskConcept, HI.hasAgentConcept, HI.hasRoleConcept,
-        HI.hasContextConcept, HI.hasPhenomenonConcept, HI.hasConstraintConcept,
-        HI.operatesInContext, HI.hasInfluenceOn,
-        HI.hasCapabilityConcept, HI.hasCapability, HI.allowsTask, HI.requiresCapability,
-        HI.hasExecutionConcept, HI.hasMethodConcept, HI.realizesTask,
-        HI.performedBy, HI.performsExecution, HI.towardsGoal,
-        HI.hasExperimentConcept, HI.hasMetricTested, HI.hasNullHypothesis, HI.hasAlternativeHypothesis,
-        HI.hasEvaluationConcept, HI.hasMetricConcept, HI.hasExperiment, HI.evaluatedBy,
-        HI.hasAgentInvolved, HI.hasInteractionIntentConcept, HI.hasInteractionModalityConcept, HI.hasInteractionEpisode,
-    }
+    def is_s1(term):
+        return isinstance(term, URIRef) and str(term).startswith(str(s1))
+
+    original = {(s, p, o) for s, p, o in source if is_s1(s) or is_s1(o)}
+    assert len(original) == 120
+    original_entities = {term for s, _, o in original for term in (s, o) if is_s1(term)}
+    assert len(identities) == len(set(identities.values())) == 23
+    assert set(identities) == original_entities
+    assert set(identities.values()) == set(graph.subjects())
+    for original_node, application_node in identities.items():
+        assert set(source.objects(original_node, RDF.type)) == set(graph.objects(application_node, RDF.type))
+
+    # Compare RDF terms directly: literal text, datatype, and language all matter.
     expected = {
-        (identities[s], p, identities.get(o, o))
-        for s, p, o in source
-        if s in identities and (p in predicates or (p == RDFS.comment and s in {
-            s1.ContextHealthMonitoring, s1.EvaluationDataCollectionQuality,
-            s1.EvaluationConflictAccuracy, s1.EvaluationTransparencyImpact,
-        }))
+        (identities.get(s, s), p, identities.get(o, o))
+        for s, p, o in original
     }
-    assert len(expected) == 116
-    assert {(s, p, o) for s, p, o in graph if p != RDFS.label} == expected
+    assert len(expected) == 120
+    assert not expected - set(graph)
+    additional = set(graph) - expected
+    expected_labels = {
+        (URIRef(BASE + entity), RDFS.label, Literal(name))
+        for entity, name in {
+            "use-case:personal-assistant": "Personal assistant HI system",
+            "goal:user-wellbeing": "Maintain and improve user wellbeing",
+            "task:data-collection": "Collect self-reports and sensor activity data",
+            "task:conflict-resolution": "Resolve inconsistencies between reported and sensed data",
+            "task:explanation": "Provide explanations to maintain trust and engagement",
+            "agent:human-user": "Human user",
+            "agent:ai-assistant": "AI assistant",
+        }.items()
+    }
+    assert len(additional) == 7
+    assert additional == expected_labels
+    assert len(graph) == 127
     assert len(set(graph.subjects(RDF.type, HI.UseCase))) == 1
     assert len(set(graph.subjects(RDF.type, HI.Goal))) == 1
     assert len(set(graph.subjects(RDF.type, HI.Task))) == 3
@@ -103,6 +115,59 @@ def test_s1_reproduces_research_core_and_passes_shacl(payload):
             assert (obj, RDF.type, OWL.Class) in ontology
     assert all(str(subject).startswith("urn:hi-app:") for subject in graph.subjects())
     assert not any(isinstance(term, BNode) for triple in graph for term in triple)
+
+
+@pytest.mark.parametrize("description", [None, "English description with quotes: \"example\".\nSecond line."])
+def test_goal_and_task_descriptions_preserve_labels_and_json(payload, description):
+    payload["goal"]["description"] = description
+    for task in payload["tasks"]:
+        task["description"] = description
+    scenario = Scenario.model_validate(payload)
+    assert Scenario.model_validate_json(scenario.model_dump_json()) == scenario
+    graph = to_rdf(scenario)
+    for kind, entity in [("goal", scenario.goal)] + [("task", task) for task in scenario.tasks]:
+        node = URIRef(BASE + kind + ":" + entity.id)
+        assert set(graph.objects(node, RDFS.label)) == {Literal(entity.name)}
+        assert set(graph.objects(node, RDFS.comment)) == (
+            set() if description is None else {Literal(description, lang="en")}
+        )
+    assert set(Graph().parse(data=to_ntriples(graph), format="nt")) == set(graph)
+    assert_conforms(graph)
+
+
+def test_legacy_goal_and_tasks_without_descriptions_keep_the_previous_rdf(payload):
+    complete = to_rdf(Scenario.model_validate(payload))
+    payload["goal"].pop("description")
+    for task in payload["tasks"]:
+        task.pop("description")
+    scenario = Scenario.model_validate(payload)
+    assert scenario.goal.description is None
+    assert all(task.description is None for task in scenario.tasks)
+    legacy = to_rdf(scenario)
+    nodes = {URIRef(BASE + "goal:" + scenario.goal.id)} | {URIRef(BASE + "task:" + task.id) for task in scenario.tasks}
+    assert set(legacy) == {t for t in complete if not (t[0] in nodes and t[1] == RDFS.comment)}
+    assert len(legacy) == 123
+
+
+@pytest.mark.parametrize("path", [("goal",), ("tasks", 0)])
+@pytest.mark.parametrize("description", ["", " \n ", 123, False, {}])
+def test_goal_and_task_descriptions_reject_blank_or_non_text(payload, path, description):
+    entity = payload
+    for key in path:
+        entity = entity[key]
+    entity["description"] = description
+    with pytest.raises(ValidationError):
+        Scenario.model_validate(payload)
+
+
+@pytest.mark.parametrize("path", [("use_case",), ("agents", 0)])
+def test_descriptions_do_not_extend_other_named_entities(payload, path):
+    entity = payload
+    for key in path:
+        entity = entity[key]
+    entity["description"] = "Outside this increment"
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        Scenario.model_validate(payload)
 
 
 def test_three_agents_preserve_identities_even_with_shared_names_and_roles(payload):
@@ -307,7 +372,7 @@ def test_cli_output_is_stable_across_processes_and_working_directories(tmp_path)
             env={**os.environ, "PYTHONPATH": str(ROOT), "PYTHONHASHSEED": seed},
             capture_output=True, text=True, check=True,
         )
-        assert "SHACL conforms: 123 triples" in result.stderr
+        assert "SHACL conforms: 127 triples" in result.stderr
         assert result.stdout == ""
         outputs.append(output.read_bytes())
     assert outputs[0] == outputs[1]
