@@ -10,12 +10,14 @@ from uuid import uuid4
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from rdflib import URIRef
 from rdflib.compare import isomorphic
+from rdflib.namespace import RDF
 
 from hi_scenario import api
 from hi_scenario.graphdb import scenario_graph_iri
 from hi_scenario.model import Scenario
-from hi_scenario.rdf import to_rdf
+from hi_scenario.rdf import HI, to_rdf
 from infra.graphdb import BASE_URL, ROOT, check_references, check_repository, read_graph, wait_for_server
 
 
@@ -29,6 +31,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
     original = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
     s2 = json.loads((ROOT / "examples" / "s2.json").read_text(encoding="utf-8"))
     s3 = json.loads((ROOT / "examples" / "s3.json").read_text(encoding="utf-8"))
+    s4 = json.loads((ROOT / "examples" / "s4.json").read_text(encoding="utf-8"))
     owned_ids = []
     saved = []
 
@@ -43,7 +46,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
             check_repository(database)
             check_references(database)
             with TestClient(api.app) as client:
-                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3)):
+                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3), ("s4", 2, s4)):
                     payload = new_payload(label, template)
                     if label == "three":
                         payload["agents"][0]["name"] = 'Zoë "User"\n☃'
@@ -59,6 +62,18 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
                         assert len(graph) == 195
                     if label == "s3":
                         assert len(graph) == 135
+                    if label == "s4":
+                        stored = read_graph(database, location["graph_iri"])
+                        assert len(stored) == 154
+                        assert set(stored) == set(graph)
+                        assert len(set(stored.subjects(RDF.type, None))) == 26
+                        base = f"urn:hi-app:scenario:{payload['id']}:"
+                        assert set(stored.triples((None, HI.hasInteractionEpisode, None))) == {
+                            (URIRef(base + "execution:explain-recommendations"), HI.hasInteractionEpisode, URIRef(base + "interaction:explain-recommendations")),
+                        }
+                        assert set(stored.subjects(HI.evaluatedBy, URIRef(base + "evaluation:tutor-impact"))) == {
+                            URIRef(base + "execution:" + execution["id"]) for execution in payload["executions"]
+                        }
                     assert isomorphic(graph, read_graph(database, location["graph_iri"]))
                     response = client.get(f"/scenarios/{payload['id']}/team")
                     assert response.status_code == 200, response.text
