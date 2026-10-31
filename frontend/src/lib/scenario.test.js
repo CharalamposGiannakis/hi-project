@@ -2,11 +2,36 @@ import { describe, expect, it } from 'vitest';
 import legacyExample from '../../../examples/s1.json';
 import s2 from '../../../examples/s2.json';
 import s3 from '../../../examples/s3.json';
+import s4 from '../../../examples/s4.json';
 import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('S4 reconstruction', () => {
+  it('round-trips descriptions, repeated task realizations, shared evaluation, and the linked interaction', () => {
+    const scenario = fromContract(JSON.stringify(s4));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(fromContract(JSON.stringify(toContract(scenario))))).toEqual(s4);
+    expect(scenario.tasks).toHaveLength(6);
+    expect(scenario.goal.required_tasks).toEqual(scenario.tasks.map((task) => task.id));
+    expect(scenario.tasks.map((task) => task.description)).toEqual(s4.tasks.map((task) => task.description));
+    expect(scenario.context?.description).toBe(s4.context.description);
+    expect(scenario.capabilities).toHaveLength(5);
+    expect(scenario.capabilities.find((capability) => capability.id === 'semantic-reasoning')?.tasks).toEqual(['semantic-reasoning', 'recommend-resources']);
+    expect(scenario.executions).toHaveLength(6);
+    expect(scenario.executions.filter((execution) => execution.task === 'reconstruct-trajectory').map((execution) => execution.agent)).toEqual(['human-learner', 'ai-tutor']);
+    expect(scenario.executions.some((execution) => execution.task === 'kg-query')).toBe(false);
+    expect(scenario.evaluations).toHaveLength(1);
+    expect(scenario.evaluations[0].executions).toEqual(scenario.executions.map((execution) => execution.id));
+    expect(scenario.evaluations[0].metrics).toEqual(s4.experiments[0].metrics);
+    expect(scenario.experiments[0].metrics).toHaveLength(3);
+    expect(scenario.experiments[0].hypothesis_language).toBe('en');
+    expect(scenario.interactions).toHaveLength(1);
+    expect(scenario.interactions[0].executions).toEqual(['explain-recommendations']);
+  });
+});
 
 describe('S3 reconstruction', () => {
   it('round-trips distinct jurors, shared entities, unlinked interactions, and English hypotheses', () => {

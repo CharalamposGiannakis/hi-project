@@ -1,0 +1,167 @@
+{
+  "id": "s4",
+  "use_case": {
+    "id": "autonomous-tutoring",
+    "name": "Autonomous tutoring",
+    "concept": "AutonomousTutoringUseCase",
+    "domain": "EducationDomain"
+  },
+  "goal": {
+    "id": "effective-learning",
+    "name": "Effective learning",
+    "concept": "EffectiveLearningGoal",
+    "required_tasks": ["reconstruct-trajectory", "recommend-resources", "semantic-reasoning", "bayesian-inference", "kg-query", "explain-recommendations"]
+  },
+  "context": {
+    "concept": "OnlineLearningContext",
+    "phenomena": ["TrustShiftPhenomenon", "KnowledgeMismatchPhenomenon"],
+    "constraints": ["PrivacyConstraint", "TransparencyConstraint", "AutonomyConstraint"],
+    "description": "Online personalized learning setting where an AI tutor adapts to a learner using self-reports and KGs."
+  },
+  "tasks": [
+    {
+      "id": "reconstruct-trajectory",
+      "name": "Reconstruct learning trajectory",
+      "concept": "ReconstructTrajectoryTask",
+      "description": "Reconstruct the learner’s study trajectory using self-reported history and logs."
+    },
+    {
+      "id": "recommend-resources",
+      "name": "Recommend resources",
+      "concept": "RecommendResourcesTask",
+      "description": "Select suitable learning resources based on the learner’s trajectory and knowledge state."
+    },
+    {
+      "id": "semantic-reasoning",
+      "name": "Semantic reasoning",
+      "concept": "SemanticReasoningTask",
+      "description": "Reason over semantic relations between topics, prerequisites, and learner goals."
+    },
+    {
+      "id": "bayesian-inference",
+      "name": "Bayesian inference",
+      "concept": "BayesianInferenceTask",
+      "description": "Infer a probabilistic model of the learner’s prior knowledge and interests."
+    },
+    {
+      "id": "kg-query",
+      "name": "Knowledge graph query",
+      "concept": "KnowledgeGraphQueryTask",
+      "description": "Query public knowledge graphs to retrieve background information and related topics."
+    },
+    {
+      "id": "explain-recommendations",
+      "name": "Explain recommendations",
+      "concept": "ExplanationTask",
+      "description": "Explain why specific resources and topics were recommended."
+    }
+  ],
+  "agents": [
+    { "id": "human-learner", "name": "Human learner", "kind": "human", "roles": ["LearnerRole"] },
+    { "id": "ai-tutor", "name": "AI tutor", "kind": "artificial", "roles": ["TutorRole"] }
+  ],
+  "capabilities": [
+    {
+      "id": "bayesian-reasoning",
+      "concept": "BayesianReasoningCapability",
+      "agents": ["ai-tutor"],
+      "tasks": ["bayesian-inference"]
+    },
+    {
+      "id": "semantic-reasoning",
+      "concept": "SemanticReasoningCapability",
+      "agents": ["ai-tutor"],
+      "tasks": ["semantic-reasoning", "recommend-resources"]
+    },
+    {
+      "id": "kg-query",
+      "concept": "KnowledgeGraphQueryingCapability",
+      "agents": ["ai-tutor"],
+      "tasks": ["kg-query"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["ai-tutor"],
+      "tasks": ["explain-recommendations"]
+    },
+    {
+      "id": "self-reporting",
+      "concept": "SelfReportingCapability",
+      "agents": ["human-learner"],
+      "tasks": ["reconstruct-trajectory"]
+    }
+  ],
+  "executions": [
+    {
+      "id": "provide-learning-history",
+      "concept": "ProvideLearningHistoryTaskExecution",
+      "task": "reconstruct-trajectory",
+      "agent": "human-learner",
+      "method": "DataCollectionMethod"
+    },
+    {
+      "id": "reconstruct-trajectory",
+      "concept": "ReconstructTrajectoryTaskExecution",
+      "task": "reconstruct-trajectory",
+      "agent": "ai-tutor",
+      "method": "KnowledgeGraphQueryMethod"
+    },
+    {
+      "id": "bayesian-modeling",
+      "concept": "BayesianModelingTaskExecution",
+      "task": "bayesian-inference",
+      "agent": "ai-tutor",
+      "method": "BayesianLogicMethod"
+    },
+    {
+      "id": "semantic-reasoning",
+      "concept": "SemanticReasoningTaskExecution",
+      "task": "semantic-reasoning",
+      "agent": "ai-tutor",
+      "method": "SemanticLinkingMethod"
+    },
+    {
+      "id": "recommend-resources",
+      "concept": "RecommendResourcesTaskExecution",
+      "task": "recommend-resources",
+      "agent": "ai-tutor",
+      "method": "SemanticLinkingMethod"
+    },
+    {
+      "id": "explain-recommendations",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-recommendations",
+      "agent": "ai-tutor",
+      "method": "PostHocExplanationMethod"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "tutoring-relevance",
+      "concept": "OnlineTutoringExperiment",
+      "metrics": ["RecommendationRelevanceMetric", "LearningGainMetric", "ExplanationClarityMetric"],
+      "null_hypothesis": "Personalized AI tutoring does not significantly improve relevance or learning gains over a non-personalized baseline.",
+      "alternative_hypothesis": "Combining Bayesian inference with semantic reasoning yields higher recommendation relevance, learning gains, and clearer explanations.",
+      "hypothesis_language": "en"
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "tutor-impact",
+      "concept": "TutorImpactEvaluation",
+      "metrics": ["RecommendationRelevanceMetric", "LearningGainMetric", "ExplanationClarityMetric"],
+      "experiment": "tutoring-relevance",
+      "executions": ["provide-learning-history", "reconstruct-trajectory", "bayesian-modeling", "semantic-reasoning", "recommend-resources", "explain-recommendations"]
+    }
+  ],
+  "interactions": [
+    {
+      "id": "explain-recommendations",
+      "intent": "ExplanationIntent",
+      "modality": "TextChatModality",
+      "agents": ["ai-tutor", "human-learner"],
+      "executions": ["explain-recommendations"]
+    }
+  ]
+}

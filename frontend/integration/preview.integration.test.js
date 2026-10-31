@@ -10,12 +10,13 @@ import { flushSync, mount, unmount } from 'svelte';
 import legacyExample from '../../examples/s1.json';
 import s2 from '../../examples/s2.json';
 import s3 from '../../examples/s3.json';
+import s4 from '../../examples/s4.json';
 import { requestPreview } from '../src/lib/api.js';
 import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
-const reconstructions = [{ label: 'S2', canonical: s2, triples: 195 }, { label: 'S3', canonical: s3, triples: 135 }];
+const reconstructions = [{ label: 'S2', canonical: s2, triples: 195 }, { label: 'S3', canonical: s3, triples: 135 }, { label: 'S4', canonical: s4, triples: 154 }];
 
 /** @type {{ url: string, stop: () => void } | undefined} */
 let backend;
@@ -158,6 +159,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     selectValue(document, 'Context type', canonical.context.concept);
     selectChecks(document, 'Phenomena', canonical.context.phenomena);
     selectChecks(document, 'Constraints', canonical.context.constraints);
+    if ('description' in canonical.context && typeof canonical.context.description === 'string') {
+      const context = /** @type {Element} */ (document.querySelector('#context-description')?.closest('fieldset'));
+      enterText(context, 'Description in English (optional)', canonical.context.description);
+    }
     canonical.tasks.forEach((task, i) => {
       if (i > 0) clickButton('Add task');
       const id = draft().tasks[i].id;
@@ -165,6 +170,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       const section = /** @type {Element} */ (document.querySelector(`#task-${id}`)?.closest('section'));
       enterText(section, 'Name', task.name);
       selectValue(section, 'Task type', task.concept);
+      if ('description' in task && typeof task.description === 'string') enterText(section, 'Description in English (optional)', task.description);
     });
     selectChecks(goal, 'Tasks required by this goal', canonical.goal.required_tasks.map((id) => ids.tasks[id]));
     for (const agent of canonical.agents) {
@@ -218,7 +224,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       selectValue(section, 'Interaction intent', interaction.intent);
       selectValue(section, 'Interaction modality', interaction.modality);
       selectChecks(section, 'Participating agents', interaction.agents.map((id) => ids.agents[id]));
-      selectChecks(section, 'Related executions (optional)', []);
+      selectChecks(section, 'Related executions (optional)', interaction.executions.map((id) => ids.executions[id]));
     }
     const entered = draft();
     // Every field and relationship must match the canonical example modulo app-assigned IDs.
@@ -232,7 +238,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       executions: canonical.executions.map((execution) => ({ ...execution, id: ids.executions[execution.id], task: ids.tasks[execution.task], agent: ids.agents[execution.agent] })),
       experiments: canonical.experiments.map((experiment) => ({ ...experiment, id: ids.experiments[experiment.id] })),
       evaluations: canonical.evaluations.map((evaluation) => ({ ...evaluation, id: ids.evaluations[evaluation.id], experiment: ids.experiments[evaluation.experiment], executions: evaluation.executions.map((id) => ids.executions[id]) })),
-      interactions: canonical.interactions.map((interaction) => ({ ...interaction, id: ids.interactions[interaction.id], agents: interaction.agents.map((id) => ids.agents[id]) })),
+      interactions: canonical.interactions.map((interaction) => ({ ...interaction, id: ids.interactions[interaction.id], agents: interaction.agents.map((id) => ids.agents[id]), executions: interaction.executions.map((id) => ids.executions[id]) })),
     };
     expect(new Set(Object.values(ids.agents)).size).toBe(canonical.agents.length);
     expect(entered.agents).toHaveLength(canonical.agents.length);
@@ -244,7 +250,11 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(text()).toContain(`${triples} triples · not saved`);
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(canonical.goal.required_tasks.length);
-    expect(rdf).not.toContain('<https://w3id.org/hi-ontology#hasInteractionEpisode>');
+    expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#hasInteractionEpisode>/g) ?? []).toHaveLength(canonical.interactions.reduce((sum, interaction) => sum + interaction.executions.length, 0));
+    for (const task of canonical.tasks) {
+      if ('description' in task && typeof task.description === 'string') expect(rdf).toContain(`<urn:hi-app:scenario:${entered.id}:task:${ids.tasks[task.id]}> <http://www.w3.org/2000/01/rdf-schema#comment> ${JSON.stringify(task.description)}@en .`);
+    }
+    if ('description' in canonical.context && typeof canonical.context.description === 'string') expect(rdf).toContain(`<urn:hi-app:scenario:${entered.id}:context> <http://www.w3.org/2000/01/rdf-schema#comment> ${JSON.stringify(canonical.context.description)}@en .`);
     const preview = await requestPreview(expected, { baseUrl });
     expect(preview.kind).toBe('ok');
     if (preview.kind !== 'ok') throw new Error(JSON.stringify(preview));
