@@ -4,11 +4,39 @@ import s2 from '../../../examples/s2.json';
 import s3 from '../../../examples/s3.json';
 import s4 from '../../../examples/s4.json';
 import s5 from '../../../examples/s5.json';
+import s6 from '../../../examples/s6.json';
 import { concepts, emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('S6 reconstruction', () => {
+  it('round-trips shared entities, separate episodes, exact HINT identifiers, and plain hypotheses', () => {
+    const scenario = fromContract(JSON.stringify(s6));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(fromContract(JSON.stringify(toContract(scenario))))).toEqual(s6);
+    expect(scenario.tasks).toHaveLength(5);
+    expect(scenario.goal.required_tasks).toEqual(scenario.tasks.map((task) => task.id));
+    expect(scenario.capabilities).toHaveLength(5);
+    expect(scenario.capabilities.find((capability) => capability.id === 'explaining')?.agents).toEqual(['ai-building-agent', 'human-grid-operator']);
+    expect(scenario.executions).toHaveLength(6);
+    expect(scenario.executions.filter((execution) => execution.task === 'explain-decision').map((execution) => execution.agent)).toEqual(['ai-building-agent', 'human-grid-operator']);
+    expect(scenario.evaluations).toHaveLength(1);
+    expect(scenario.evaluations[0].executions).toEqual(scenario.executions.map((execution) => execution.id));
+    expect(scenario.evaluations[0].metrics).toEqual(s6.experiments[0].metrics);
+    expect(scenario.experiments).toHaveLength(1);
+    expect(scenario.experiments[0].metrics).toHaveLength(4);
+    expect(scenario.experiments[0].hypothesis_language).toBe('');
+    expect(toContract(scenario).experiments?.[0]).not.toHaveProperty('hypothesis_language');
+    expect(scenario.interactions.map((interaction) => [interaction.id, interaction.executions])).toEqual([
+      ['negotiation', ['negotiate']], ['explain-allocation', ['explain-decision']],
+    ]);
+    expect(scenario.interactions.every((interaction) => interaction.agents.length === 2 && !interaction.executions.includes('explain-operator'))).toBe(true);
+    expect(scenario.tasks.find((task) => task.id === 'negotiate-allocation')?.concept).toBe('AllocationNegotationTask');
+    expect(scenario.evaluations[0].concept).toBe('NegotationImpactEvaluation');
+  });
+});
 
 describe('S5 reconstruction', () => {
   it('offers generic Evaluation and round-trips distinct evaluations, shared capability, episodes, and literals', () => {

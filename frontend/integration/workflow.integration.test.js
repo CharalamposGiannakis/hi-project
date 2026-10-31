@@ -9,6 +9,7 @@ import s2 from '../../examples/s2.json';
 import s3 from '../../examples/s3.json';
 import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
+import s6 from '../../examples/s6.json';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -134,6 +135,61 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Svelte', () => {
+  it('S6: saves shared Explanation, six evaluation links, and distinct episodes without linking the human explanation', async () => {
+    const id = `${RUN}-s6`;
+    await mountApp(api);
+    await openJson({ ...structuredClone(s6), id });
+    click('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('150 triples · not saved');
+    expect(await storedTriples(id)).toBe(0);
+    await saveAndTrack(id);
+    expect(text()).toContain('Saved in GraphDB · repository hi · 150 triples');
+    expect(await storedTriples(id)).toBe(150);
+    const base = `urn:hi-app:scenario:${id}:`;
+    const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
+    const expected = [
+      'team', 'context', `use-case:${s6.use_case.id}`, `goal:${s6.goal.id}`,
+      ...s6.agents.map((agent) => `agent:${agent.id}`), ...s6.tasks.map((task) => `task:${task.id}`),
+      ...s6.capabilities.map((capability) => `capability:${capability.id}`), ...s6.executions.map((execution) => `execution:${execution.id}`),
+      ...s6.experiments.map((experiment) => `experiment:${experiment.id}`), ...s6.evaluations.map((evaluation) => `evaluation:${evaluation.id}`),
+      ...s6.interactions.map((interaction) => `interaction:${interaction.id}`),
+    ];
+    expect(typed).toHaveLength(26);
+    expect(new Set(typed.map((row) => row.entity.value))).toEqual(new Set(expected.map((entity) => base + entity)));
+    const shared = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?agent ?capability WHERE { GRAPH <${graphIri(id)}> {
+        ?agent hi:hasCapability ?capability .
+        ?capability hi:hasCapabilityConcept <https://w3id.org/hi-thesaurus/ExplainingCapability> .
+      } }
+    `);
+    expect(shared).toHaveLength(2);
+    expect(new Set(shared.map((row) => row.capability.value))).toEqual(new Set([`${base}capability:explaining`]));
+    expect(new Set(shared.map((row) => row.agent.value))).toEqual(new Set(s6.agents.map((agent) => `${base}agent:${agent.id}`)));
+    const evaluated = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?evaluation WHERE { GRAPH <${graphIri(id)}> { ?execution hi:evaluatedBy ?evaluation } }
+    `);
+    expect(evaluated).toHaveLength(6);
+    expect(new Set(evaluated.map((row) => row.execution.value))).toEqual(new Set(s6.executions.map((execution) => `${base}execution:${execution.id}`)));
+    expect(new Set(evaluated.map((row) => row.evaluation.value))).toEqual(new Set([`${base}evaluation:negotiation-impact`]));
+    const episodes = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?interaction WHERE { GRAPH <${graphIri(id)}> { ?execution hi:hasInteractionEpisode ?interaction } }
+    `);
+    expect(episodes).toHaveLength(2);
+    expect(episodes.map((row) => [row.execution.value, row.interaction.value])).toEqual(expect.arrayContaining([
+      [`${base}execution:negotiate`, `${base}interaction:negotiation`],
+      [`${base}execution:explain-decision`, `${base}interaction:explain-allocation`],
+    ]));
+    expect(episodes.some((row) => row.execution.value === `${base}execution:explain-operator`)).toBe(false);
+    click('Show team composition (CQ1)');
+    await until(() => text().includes('CQ1 over the saved graph'));
+    expect(teamRows()).toHaveLength(2);
+    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s6.agents.map((agent) => agent.name)));
+  }, 60_000);
+
   it('S5: saves all identities, shared Explanation capability, separate evaluation groups, and two dialogue episodes', async () => {
     const id = `${RUN}-s5`;
     await mountApp(api);
