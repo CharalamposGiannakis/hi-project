@@ -3,11 +3,44 @@ import legacyExample from '../../../examples/s1.json';
 import s2 from '../../../examples/s2.json';
 import s3 from '../../../examples/s3.json';
 import s4 from '../../../examples/s4.json';
-import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
+import s5 from '../../../examples/s5.json';
+import { concepts, emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('S5 reconstruction', () => {
+  it('offers generic Evaluation and round-trips distinct evaluations, shared capability, episodes, and literals', () => {
+    expect(concepts.Evaluation.find((concept) => concept.id === 'Evaluation')?.label).toBe('Evaluation');
+    const scenario = fromContract(JSON.stringify(s5));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(fromContract(JSON.stringify(toContract(scenario))))).toEqual(s5);
+    expect(scenario.goal.required_tasks).toEqual(scenario.tasks.map((task) => task.id));
+    expect(scenario.capabilities).toHaveLength(4);
+    expect(scenario.capabilities.find((capability) => capability.id === 'explaining')?.agents).toEqual(['ai-diagnostic-assistant', 'human-clinician']);
+    expect(scenario.executions).toHaveLength(5);
+    expect(scenario.executions.filter((execution) => execution.task === 'explain-reasoning').map((execution) => execution.agent)).toEqual(['ai-diagnostic-assistant', 'human-clinician']);
+    expect(scenario.evaluations.map((evaluation) => evaluation.concept)).toEqual(['Evaluation', 'Evaluation']);
+    expect(new Set(scenario.evaluations.map((evaluation) => evaluation.id)).size).toBe(2);
+    expect(scenario.evaluations.map((evaluation) => evaluation.executions)).toEqual([
+      ['symptom-embedding', 'candidate-generation', 'hypothesis-comparison'], ['explain-ai', 'explain-human'],
+    ]);
+    expect(scenario.evaluations.map((evaluation) => evaluation.experiment)).toEqual(['diagnosis-accuracy', 'explanation-clarity']);
+    expect(scenario.experiments.map((experiment) => experiment.hypothesis_language)).toEqual(['en', 'en']);
+    expect(scenario.interactions[0].executions).toEqual(['explain-ai', 'explain-human']);
+    expect([scenario.context?.description, ...scenario.experiments.map((e) => e.description), ...scenario.evaluations.map((e) => e.description), scenario.interactions[0].description].every(Boolean)).toBe(true);
+  });
+
+  it.each(['DiagnosisAccuracyMetric', 'ExplanationClarityMetric'])('still rejects %s as an Evaluation concept', (metric) => {
+    const source = structuredClone(s5);
+    source.evaluations[0].concept = metric;
+    expect(() => fromContract(source)).toThrow('not a HINT Evaluation concept');
+    const scenario = fromContract(s5);
+    scenario.evaluations[0].concept = metric;
+    expect(validate(scenario).map((issue) => issue.path)).toContain('evaluations.0.concept');
+  });
+});
 
 describe('S4 reconstruction', () => {
   it('round-trips descriptions, repeated task realizations, shared evaluation, and the linked interaction', () => {

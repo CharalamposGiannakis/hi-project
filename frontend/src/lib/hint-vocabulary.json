@@ -920,6 +920,11 @@
       "definition": "An evaluation assessing the quality, completeness, and reliability of collected data."
     },
     {
+      "id": "Evaluation",
+      "label": "Evaluation",
+      "definition": "The process of assessing the performance, effectiveness, or impact of Hybrid Intelligence systems."
+    },
+    {
       "id": "FineManipulationEvaluation",
       "label": "Fine Manipulation Evaluation",
       "definition": "Evaluation of precision and correctness for fine manipulation tasks such as unlocking and precise insertion."

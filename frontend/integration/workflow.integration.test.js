@@ -8,6 +8,7 @@ import example from '../../examples/s1.json';
 import s2 from '../../examples/s2.json';
 import s3 from '../../examples/s3.json';
 import s4 from '../../examples/s4.json';
+import s5 from '../../examples/s5.json';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -133,6 +134,58 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Svelte', () => {
+  it('S5: saves all identities, shared Explanation capability, separate evaluation groups, and two dialogue episodes', async () => {
+    const id = `${RUN}-s5`;
+    await mountApp(api);
+    await openJson({ ...structuredClone(s5), id });
+    click('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('139 triples · not saved');
+    expect(await storedTriples(id)).toBe(0);
+    await saveAndTrack(id);
+    expect(text()).toContain('Saved in GraphDB · repository hi · 139 triples');
+    expect(await storedTriples(id)).toBe(139);
+    const base = `urn:hi-app:scenario:${id}:`;
+    const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
+    const expected = [
+      'team', 'context', `use-case:${s5.use_case.id}`, `goal:${s5.goal.id}`,
+      ...s5.agents.map((agent) => `agent:${agent.id}`), ...s5.tasks.map((task) => `task:${task.id}`),
+      ...s5.capabilities.map((capability) => `capability:${capability.id}`), ...s5.executions.map((execution) => `execution:${execution.id}`),
+      ...s5.experiments.map((experiment) => `experiment:${experiment.id}`), ...s5.evaluations.map((evaluation) => `evaluation:${evaluation.id}`),
+      ...s5.interactions.map((interaction) => `interaction:${interaction.id}`),
+    ];
+    expect(typed).toHaveLength(24);
+    expect(new Set(typed.map((row) => row.entity.value))).toEqual(new Set(expected.map((entity) => base + entity)));
+    const shared = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?agent WHERE { GRAPH <${graphIri(id)}> { ?agent hi:hasCapability <${base}capability:explaining> } }
+    `);
+    expect(new Set(shared.map((row) => row.agent.value))).toEqual(new Set(s5.agents.map((agent) => `${base}agent:${agent.id}`)));
+    const evaluations = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?evaluation ?experiment WHERE { GRAPH <${graphIri(id)}> {
+        ?execution hi:evaluatedBy ?evaluation . ?evaluation hi:hasExperiment ?experiment .
+      } }
+    `);
+    expect(evaluations).toHaveLength(5);
+    for (const evaluation of s5.evaluations) {
+      const rows = evaluations.filter((row) => row.evaluation.value === `${base}evaluation:${evaluation.id}`);
+      expect(new Set(rows.map((row) => row.execution.value))).toEqual(new Set(evaluation.executions.map((execution) => `${base}execution:${execution}`)));
+      expect(new Set(rows.map((row) => row.experiment.value))).toEqual(new Set([`${base}experiment:${evaluation.experiment}`]));
+    }
+    const episodes = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?interaction WHERE { GRAPH <${graphIri(id)}> { ?execution hi:hasInteractionEpisode ?interaction } }
+    `);
+    expect(episodes).toHaveLength(2);
+    expect(new Set(episodes.map((row) => row.execution.value))).toEqual(new Set([`${base}execution:explain-ai`, `${base}execution:explain-human`]));
+    expect(new Set(episodes.map((row) => row.interaction.value))).toEqual(new Set([`${base}interaction:clinical-dialogue`]));
+    click('Show team composition (CQ1)');
+    await until(() => text().includes('CQ1 over the saved graph'));
+    expect(teamRows()).toHaveLength(2);
+    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s5.agents.map((agent) => agent.name)));
+  }, 60_000);
+
   it('S4: saves all 26 identities, six evaluation links, and the specific explanation interaction', async () => {
     const id = `${RUN}-s4`;
     await mountApp(api);

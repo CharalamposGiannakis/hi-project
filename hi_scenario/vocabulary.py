@@ -24,12 +24,16 @@ def _text(term: URIRef, predicate: URIRef) -> str:
 
 
 def concepts(category: str) -> list[dict[str, str]]:
-    """List concepts below `category`, mirroring the check in `rdf._concept`."""
+    """List specific concepts, plus the backend-valid generic Evaluation fallback."""
     vocabulary = _thesaurus()
     root = HINT[category]
     found = []
     for term in vocabulary.subjects(RDF.type, SKOS.Concept):
-        if term == root or root not in set(vocabulary.transitive_objects(term, SKOS.broader)):
+        if term == root:
+            # Avoid requiring an unsupported subtype when only generic evaluation is known.
+            if category != "Evaluation":
+                continue
+        elif root not in set(vocabulary.transitive_objects(term, SKOS.broader)):
             continue
         found.append({
             "id": str(term).removeprefix(str(HINT)),
