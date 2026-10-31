@@ -1041,5 +1041,64 @@
       "label": "User Comfort Metric",
       "definition": "A metric that quantifies the user comfort."
     }
+  ],
+  "InteractionIntent": [
+    {
+      "id": "AnswerIntent",
+      "label": "Answer Intent",
+      "definition": "An intent centered around answering."
+    },
+    {
+      "id": "DeliberationIntent",
+      "label": "Deliberation Intent",
+      "definition": "An intent centered around group deliberation and decision-making during interactions."
+    },
+    {
+      "id": "ExplanationIntent",
+      "label": "Explanation Intent",
+      "definition": "An intent focused on providing explanations or justifications during interactions."
+    },
+    {
+      "id": "GuideIntent",
+      "label": "Guide Intent",
+      "definition": "An intent centered around guiding."
+    },
+    {
+      "id": "NegotiationIntent",
+      "label": "Negotiation Intent",
+      "definition": "An intent centered around negotiation."
+    }
+  ],
+  "InteractionModality": [
+    {
+      "id": "DashboardModality",
+      "label": "Dashboard Modality",
+      "definition": "An interaction modality that involves a dashboard."
+    },
+    {
+      "id": "NetworkProtocolModality",
+      "label": "Network Protocol Modality",
+      "definition": "An interaction modality that involves network protocol."
+    },
+    {
+      "id": "TextChatModality",
+      "label": "Text Chat Modality",
+      "definition": "An interaction modality that involves a text chat."
+    },
+    {
+      "id": "VerbalDialogueModality",
+      "label": "Verbal Dialogue Modality",
+      "definition": "An interaction modality that involves verbal communication."
+    },
+    {
+      "id": "VirtualRealityModality",
+      "label": "Virtual Reality Modality",
+      "definition": "An interaction modality that involves virtual Realier."
+    },
+    {
+      "id": "VoiceChatModality",
+      "label": "Voice Chat Modality",
+      "definition": "An interaction modality that involves voice char."
+    }
   ]
 }

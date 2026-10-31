@@ -78,6 +78,22 @@ class Evaluation(Record):
     description: Name | None = None
 
 
+class Interaction(Record):
+    id: Identifier
+    intent: Concept
+    modality: Concept
+    agents: tuple[Identifier, ...] = Field(min_length=2)
+    executions: tuple[Identifier, ...] = ()
+    description: Name | None = None
+
+    @model_validator(mode="after")
+    def check_distinct_references(self) -> Self:
+        for label, references in (("agent", self.agents), ("execution", self.executions)):
+            if len(references) != len(set(references)):
+                raise ValueError(f"Duplicate interaction {label} references are not allowed")
+        return self
+
+
 class Scenario(Record):
     # IDs are assigned by the application and retained across edits.
     id: Identifier
@@ -90,6 +106,7 @@ class Scenario(Record):
     executions: tuple[Execution, ...] = ()
     experiments: tuple[Experiment, ...] = ()
     evaluations: tuple[Evaluation, ...] = ()
+    interactions: tuple[Interaction, ...] = ()
 
     @model_validator(mode="after")
     def check_team_and_identities(self) -> Self:
@@ -97,6 +114,7 @@ class Scenario(Record):
             ("task", self.tasks), ("agent", self.agents),
             ("capability", self.capabilities), ("execution", self.executions),
             ("experiment", self.experiments), ("evaluation", self.evaluations),
+            ("interaction", self.interactions),
         ):
             ids = [entity.id for entity in entities]
             if len(ids) != len(set(ids)):
@@ -123,4 +141,12 @@ class Scenario(Record):
             unknown = set(evaluation.executions) - {execution.id for execution in self.executions}
             if unknown:
                 raise ValueError(f"Evaluation {evaluation.id} references unknown execution IDs: {', '.join(sorted(unknown))}")
+        for interaction in self.interactions:
+            for label, references, entities in (
+                ("agent", interaction.agents, self.agents),
+                ("execution", interaction.executions, self.executions),
+            ):
+                unknown = set(references) - {entity.id for entity in entities}
+                if unknown:
+                    raise ValueError(f"Interaction {interaction.id} references unknown {label} IDs: {', '.join(sorted(unknown))}")
         return self

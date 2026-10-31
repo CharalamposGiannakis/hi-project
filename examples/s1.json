@@ -132,6 +132,15 @@
       "description": "Evaluates how explanation clarity influences user trust under inconsistent data."
     }
   ],
+  "interactions": [
+    {
+      "id": "explain-decision",
+      "intent": "ExplanationIntent",
+      "modality": "VerbalDialogueModality",
+      "agents": ["ai-assistant", "human-user"],
+      "executions": ["explanation"]
+    }
+  ],
   "agents": [
     {
       "id": "human-user",

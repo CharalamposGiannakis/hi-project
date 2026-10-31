@@ -26,6 +26,7 @@ def payload():
     data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
     data.pop("experiments", None)
     data.pop("evaluations", None)
+    data.pop("interactions", None)
     return data
 
 

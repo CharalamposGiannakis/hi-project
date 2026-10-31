@@ -25,6 +25,7 @@ def payload():
     data.pop("executions", None)
     data.pop("experiments", None)
     data.pop("evaluations", None)
+    data.pop("interactions", None)
     return data
 
 

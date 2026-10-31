@@ -20,7 +20,9 @@ BASE = "urn:hi-app:scenario:s1:"
 
 @pytest.fixture
 def payload():
-    return json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    data.pop("interactions", None)  # Isolate assessment patterns from interaction links.
+    return data
 
 
 def test_s1_adds_exactly_thirty_three_original_assessment_triples(payload):
