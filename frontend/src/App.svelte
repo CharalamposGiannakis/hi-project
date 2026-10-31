@@ -194,10 +194,11 @@
         <label for="goal-description">Description in English (optional)</label>
         <textarea id="goal-description" rows="2" bind:value={scenario.goal.description}></textarea>
       </div>
+      <ReferenceChecklist label="Tasks required by this goal" options={scenario.tasks} bind:values={scenario.goal.required_tasks} error={errorFor('goal.required_tasks')} />
     </fieldset>
 
     <fieldset>
-      <legend>Tasks required by the goal</legend>
+      <legend>Tasks</legend>
       {#if errorFor('tasks')}<p class="error">{errorFor('tasks')}</p>{/if}
       {#each scenario.tasks as task, i (task.id)}
         <section class="item">

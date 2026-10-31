@@ -1,9 +1,66 @@
 import { describe, expect, it } from 'vitest';
-import example from '../../../examples/s1.json';
-import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, removeEntity, toContract, validate } from './scenario.js';
+import legacyExample from '../../../examples/s1.json';
+import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
+const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('explicit goal task requirements', () => {
+  it('initializes legacy JSON with all tasks selected and exports explicit IDs', () => {
+    const scenario = fromContract(JSON.stringify(legacyExample));
+    expect(scenario.goal.required_tasks).toEqual(example.goal.required_tasks);
+    expect(toContract(scenario)).toEqual(example);
+    expect(validate(scenario)).toEqual([]);
+    const fresh = emptyScenario();
+    expect(fresh.goal.required_tasks).toEqual([fresh.tasks[0].id]);
+  });
+
+  it('round-trips an explicit subset independently of capabilities and executions', () => {
+    const data = copy();
+    data.goal.required_tasks = ['data-collection'];
+    const scenario = fromContract(JSON.stringify(data));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(data);
+    expect(scenario.tasks).toHaveLength(3);
+    expect(scenario.executions.some((execution) => !scenario.goal.required_tasks.includes(execution.task))).toBe(true);
+  });
+
+  it.each([[], null, ['data-collection', 'data-collection'], ['missing'], ['data-collection', 'missing'], 'data-collection', [123], ['task:injected']])('rejects invalid requirement JSON: %j', (references) => {
+    expect(() => fromContract({ ...copy(), goal: { ...example.goal, required_tasks: references } })).toThrow('goal.required_tasks');
+  });
+
+  it('validates empty, duplicate, and unknown selections and allows repair', () => {
+    const scenario = fromContract(copy());
+    for (const references of [[], ['data-collection', 'data-collection'], ['missing']]) {
+      scenario.goal.required_tasks = references;
+      expect(validate(scenario).map((issue) => issue.path)).toContain('goal.required_tasks');
+    }
+    scenario.goal.required_tasks = ['explanation'];
+    expect(validate(scenario)).toEqual([]);
+  });
+
+  it('does not select added tasks and removes only references to deleted tasks', () => {
+    const scenario = fromContract(legacyExample);
+    const task = { ...newTask(), name: 'Supporting task', concept: 'DataCollectionTask' };
+    scenario.tasks.push(task);
+    expect(scenario.goal.required_tasks).toEqual(example.goal.required_tasks);
+    expect(validate(scenario)).toEqual([]);
+    removeEntity(scenario, 'tasks', task.id); // Non-required task.
+    expect(scenario.goal.required_tasks).toEqual(example.goal.required_tasks);
+    scenario.goal.required_tasks = ['data-collection'];
+    removeEntity(scenario, 'tasks', 'data-collection');
+    expect(scenario.goal.required_tasks).toEqual([]);
+    expect(scenario.tasks).toHaveLength(2);
+    expect(validate(scenario).map((issue) => issue.path)).toContain('goal.required_tasks');
+    expect(toContract(scenario).goal.required_tasks).toEqual([]); // Never fall back to all tasks.
+  });
+
+  it('does not extend task records with goal relationship fields', () => {
+    const data = copy();
+    expect(() => fromContract({ ...data, tasks: [{ ...data.tasks[0], required_tasks: ['data-collection'] }] })).toThrow('required_tasks: unexpected field');
+  });
+});
 
 describe('optional goal and task descriptions', () => {
   it('round-trips S1 descriptions separately from names and identities', () => {

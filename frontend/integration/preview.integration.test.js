@@ -7,10 +7,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
-import example from '../../examples/s1.json';
+import legacyExample from '../../examples/s1.json';
 import { requestPreview } from '../src/lib/api.js';
 import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
+
+const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 
 /** @type {{ url: string, stop: () => void } | undefined} */
 let backend;
@@ -69,13 +71,81 @@ function selectValue(root, label, value) {
 /** @param {ParentNode} root @param {string} label @param {string} value */
 function enterText(root, label, value) {
   const control = [...root.querySelectorAll('label')].find((l) => l.textContent?.trim() === label)?.control;
-  if (!(control instanceof HTMLTextAreaElement)) throw new Error(`No textarea "${label}"`);
+  if (!(control instanceof HTMLTextAreaElement || control instanceof HTMLInputElement)) throw new Error(`No text input "${label}"`);
   control.value = value;
   control.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('selects goal requirements explicitly and previews added tasks without requiring them', async () => {
+    await mountApp();
+    clickButton('Load S1 example'); // Legacy JSON initializes all three requirements.
+    const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
+    const checklist = /** @type {Element} */ (goal.querySelector('fieldset'));
+    expect(checklist.querySelector('legend')?.textContent).toBe('Tasks required by this goal');
+    expect(checklist.querySelectorAll('input:checked')).toHaveLength(3);
+    for (const id of ['conflict-resolution', 'explanation']) {
+      /** @type {HTMLInputElement} */ (checklist.querySelector(`input[value="${id}"]`)).click();
+      flushSync();
+    }
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').goal.required_tasks).toEqual(['data-collection']);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('125 triples · not saved');
+    let rdf = document.querySelector('pre.rdf')?.textContent ?? '';
+    expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(1);
+    for (const task of example.tasks) {
+      expect(rdf).toContain(`<urn:hi-app:scenario:s1:task:${task.id}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/hi-ontology#Task> .`);
+    }
+    expect(rdf).toContain('<urn:hi-app:scenario:s1:execution:explanation> <https://w3id.org/hi-ontology#realizesTask> <urn:hi-app:scenario:s1:task:explanation> .');
+
+    clickButton('Add task');
+    const draft = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
+    const id = draft.tasks.at(-1).id;
+    const taskSection = /** @type {Element} */ (document.querySelector(`#task-${id}`)?.closest('section'));
+    enterText(taskSection, 'Name', 'Supporting task');
+    selectValue(taskSection, 'Task type', 'DataCollectionTask');
+    expect(draft.goal.required_tasks).toEqual(['data-collection']);
+    expect(/** @type {HTMLInputElement} */ (checklist.querySelector(`input[value="${id}"]`)).checked).toBe(false);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('128 triples · not saved');
+    rdf = document.querySelector('pre.rdf')?.textContent ?? '';
+    expect(rdf).toContain(`<urn:hi-app:scenario:s1:task:${id}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/hi-ontology#Task> .`);
+    expect(rdf).not.toContain(`<urn:hi-app:scenario:s1:goal:user-wellbeing> <https://w3id.org/hi-ontology#requiresTask> <urn:hi-app:scenario:s1:task:${id}> .`);
+  });
+
+  it('removes task references and blocks preview and save until an empty requirement selection is repaired', async () => {
+    await mountApp();
+    const data = { ...structuredClone(example), capabilities: [], executions: [], evaluations: [], experiments: [], interactions: [] };
+    data.goal.required_tasks = ['data-collection'];
+    const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
+    Object.defineProperty(input, 'files', { value: [{ name: 'requirements.json', text: async () => JSON.stringify(data) }] });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => text().includes('Loaded requirements.json'));
+    for (const id of ['conflict-resolution', 'data-collection']) {
+      const section = /** @type {Element} */ (document.querySelector(`#task-${id}`)?.closest('section'));
+      /** @type {HTMLButtonElement} */ (section.querySelector('button')).click();
+      flushSync();
+      expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').goal.required_tasks).toEqual(id === 'conflict-resolution' ? ['data-collection'] : []);
+    }
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    try {
+      clickButton('Validate & preview RDF');
+      clickButton('Save to GraphDB');
+      expect(text()).toContain('Choose at least one required task.');
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally { fetchSpy.mockRestore(); }
+    const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
+    /** @type {HTMLInputElement} */ (goal.querySelector('input[value="explanation"]')).click();
+    flushSync();
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').goal.required_tasks).toEqual(['explanation']);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(document.querySelector('pre.rdf')?.textContent).toContain('<urn:hi-app:scenario:s1:goal:user-wellbeing> <https://w3id.org/hi-ontology#requiresTask> <urn:hi-app:scenario:s1:task:explanation> .');
+  });
+
   it('enters all four S1 goal and task descriptions and previews English comments independently of names', async () => {
     await mountApp();
     clickButton('Load S1 example');

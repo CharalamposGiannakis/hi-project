@@ -172,6 +172,36 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(page.headers.get('content-type')).toContain('text/html');
   }, 60_000);
 
+  it('persists only selected goal requirements while retaining every task and execution', async () => {
+    const id = `${RUN}-goal-subset`;
+    await mountApp(api);
+    await openJson(scenario(id, (data) => { data.goal.required_tasks = ['data-collection']; }));
+    await saveAndTrack(id);
+    expect(text()).toContain('Saved in GraphDB · repository hi · 125 triples');
+    expect(await storedTriples(id)).toBe(125);
+    const required = await select(`
+      SELECT ?task WHERE { GRAPH <${graphIri(id)}> {
+        <urn:hi-app:scenario:${id}:goal:user-wellbeing> <https://w3id.org/hi-ontology#requiresTask> ?task
+      } }
+    `);
+    expect(required.map((row) => row.task.value)).toEqual([`urn:hi-app:scenario:${id}:task:data-collection`]);
+    const tasks = await select(`
+      SELECT ?task WHERE { GRAPH <${graphIri(id)}> { ?task a <https://w3id.org/hi-ontology#Task> } }
+    `);
+    expect(new Set(tasks.map((row) => row.task.value))).toEqual(new Set(example.tasks.map((task) => `urn:hi-app:scenario:${id}:task:${task.id}`)));
+    const executions = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution WHERE { GRAPH <${graphIri(id)}> {
+        ?execution hi:realizesTask <urn:hi-app:scenario:${id}:task:explanation> ;
+          hi:towardsGoal <urn:hi-app:scenario:${id}:goal:user-wellbeing>
+      } }
+    `);
+    expect(executions.map((row) => row.execution.value)).toEqual([`urn:hi-app:scenario:${id}:execution:explanation`]);
+    click('Show team composition (CQ1)');
+    await until(() => text().includes('CQ1 over the saved graph'));
+    expect(teamRows()).toHaveLength(2);
+  }, 60_000);
+
   it('stores one shared capability with explicit links to multiple agents and tasks', async () => {
     const id = `${RUN}-shared-capability`;
     await mountApp(api);
