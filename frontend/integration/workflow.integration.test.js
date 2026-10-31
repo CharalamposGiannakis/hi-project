@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { flushSync, mount, unmount } from 'svelte';
 import example from '../../examples/s1.json';
 import s2 from '../../examples/s2.json';
+import s3 from '../../examples/s3.json';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -61,11 +62,13 @@ beforeAll(async () => {
 afterAll(async () => {
   backends.forEach((b) => b.stop());
   for (const id of created) {
-    await fetch(`${GRAPHDB}/repositories/${REPOSITORY}/statements`, {
+    const response = await fetch(`${GRAPHDB}/repositories/${REPOSITORY}/statements`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ update: `DROP SILENT GRAPH <${graphIri(id)}>` }),
     });
+    expect(response.ok).toBe(true);
+    expect(await storedTriples(id)).toBe(0);
   }
 });
 
@@ -129,6 +132,72 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Svelte', () => {
+  it('S3: saves distinct jurors with shared capability and evaluation, English hypotheses, and two unlinked interactions', async () => {
+    const id = `${RUN}-s3`;
+    await mountApp(api);
+    await openJson({ ...structuredClone(s3), id });
+    click('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('135 triples · not saved');
+    expect(await storedTriples(id)).toBe(0);
+    await saveAndTrack(id);
+    expect(text()).toContain('Saved in GraphDB · repository hi · 135 triples');
+    expect(await storedTriples(id)).toBe(135);
+    const base = `urn:hi-app:scenario:${id}:`;
+    const shared = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?agent ?capability WHERE { GRAPH <${graphIri(id)}> {
+        ?agent hi:hasCapability ?capability .
+        ?capability hi:hasCapabilityConcept <https://w3id.org/hi-thesaurus/SelfReportingCapability> .
+      } }
+    `);
+    expect(new Set(shared.map((row) => row.capability.value))).toEqual(new Set([`${base}capability:self-reporting`]));
+    expect(new Set(shared.map((row) => row.agent.value))).toEqual(new Set([`${base}agent:human-juror-1`, `${base}agent:human-juror-2`]));
+    const executions = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?task ?agent ?evaluation ?experiment WHERE { GRAPH <${graphIri(id)}> {
+        ?execution a hi:TaskExecution ; hi:realizesTask ?task ; hi:performedBy ?agent ; hi:evaluatedBy ?evaluation .
+        ?evaluation hi:hasExperiment ?experiment .
+      } }
+    `);
+    expect(executions).toHaveLength(5);
+    expect(new Set(executions.map((row) => row.evaluation.value))).toEqual(new Set([`${base}evaluation:ai-intervention-impact`]));
+    expect(new Set(executions.map((row) => row.experiment.value))).toEqual(new Set([`${base}experiment:deliberation-support`]));
+    const statements = executions.filter((row) => row.task.value === `${base}task:provide-statement`);
+    expect(statements).toHaveLength(2);
+    expect(new Set(statements.map((row) => row.agent.value))).toEqual(new Set([`${base}agent:human-juror-1`, `${base}agent:human-juror-2`]));
+    const interactions = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?interaction ?participant ?execution WHERE { GRAPH <${graphIri(id)}> {
+        ?interaction a hi:Interaction ; hi:hasAgentInvolved ?participant .
+        OPTIONAL { ?execution hi:hasInteractionEpisode ?interaction }
+      } }
+    `);
+    expect(interactions).toHaveLength(6);
+    expect(new Set(interactions.map((row) => row.interaction.value)).size).toBe(2);
+    for (const interaction of s3.interactions) {
+      expect(new Set(interactions.filter((row) => row.interaction.value === `${base}interaction:${interaction.id}`).map((row) => row.participant.value)))
+        .toEqual(new Set(s3.agents.map((agent) => `${base}agent:${agent.id}`)));
+    }
+    expect(interactions.every((row) => !row.execution)).toBe(true);
+    const hypotheses = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?nullHypothesis ?alternativeHypothesis (LANG(?nullHypothesis) AS ?nullLanguage) (LANG(?alternativeHypothesis) AS ?alternativeLanguage)
+      WHERE { GRAPH <${graphIri(id)}> {
+        <${base}experiment:deliberation-support> hi:hasNullHypothesis ?nullHypothesis ; hi:hasAlternativeHypothesis ?alternativeHypothesis .
+      } }
+    `);
+    expect(hypotheses).toHaveLength(1);
+    expect(hypotheses[0].nullHypothesis.value).toBe(s3.experiments[0].null_hypothesis);
+    expect(hypotheses[0].alternativeHypothesis.value).toBe(s3.experiments[0].alternative_hypothesis);
+    expect(hypotheses[0].nullLanguage.value).toBe('en');
+    expect(hypotheses[0].alternativeLanguage.value).toBe('en');
+    click('Show team composition (CQ1)');
+    await until(() => text().includes('CQ1 over the saved graph'));
+    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s3.agents.map((agent) => agent.name)));
+    expect(teamRows()).toHaveLength(3);
+  }, 60_000);
+
   it('S2: previews, saves, and queries the complete reconstruction without merging entities', async () => {
     const id = `${RUN}-s2`;
     await mountApp(api);

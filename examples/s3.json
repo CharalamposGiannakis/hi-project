@@ -1,0 +1,126 @@
+{
+  "id": "s3",
+  "use_case": {
+    "id": "group-deliberation",
+    "name": "Group deliberation",
+    "concept": "GroupDeliberationUseCase",
+    "domain": "LawAndPolicyDomain"
+  },
+  "goal": {
+    "id": "fair-accurate-verdict",
+    "name": "Fair and accurate verdict",
+    "concept": "FairAccurateVerdictGoal",
+    "required_tasks": ["assess-communication-accuracy", "decide-intervention", "explain-decision", "provide-statement"]
+  },
+  "context": {
+    "concept": "JuryDeliberationContext",
+    "phenomena": ["GroupThinkingPhenomenon", "TrustShiftPhenomenon"],
+    "constraints": ["UndueInfluenceConstraint", "FairnessConstraint", "TransparencyConstraint"]
+  },
+  "tasks": [
+    { "id": "assess-communication-accuracy", "name": "Assess communication accuracy", "concept": "AssessCommunicationAccuracy" },
+    { "id": "decide-intervention", "name": "Decide intervention", "concept": "DecideInterventionTask" },
+    { "id": "explain-decision", "name": "Explain decision", "concept": "ExplanationTask" },
+    { "id": "provide-statement", "name": "Provide statement", "concept": "ProvideStatementTask" }
+  ],
+  "agents": [
+    { "id": "human-juror-1", "name": "Human juror 1", "kind": "human", "roles": ["JurorRole"] },
+    { "id": "human-juror-2", "name": "Human juror 2", "kind": "human", "roles": ["JurorRole"] },
+    { "id": "ai-deliberation-assistant", "name": "AI deliberation assistant", "kind": "artificial", "roles": ["AIAdvisorRole"] }
+  ],
+  "capabilities": [
+    {
+      "id": "bayesian-reasoning",
+      "concept": "BayesianReasoningCapability",
+      "agents": ["ai-deliberation-assistant"],
+      "tasks": ["assess-communication-accuracy", "decide-intervention"]
+    },
+    {
+      "id": "meta-analysis",
+      "concept": "MetaAnalysisCapability",
+      "agents": ["ai-deliberation-assistant"],
+      "tasks": ["assess-communication-accuracy"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["ai-deliberation-assistant"],
+      "tasks": ["explain-decision"]
+    },
+    {
+      "id": "self-reporting",
+      "concept": "SelfReportingCapability",
+      "agents": ["human-juror-1", "human-juror-2"],
+      "tasks": ["provide-statement"]
+    }
+  ],
+  "executions": [
+    {
+      "id": "assess-accuracy",
+      "concept": "AssessAccuracyTaskExecution",
+      "task": "assess-communication-accuracy",
+      "agent": "ai-deliberation-assistant",
+      "method": "BayesianLogicMethod"
+    },
+    {
+      "id": "decide-intervention",
+      "concept": "DecideInterventionTaskExecution",
+      "task": "decide-intervention",
+      "agent": "ai-deliberation-assistant",
+      "method": "MetaAnalysisScoringMethod"
+    },
+    {
+      "id": "explain-decision",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-decision",
+      "agent": "ai-deliberation-assistant"
+    },
+    {
+      "id": "provide-statement-1",
+      "concept": "ProvideStatementTaskExecution",
+      "task": "provide-statement",
+      "agent": "human-juror-1"
+    },
+    {
+      "id": "provide-statement-2",
+      "concept": "ProvideStatementTaskExecution",
+      "task": "provide-statement",
+      "agent": "human-juror-2"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "deliberation-support",
+      "concept": "DeliberationSupportExperiment",
+      "metrics": ["FairOutcomeMetric", "UndueInfluenceMetric", "ExplanationClarityMetric"],
+      "null_hypothesis": "AI intervention has no effect on fairness or may increase undue influence.",
+      "alternative_hypothesis": "AI-supported Bayesian meta-analysis improves fairness without increasing undue influence.",
+      "hypothesis_language": "en"
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "ai-intervention-impact",
+      "concept": "AIInterventionImpactEvaluation",
+      "metrics": ["FairOutcomeMetric", "UndueInfluenceMetric", "ExplanationClarityMetric"],
+      "experiment": "deliberation-support",
+      "executions": ["assess-accuracy", "decide-intervention", "explain-decision", "provide-statement-1", "provide-statement-2"]
+    }
+  ],
+  "interactions": [
+    {
+      "id": "group-deliberation",
+      "intent": "DeliberationIntent",
+      "modality": "VerbalDialogueModality",
+      "agents": ["ai-deliberation-assistant", "human-juror-1", "human-juror-2"],
+      "executions": []
+    },
+    {
+      "id": "explain-conditions",
+      "intent": "ExplanationIntent",
+      "modality": "VerbalDialogueModality",
+      "agents": ["ai-deliberation-assistant", "human-juror-1", "human-juror-2"],
+      "executions": []
+    }
+  ]
+}

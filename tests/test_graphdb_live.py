@@ -28,6 +28,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
     monkeypatch.setenv("GRAPHDB_TIMEOUT_SECONDS", "10")
     original = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
     s2 = json.loads((ROOT / "examples" / "s2.json").read_text(encoding="utf-8"))
+    s3 = json.loads((ROOT / "examples" / "s3.json").read_text(encoding="utf-8"))
     owned_ids = []
     saved = []
 
@@ -42,9 +43,9 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
             check_repository(database)
             check_references(database)
             with TestClient(api.app) as client:
-                for label, count in (("s1", 2), ("three", 3), ("s2", 2)):
-                    payload = new_payload(label, s2 if label == "s2" else original)
-                    if count == 3:
+                for label, count, template in (("s1", 2, original), ("three", 3, original), ("s2", 2, s2), ("s3", 3, s3)):
+                    payload = new_payload(label, template)
+                    if label == "three":
                         payload["agents"][0]["name"] = 'Zoë "User"\n☃'
                         payload["agents"].append({
                             "id": "second-human", "name": payload["agents"][0]["name"],
@@ -56,6 +57,8 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
                     graph = to_rdf(Scenario.model_validate(payload))
                     if label == "s2":
                         assert len(graph) == 195
+                    if label == "s3":
+                        assert len(graph) == 135
                     assert isomorphic(graph, read_graph(database, location["graph_iri"]))
                     response = client.get(f"/scenarios/{payload['id']}/team")
                     assert response.status_code == 200, response.text
@@ -120,3 +123,4 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
             for scenario_id in owned_ids:
                 iri = scenario_graph_iri(scenario_id)
                 database.delete("/repositories/hi/statements", params={"context": f"<{iri}>"}).raise_for_status()
+                assert len(read_graph(database, iri)) == 0
