@@ -1,11 +1,41 @@
 import { describe, expect, it } from 'vitest';
 import legacyExample from '../../../examples/s1.json';
 import s2 from '../../../examples/s2.json';
+import s3 from '../../../examples/s3.json';
 import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('S3 reconstruction', () => {
+  it('round-trips distinct jurors, shared entities, unlinked interactions, and English hypotheses', () => {
+    const scenario = fromContract(JSON.stringify(s3));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(s3);
+    expect(scenario.agents.filter((agent) => agent.kind === 'human').map((agent) => agent.id)).toEqual(['human-juror-1', 'human-juror-2']);
+    expect(scenario.capabilities).toHaveLength(4);
+    expect(scenario.capabilities.find((capability) => capability.id === 'self-reporting')?.agents).toEqual(['human-juror-1', 'human-juror-2']);
+    expect(scenario.goal.required_tasks).toEqual(scenario.tasks.map((task) => task.id));
+    expect(scenario.executions).toHaveLength(5);
+    expect(scenario.executions.filter((execution) => execution.task === 'provide-statement').map((execution) => execution.agent)).toEqual(['human-juror-1', 'human-juror-2']);
+    expect(scenario.evaluations).toHaveLength(1);
+    expect(scenario.evaluations[0].executions).toEqual(scenario.executions.map((execution) => execution.id));
+    expect(scenario.evaluations[0].metrics).toHaveLength(3);
+    expect(scenario.experiments).toHaveLength(1);
+    expect(scenario.experiments[0].metrics).toHaveLength(3);
+    expect(scenario.experiments[0].hypothesis_language).toBe('en');
+    expect(scenario.interactions).toHaveLength(2);
+    expect(scenario.interactions.every((interaction) => interaction.agents.length === 3 && interaction.executions.length === 0)).toBe(true);
+    expect(scenario.tasks[0].concept).toBe('AssessCommunicationAccuracy');
+  });
+
+  it('continues to reject the original undefined concept instead of treating it as an alias', () => {
+    const original = structuredClone(s3);
+    original.tasks[0].concept = 'AssessCommunicationAccuracyTask';
+    expect(() => fromContract(original)).toThrow('"AssessCommunicationAccuracyTask" is not a HINT Task concept');
+  });
+});
 
 describe('S2 reconstruction', () => {
   it('round-trips all entities and explicit relationships without collapsing shared concepts', () => {

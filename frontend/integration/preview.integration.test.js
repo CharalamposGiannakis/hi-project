@@ -9,11 +9,13 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { flushSync, mount, unmount } from 'svelte';
 import legacyExample from '../../examples/s1.json';
 import s2 from '../../examples/s2.json';
+import s3 from '../../examples/s3.json';
 import { requestPreview } from '../src/lib/api.js';
 import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
+const reconstructions = [{ label: 'S2', canonical: s2, triples: 195 }, { label: 'S3', canonical: s3, triples: 135 }];
 
 /** @type {{ url: string, stop: () => void } | undefined} */
 let backend;
@@ -79,23 +81,23 @@ function enterText(root, label, value) {
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
-  it('imports S2, exports it through Copy, reimports it, and previews identical RDF', async () => {
+  it.each(reconstructions)('imports $label, exports it through Copy, reimports it, and previews identical RDF', async ({ canonical, triples }) => {
     await mountApp();
     /** @param {string} json */
     async function importJson(json) {
       const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
-      Object.defineProperty(input, 'files', { value: [{ name: 's2.json', text: async () => json }], configurable: true });
+      Object.defineProperty(input, 'files', { value: [{ name: 'example.json', text: async () => json }], configurable: true });
       input.dispatchEvent(new Event('change', { bubbles: true }));
-      await until(() => text().includes('Loaded s2.json'));
+      await until(() => text().includes('Loaded example.json'));
     }
-    await importJson(JSON.stringify(s2));
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(s2);
-    const expected = await requestPreview(s2, { baseUrl });
+    await importJson(JSON.stringify(canonical));
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(canonical);
+    const expected = await requestPreview(canonical, { baseUrl });
     expect(expected.kind).toBe('ok');
     if (expected.kind !== 'ok') throw new Error(JSON.stringify(expected));
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('195 triples · not saved');
+    expect(text()).toContain(`${triples} triples · not saved`);
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected.preview.rdf);
 
     let exported = '';
@@ -108,18 +110,18 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
-    expect(JSON.parse(exported)).toEqual(s2);
+    expect(JSON.parse(exported)).toEqual(canonical);
     unmount(/** @type {Record<string, any>} */ (app));
     app = undefined;
     await mountApp();
     await importJson(exported);
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(s2);
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(canonical);
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected.preview.rdf);
   });
 
-  it('enters the complete S2 through the form with independent entities and source relationships', async () => {
+  it.each(reconstructions)('enters the complete $label through the form with independent entities and source relationships', async ({ canonical, triples }) => {
     await mountApp(); // Start with a blank form; do not load or inject scenario JSON.
     const draft = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
     /** @type {Record<string, Record<string, string>>} */
@@ -146,17 +148,17 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       return section;
     }
     const useCase = /** @type {Element} */ (document.querySelector('form > fieldset'));
-    enterText(useCase, 'Name', s2.use_case.name);
-    selectValue(useCase, 'Use case type', s2.use_case.concept);
-    selectValue(useCase, 'Domain (optional)', s2.use_case.domain);
+    enterText(useCase, 'Name', canonical.use_case.name);
+    selectValue(useCase, 'Use case type', canonical.use_case.concept);
+    selectValue(useCase, 'Domain (optional)', canonical.use_case.domain);
     const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
-    enterText(goal, 'Name', s2.goal.name);
-    selectValue(goal, 'Goal type', s2.goal.concept);
+    enterText(goal, 'Name', canonical.goal.name);
+    selectValue(goal, 'Goal type', canonical.goal.concept);
     clickButton('Add context');
-    selectValue(document, 'Context type', s2.context.concept);
-    selectChecks(document, 'Phenomena', s2.context.phenomena);
-    selectChecks(document, 'Constraints', s2.context.constraints);
-    s2.tasks.forEach((task, i) => {
+    selectValue(document, 'Context type', canonical.context.concept);
+    selectChecks(document, 'Phenomena', canonical.context.phenomena);
+    selectChecks(document, 'Constraints', canonical.context.constraints);
+    canonical.tasks.forEach((task, i) => {
       if (i > 0) clickButton('Add task');
       const id = draft().tasks[i].id;
       ids.tasks[task.id] = id;
@@ -164,9 +166,14 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       enterText(section, 'Name', task.name);
       selectValue(section, 'Task type', task.concept);
     });
-    selectChecks(goal, 'Tasks required by this goal', s2.goal.required_tasks.map((id) => ids.tasks[id]));
-    for (const agent of s2.agents) {
-      const id = draft().agents.find((/** @type {any} */ a) => a.kind === agent.kind).id;
+    selectChecks(goal, 'Tasks required by this goal', canonical.goal.required_tasks.map((id) => ids.tasks[id]));
+    for (const agent of canonical.agents) {
+      let record = draft().agents.find((/** @type {any} */ a) => a.kind === agent.kind && !Object.values(ids.agents).includes(a.id));
+      if (!record) {
+        clickButton(`Add ${agent.kind} agent`);
+        record = draft().agents.at(-1);
+      }
+      const id = record.id;
       ids.agents[agent.id] = id;
       const section = /** @type {Element} */ (document.querySelector(`#agent-${id}`)?.closest('section'));
       enterText(section, 'Name', agent.name);
@@ -178,34 +185,35 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
         flushSync();
       }
     }
-    for (const capability of s2.capabilities) {
+    for (const capability of canonical.capabilities) {
       const section = addRecord('capability', 'capabilities', capability.id);
       selectValue(section, 'Capability type', capability.concept);
       selectChecks(section, 'Possessed by agents', capability.agents.map((id) => ids.agents[id]));
       selectChecks(section, 'Enables tasks', capability.tasks.map((id) => ids.tasks[id]));
     }
-    for (const execution of s2.executions) {
+    for (const execution of canonical.executions) {
       const section = addRecord('execution', 'executions', execution.id);
       selectValue(section, 'Execution type', execution.concept);
       selectValue(section, 'Task', ids.tasks[execution.task]);
       selectValue(section, 'Agent', ids.agents[execution.agent]);
       if (execution.method) selectValue(section, 'Method (optional)', execution.method);
     }
-    for (const experiment of s2.experiments) {
+    for (const experiment of canonical.experiments) {
       const section = addRecord('experiment', 'experiments', experiment.id);
       selectValue(section, 'Experiment type', experiment.concept);
       selectChecks(section, 'Metrics', experiment.metrics);
       enterText(section, 'Null hypothesis', experiment.null_hypothesis);
       enterText(section, 'Alternative hypothesis', experiment.alternative_hypothesis);
+      if ('hypothesis_language' in experiment) selectValue(section, 'Hypothesis literal format', String(experiment.hypothesis_language));
     }
-    for (const evaluation of s2.evaluations) {
+    for (const evaluation of canonical.evaluations) {
       const section = addRecord('evaluation', 'evaluations', evaluation.id);
       selectValue(section, 'Evaluation type', evaluation.concept);
       selectChecks(section, 'Metrics', evaluation.metrics);
       selectValue(section, 'Experiment', ids.experiments[evaluation.experiment]);
       selectChecks(section, 'Evaluated executions', evaluation.executions.map((id) => ids.executions[id]));
     }
-    for (const interaction of s2.interactions) {
+    for (const interaction of canonical.interactions) {
       const section = addRecord('interaction', 'interactions', interaction.id);
       selectValue(section, 'Interaction intent', interaction.intent);
       selectValue(section, 'Interaction modality', interaction.modality);
@@ -215,23 +223,27 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const entered = draft();
     // Every field and relationship must match the canonical example modulo app-assigned IDs.
     const expected = {
-      ...s2, id: entered.id,
-      use_case: { ...s2.use_case, id: entered.use_case.id },
-      goal: { ...s2.goal, id: entered.goal.id, required_tasks: s2.goal.required_tasks.map((id) => ids.tasks[id]) },
-      tasks: s2.tasks.map((task) => ({ ...task, id: ids.tasks[task.id] })),
-      agents: s2.agents.map((agent) => ({ ...agent, id: ids.agents[agent.id] })),
-      capabilities: s2.capabilities.map((capability) => ({ ...capability, id: ids.capabilities[capability.id], agents: capability.agents.map((id) => ids.agents[id]), tasks: capability.tasks.map((id) => ids.tasks[id]) })),
-      executions: s2.executions.map((execution) => ({ ...execution, id: ids.executions[execution.id], task: ids.tasks[execution.task], agent: ids.agents[execution.agent] })),
-      experiments: s2.experiments.map((experiment) => ({ ...experiment, id: ids.experiments[experiment.id] })),
-      evaluations: s2.evaluations.map((evaluation) => ({ ...evaluation, id: ids.evaluations[evaluation.id], experiment: ids.experiments[evaluation.experiment], executions: evaluation.executions.map((id) => ids.executions[id]) })),
-      interactions: s2.interactions.map((interaction) => ({ ...interaction, id: ids.interactions[interaction.id], agents: interaction.agents.map((id) => ids.agents[id]) })),
+      ...canonical, id: entered.id,
+      use_case: { ...canonical.use_case, id: entered.use_case.id },
+      goal: { ...canonical.goal, id: entered.goal.id, required_tasks: canonical.goal.required_tasks.map((id) => ids.tasks[id]) },
+      tasks: canonical.tasks.map((task) => ({ ...task, id: ids.tasks[task.id] })),
+      agents: canonical.agents.map((agent) => ({ ...agent, id: ids.agents[agent.id] })),
+      capabilities: canonical.capabilities.map((capability) => ({ ...capability, id: ids.capabilities[capability.id], agents: capability.agents.map((id) => ids.agents[id]), tasks: capability.tasks.map((id) => ids.tasks[id]) })),
+      executions: canonical.executions.map((execution) => ({ ...execution, id: ids.executions[execution.id], task: ids.tasks[execution.task], agent: ids.agents[execution.agent] })),
+      experiments: canonical.experiments.map((experiment) => ({ ...experiment, id: ids.experiments[experiment.id] })),
+      evaluations: canonical.evaluations.map((evaluation) => ({ ...evaluation, id: ids.evaluations[evaluation.id], experiment: ids.experiments[evaluation.experiment], executions: evaluation.executions.map((id) => ids.executions[id]) })),
+      interactions: canonical.interactions.map((interaction) => ({ ...interaction, id: ids.interactions[interaction.id], agents: interaction.agents.map((id) => ids.agents[id]) })),
     };
+    expect(new Set(Object.values(ids.agents)).size).toBe(canonical.agents.length);
+    expect(entered.agents).toHaveLength(canonical.agents.length);
+    // Extra human rows are appended after the initial human/artificial pair; row order is not identity.
+    expected.agents.sort((a, b) => entered.agents.findIndex((/** @type {any} */ agent) => agent.id === a.id) - entered.agents.findIndex((/** @type {any} */ agent) => agent.id === b.id));
     expect(entered).toEqual(expected);
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('195 triples · not saved');
+    expect(text()).toContain(`${triples} triples · not saved`);
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
-    expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(3);
+    expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(canonical.goal.required_tasks.length);
     expect(rdf).not.toContain('<https://w3id.org/hi-ontology#hasInteractionEpisode>');
     const preview = await requestPreview(expected, { baseUrl });
     expect(preview.kind).toBe('ok');
