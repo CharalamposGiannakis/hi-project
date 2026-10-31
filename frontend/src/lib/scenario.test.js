@@ -1,10 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import legacyExample from '../../../examples/s1.json';
+import s2 from '../../../examples/s2.json';
 import { emptyScenario, fromContract, newAgent, newCapability, newContext, newExecution, newExperiment, newEvaluation, newInteraction, newId, newTask, removeEntity, toContract, validate } from './scenario.js';
 
 const ID = /^[a-z0-9][a-z0-9_-]*$/;
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
 const copy = () => structuredClone(example);
+
+describe('S2 reconstruction', () => {
+  it('round-trips all entities and explicit relationships without collapsing shared concepts', () => {
+    const scenario = fromContract(JSON.stringify(s2));
+    expect(validate(scenario)).toEqual([]);
+    expect(toContract(scenario)).toEqual(s2);
+    expect(scenario.tasks).toHaveLength(10);
+    expect(scenario.goal.required_tasks).toEqual(['unlock-cabinet', 'open-cabinet', 'retrieve-tool']);
+    expect(scenario.capabilities).toHaveLength(8);
+    expect(scenario.capabilities.filter((capability) => capability.tasks.length === 2)).toHaveLength(3);
+    expect(scenario.executions.filter((execution) => execution.task === 'heavy-lift')).toHaveLength(2);
+    expect(scenario.executions.some((execution) => execution.task === 'retrieve-tool')).toBe(false);
+    expect(scenario.experiments.filter((experiment) => experiment.concept === 'SafetyComplianceExperiment').map((experiment) => experiment.id)).toEqual(['reach-safety', 'load-safety']);
+    expect(scenario.evaluations.filter((evaluation) => evaluation.concept === 'AIInterventionImpactEvaluation').map((evaluation) => evaluation.id)).toEqual(['reach-safety', 'load-safety']);
+    expect(scenario.interactions[0].executions).toEqual([]);
+    expect(scenario.experiments.every((experiment) => experiment.hypothesis_language === '')).toBe(true);
+  });
+});
 
 describe('explicit goal task requirements', () => {
   it('initializes legacy JSON with all tasks selected and exports explicit IDs', () => {

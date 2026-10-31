@@ -27,11 +27,12 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
     monkeypatch.setenv("GRAPHDB_REPOSITORY", "hi")
     monkeypatch.setenv("GRAPHDB_TIMEOUT_SECONDS", "10")
     original = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
+    s2 = json.loads((ROOT / "examples" / "s2.json").read_text(encoding="utf-8"))
     owned_ids = []
     saved = []
 
-    def new_payload(label):
-        data = json.loads(json.dumps(original))
+    def new_payload(label, template=original):
+        data = json.loads(json.dumps(template))
         data["id"] = f"test-{label}-{uuid4().hex}"
         owned_ids.append(data["id"])
         return data
@@ -41,8 +42,8 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
             check_repository(database)
             check_references(database)
             with TestClient(api.app) as client:
-                for label, count in (("s1", 2), ("three", 3)):
-                    payload = new_payload(label)
+                for label, count in (("s1", 2), ("three", 3), ("s2", 2)):
+                    payload = new_payload(label, s2 if label == "s2" else original)
                     if count == 3:
                         payload["agents"][0]["name"] = 'Zoë "User"\n☃'
                         payload["agents"].append({
@@ -53,6 +54,8 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
                     assert response.status_code == 201, response.text
                     location = response.json()
                     graph = to_rdf(Scenario.model_validate(payload))
+                    if label == "s2":
+                        assert len(graph) == 195
                     assert isomorphic(graph, read_graph(database, location["graph_iri"]))
                     response = client.get(f"/scenarios/{payload['id']}/team")
                     assert response.status_code == 200, response.text
@@ -70,7 +73,7 @@ def test_live_persistence_cq1_conflicts_concurrency_restart_and_unavailability(m
                     assert duplicate.status_code == 409
                     assert isomorphic(graph, read_graph(database, location["graph_iri"]))
                     saved.append((payload, graph, composition))
-                    print(f"Saved and retrieved S1-derived {count}-agent scenario: {payload['id']}")
+                    print(f"Saved and retrieved {label} {count}-agent scenario: {payload['id']}")
 
                 race = new_payload("concurrent")
                 variants = [

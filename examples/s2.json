@@ -1,0 +1,204 @@
+{
+  "id": "s2",
+  "use_case": {
+    "id": "collaborative-manipulation",
+    "name": "Collaborative manipulation",
+    "concept": "CollaborativeManipulationUseCase",
+    "domain": "IndustrialAndServiceRoboticsDomain"
+  },
+  "goal": {
+    "id": "safe-tool-retrieval",
+    "name": "Safe tool retrieval",
+    "concept": "SafeRetrievalGoal",
+    "required_tasks": ["unlock-cabinet", "open-cabinet", "retrieve-tool"]
+  },
+  "context": {
+    "concept": "WorkspaceManipulationContext",
+    "phenomena": ["RiskExposurePhenomenon", "SkillsComplementarityPhenomenon"],
+    "constraints": ["SafetyConstraint", "TransparencyConstraint"]
+  },
+  "tasks": [
+    { "id": "unlock-cabinet", "name": "Unlock cabinet", "concept": "UnlockCabinetTask" },
+    { "id": "open-cabinet", "name": "Open cabinet", "concept": "OpenCabinetTask" },
+    { "id": "retrieve-tool", "name": "Retrieve tool", "concept": "RetrieveToolTask" },
+    { "id": "fine-insertion", "name": "Fine insertion", "concept": "FineInsertionTask" },
+    { "id": "heavy-lift", "name": "Heavy lifting", "concept": "HeavyLiftingTask" },
+    { "id": "situational-assessment", "name": "Situational assessment", "concept": "SituationalAssessmentTask" },
+    { "id": "data-collection", "name": "Data collection", "concept": "DataCollectionTask" },
+    { "id": "policy-learning", "name": "Policy learning", "concept": "PolicyLearningTask" },
+    { "id": "knowledge-query", "name": "Knowledge graph query", "concept": "KnowledgeGraphQueryTask" },
+    { "id": "explanation", "name": "Explanation", "concept": "ExplanationTask" }
+  ],
+  "agents": [
+    { "id": "human-technician", "name": "Human technician", "kind": "human", "roles": ["FineManipulatorRole"] },
+    { "id": "robot-manipulator", "name": "Robot manipulator", "kind": "artificial", "roles": ["RiskOperatorRole"] }
+  ],
+  "capabilities": [
+    {
+      "id": "heavy-lifting",
+      "concept": "HeavyLiftingCapability",
+      "agents": ["robot-manipulator"],
+      "tasks": ["heavy-lift", "retrieve-tool"]
+    },
+    {
+      "id": "confined-reach",
+      "concept": "ConfinedReachingCapability",
+      "agents": ["robot-manipulator"],
+      "tasks": ["open-cabinet", "heavy-lift"]
+    },
+    {
+      "id": "rl-policy-learning",
+      "concept": "ReinforcementLearningCapability",
+      "agents": ["robot-manipulator"],
+      "tasks": ["policy-learning"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["robot-manipulator"],
+      "tasks": ["explanation"]
+    },
+    {
+      "id": "kg-query",
+      "concept": "KnowledgeGraphQueryingCapability",
+      "agents": ["robot-manipulator"],
+      "tasks": ["knowledge-query"]
+    },
+    {
+      "id": "fine-dexterity",
+      "concept": "FineDexterityCapability",
+      "agents": ["human-technician"],
+      "tasks": ["fine-insertion", "unlock-cabinet"]
+    },
+    {
+      "id": "situational-awareness",
+      "concept": "SituationalAwarenessCapability",
+      "agents": ["human-technician"],
+      "tasks": ["situational-assessment"]
+    },
+    {
+      "id": "self-reporting",
+      "concept": "SelfReportingCapability",
+      "agents": ["human-technician"],
+      "tasks": ["data-collection"]
+    }
+  ],
+  "executions": [
+    {
+      "id": "unlock-cabinet",
+      "concept": "UnlockCabinetTaskExecution",
+      "task": "unlock-cabinet",
+      "agent": "human-technician"
+    },
+    {
+      "id": "open-cabinet",
+      "concept": "OpenCabinetTaskExecution",
+      "task": "open-cabinet",
+      "agent": "robot-manipulator",
+      "method": "KnowledgeGraphQueryMethod"
+    },
+    {
+      "id": "confined-reach",
+      "concept": "ConfinedReachTaskExecution",
+      "task": "heavy-lift",
+      "agent": "robot-manipulator",
+      "method": "ReinforcementLearningMethod"
+    },
+    {
+      "id": "heavy-lift",
+      "concept": "HeavyLiftingTaskExecution",
+      "task": "heavy-lift",
+      "agent": "robot-manipulator"
+    },
+    {
+      "id": "rl-explain",
+      "concept": "ReinforcementLearningExplanationTaskExecution",
+      "task": "explanation",
+      "agent": "robot-manipulator",
+      "method": "PostHocExplanationMethod"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "fine-manipulation",
+      "concept": "FineManipulationExperiment",
+      "metrics": ["TaskSuccessRateMetric"],
+      "null_hypothesis": "Fine manipulation precision and success rate do not improve across trials or conditions.",
+      "alternative_hypothesis": "Fine manipulation precision and success rate improve, especially when roles and capabilities are well allocated between human and robot."
+    },
+    {
+      "id": "kg-support",
+      "concept": "ReinforcementLearningWithKnowledgeGraphsExperiment",
+      "metrics": ["TaskSuccessRateMetric"],
+      "null_hypothesis": "Knowledge graph support does not significantly increase the success rate of cabinet opening and tool retrieval.",
+      "alternative_hypothesis": "Knowledge graph support increases the success rate and robustness of cabinet opening and tool retrieval sequences."
+    },
+    {
+      "id": "reach-safety",
+      "concept": "SafetyComplianceExperiment",
+      "metrics": ["SafetyComplianceMetric"],
+      "null_hypothesis": "Using RL-based policies in confined reach does not change safety compliance compared to baseline control.",
+      "alternative_hypothesis": "Using RL-based policies in confined reach improves safety compliance and reduces risk exposure for the human."
+    },
+    {
+      "id": "load-safety",
+      "concept": "SafetyComplianceExperiment",
+      "metrics": ["SafetyComplianceMetric"],
+      "null_hypothesis": "Delegating heavy lifting to the robot does not significantly reduce safety incidents.",
+      "alternative_hypothesis": "Delegating heavy lifting to the robot reduces safety incidents and improves overall safety compliance."
+    },
+    {
+      "id": "explanation-transparency",
+      "concept": "TransparencyTrustExperiment",
+      "metrics": ["ExplanationClarityMetric"],
+      "null_hypothesis": "Providing explanations about planned risky actions does not affect perceived clarity or operator trust.",
+      "alternative_hypothesis": "Providing explanations about planned risky actions improves perceived clarity and maintains or increases operator trust."
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "fine-manipulation",
+      "concept": "FineManipulationEvaluation",
+      "metrics": ["TaskSuccessRateMetric"],
+      "experiment": "fine-manipulation",
+      "executions": ["unlock-cabinet"]
+    },
+    {
+      "id": "kg-query-accuracy",
+      "concept": "KGQueryAccuracyEvaluation",
+      "metrics": ["TaskSuccessRateMetric"],
+      "experiment": "kg-support",
+      "executions": ["open-cabinet"]
+    },
+    {
+      "id": "reach-safety",
+      "concept": "AIInterventionImpactEvaluation",
+      "metrics": ["SafetyComplianceMetric"],
+      "experiment": "reach-safety",
+      "executions": ["confined-reach"]
+    },
+    {
+      "id": "load-safety",
+      "concept": "AIInterventionImpactEvaluation",
+      "metrics": ["SafetyComplianceMetric"],
+      "experiment": "load-safety",
+      "executions": ["heavy-lift"]
+    },
+    {
+      "id": "explanation-transparency",
+      "concept": "TransparencyEvaluation",
+      "metrics": ["ExplanationClarityMetric"],
+      "experiment": "explanation-transparency",
+      "executions": ["rl-explain"]
+    }
+  ],
+  "interactions": [
+    {
+      "id": "explain-risk",
+      "intent": "ExplanationIntent",
+      "modality": "VerbalDialogueModality",
+      "agents": ["robot-manipulator", "human-technician"],
+      "executions": []
+    }
+  ]
+}

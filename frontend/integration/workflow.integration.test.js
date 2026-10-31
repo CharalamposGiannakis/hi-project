@@ -5,6 +5,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import example from '../../examples/s1.json';
+import s2 from '../../examples/s2.json';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -128,6 +129,53 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Svelte', () => {
+  it('S2: previews, saves, and queries the complete reconstruction without merging entities', async () => {
+    const id = `${RUN}-s2`;
+    await mountApp(api);
+    await openJson({ ...structuredClone(s2), id });
+    click('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('195 triples · not saved');
+    expect(await storedTriples(id)).toBe(0);
+    await saveAndTrack(id);
+    expect(text()).toContain('Saved in GraphDB · repository hi · 195 triples');
+    expect(await storedTriples(id)).toBe(195);
+    const base = `urn:hi-app:scenario:${id}:`;
+    const requirements = await select(`
+      SELECT ?task WHERE { GRAPH <${graphIri(id)}> {
+        <${base}goal:safe-tool-retrieval> <https://w3id.org/hi-ontology#requiresTask> ?task
+      } }
+    `);
+    expect(new Set(requirements.map((row) => row.task.value))).toEqual(new Set(s2.goal.required_tasks.map((task) => `${base}task:${task}`)));
+    const types = await select(`SELECT ?entity ?type WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
+    expect(types).toHaveLength(40);
+    expect(types.filter((row) => row.type.value === 'https://w3id.org/hi-ontology#Task')).toHaveLength(10);
+    const executions = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?task ?evaluation ?experiment WHERE { GRAPH <${graphIri(id)}> {
+        ?execution a hi:TaskExecution ; hi:realizesTask ?task ; hi:evaluatedBy ?evaluation .
+        ?evaluation hi:hasExperiment ?experiment .
+      } }
+    `);
+    expect(executions).toHaveLength(5);
+    expect(new Set(executions.map((row) => row.evaluation.value)).size).toBe(5);
+    expect(new Set(executions.map((row) => row.experiment.value)).size).toBe(5);
+    expect(executions.filter((row) => row.task.value === `${base}task:heavy-lift`)).toHaveLength(2);
+    expect(executions.some((row) => row.task.value === `${base}task:retrieve-tool`)).toBe(false);
+    const participants = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?participant ?execution WHERE { GRAPH <${graphIri(id)}> {
+        <${base}interaction:explain-risk> hi:hasAgentInvolved ?participant .
+        OPTIONAL { ?execution hi:hasInteractionEpisode <${base}interaction:explain-risk> }
+      } }
+    `);
+    expect(participants).toHaveLength(2);
+    expect(participants.every((row) => !row.execution)).toBe(true);
+    click('Show team composition (CQ1)');
+    await until(() => text().includes('CQ1 over the saved graph'));
+    expect(teamRows().map((row) => row[0])).toEqual(['Human technician', 'Robot manipulator']);
+  }, 60_000);
+
   it('S1: preview, save, CQ1, and the Workbench link for the saved graph', async () => {
     const id = `${RUN}-s1`;
     await mountApp(api);
