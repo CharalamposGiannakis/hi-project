@@ -22,7 +22,7 @@
     {/each}
   </select>
   {#if missing}
-    <p class="error">{label} "{value}" no longer exists. Choose a replacement or remove this execution.</p>
+    <p class="error">{label} "{value}" no longer exists. Choose a replacement or remove this record.</p>
   {:else if error}
     <p class="error">{error}</p>
   {/if}

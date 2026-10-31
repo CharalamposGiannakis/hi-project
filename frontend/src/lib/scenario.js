@@ -4,14 +4,16 @@ import vocabulary from './hint-vocabulary.json';
 
 /**
  * @typedef {{ id: string, label: string, definition: string }} Concept
- * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method'} Category
+ * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method' | 'Experiment' | 'Evaluation' | 'Metric'} Category
  * @typedef {{ id: string, name: string, concept: string }} Entity
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
  * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
  * @typedef {{ concept: string, phenomena: string[], constraints: string[], description: string }} Context
  * @typedef {{ id: string, concept: string, agents: string[], tasks: string[] }} Capability
  * @typedef {{ id: string, concept: string, task: string, agent: string, method: string }} Execution
- * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[] }} Scenario
+ * @typedef {{ id: string, concept: string, metrics: string[], null_hypothesis: string, alternative_hypothesis: string, hypothesis_language: '' | 'en', description: string }} Experiment
+ * @typedef {{ id: string, concept: string, metrics: string[], experiment: string, executions: string[], description: string }} Evaluation
+ * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[] }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -78,6 +80,16 @@ export function newExecution(taken) {
   return { id: newId(taken), concept: '', task: '', agent: '', method: '' };
 }
 
+/** @param {Iterable<string>} [taken] @returns {Experiment} */
+export function newExperiment(taken) {
+  return { id: newId(taken), concept: '', metrics: [], null_hypothesis: '', alternative_hypothesis: '', hypothesis_language: '', description: '' };
+}
+
+/** @param {Iterable<string>} [taken] @returns {Evaluation} */
+export function newEvaluation(taken) {
+  return { id: newId(taken), concept: '', metrics: [], experiment: '', executions: [], description: '' };
+}
+
 /** Remove an entity and its capability links. Keep executions for explicit repair.
  * @param {Scenario} scenario
  * @param {'agents' | 'tasks'} field
@@ -103,6 +115,8 @@ export function emptyScenario() {
     context: null,
     capabilities: [],
     executions: [],
+    experiments: [],
+    evaluations: [],
   };
 }
 
@@ -194,6 +208,27 @@ export function validate(scenario) {
     if (!agents.some((agent) => agent.id === execution.agent)) add(`${path}.agent`, 'Choose an existing agent.');
     if (!tasks.some((task) => task.id === execution.task)) add(`${path}.task`, 'Choose an existing task.');
   });
+  checkUnique('experiments', scenario.experiments, 'experiment');
+  scenario.experiments.forEach((experiment, i) => {
+    const path = `experiments.${i}`;
+    checkId(`${path}.id`, experiment.id);
+    checkConcept(`${path}.concept`, 'Experiment', experiment.concept);
+    experiment.metrics.forEach((id) => checkConcept(`${path}.metrics`, 'Metric', id));
+    if (!experiment.null_hypothesis.trim()) add(`${path}.null_hypothesis`, 'Enter a null hypothesis.');
+    if (!experiment.alternative_hypothesis.trim()) add(`${path}.alternative_hypothesis`, 'Enter an alternative hypothesis.');
+    if (experiment.hypothesis_language !== '' && experiment.hypothesis_language !== 'en') add(`${path}.hypothesis_language`, 'Choose plain text or English (@en).');
+  });
+  checkUnique('evaluations', scenario.evaluations, 'evaluation');
+  scenario.evaluations.forEach((evaluation, i) => {
+    const path = `evaluations.${i}`;
+    checkId(`${path}.id`, evaluation.id);
+    checkConcept(`${path}.concept`, 'Evaluation', evaluation.concept);
+    evaluation.metrics.forEach((id) => checkConcept(`${path}.metrics`, 'Metric', id));
+    if (!scenario.experiments.some((experiment) => experiment.id === evaluation.experiment)) add(`${path}.experiment`, 'Choose an existing experiment.');
+    evaluation.executions.forEach((id) => {
+      if (!scenario.executions.some((execution) => execution.id === id)) add(`${path}.executions`, `Unknown execution ID: ${id}.`);
+    });
+  });
   return issues;
 }
 
@@ -218,6 +253,16 @@ export function toContract(scenario) {
     ...(scenario.executions.length ? { executions: scenario.executions.map((e) => ({
       id: e.id, concept: e.concept, task: e.task, agent: e.agent,
       ...(e.method ? { method: e.method } : {}),
+    })) } : {}),
+    ...(scenario.experiments.length ? { experiments: scenario.experiments.map((e) => ({
+      id: e.id, concept: e.concept, metrics: [...e.metrics],
+      null_hypothesis: e.null_hypothesis.trim(), alternative_hypothesis: e.alternative_hypothesis.trim(),
+      ...(e.hypothesis_language ? { hypothesis_language: e.hypothesis_language } : {}),
+      ...(e.description.trim() ? { description: e.description.trim() } : {}),
+    })) } : {}),
+    ...(scenario.evaluations.length ? { evaluations: scenario.evaluations.map((e) => ({
+      id: e.id, concept: e.concept, metrics: [...e.metrics], experiment: e.experiment, executions: [...e.executions],
+      ...(e.description.trim() ? { description: e.description.trim() } : {}),
     })) } : {}),
     ...(context ? { context: {
       concept: context.concept,
@@ -292,7 +337,15 @@ export function fromContract(input) {
     return { id: string(e.id, `${path}.id`), name: string(e.name, `${path}.name`), concept: string(e.concept, `${path}.concept`) };
   };
 
-  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions']);
+  /** @param {unknown} value @param {string} path */
+  const description = (value, path) => {
+    if (value == null) return '';
+    const text = string(value, path);
+    if (typeof value === 'string' && !text.trim()) problems.push(`${path}: expected nonblank text.`);
+    return text;
+  };
+
+  const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions', 'experiments', 'evaluations']);
   const uc = object(root.use_case, 'use_case', ['id', 'name', 'concept'], ['domain']);
   const domain = uc.domain == null ? '' : string(uc.domain, 'use_case.domain');
   /** @type {Context | null} */
@@ -311,6 +364,29 @@ export function fromContract(input) {
   const scenario = {
     id: string(root.id, 'id'),
     context,
+    experiments: root.experiments === undefined ? [] : array(root.experiments, 'experiments').map((value, i) => {
+      const path = `experiments.${i}`;
+      const e = object(value, path, ['id', 'concept', 'null_hypothesis', 'alternative_hypothesis'], ['metrics', 'hypothesis_language', 'description']);
+      if (e.hypothesis_language != null && e.hypothesis_language !== 'en') problems.push(`${path}.hypothesis_language: choose null or en.`);
+      return {
+        id: string(e.id, `${path}.id`), concept: string(e.concept, `${path}.concept`),
+        metrics: e.metrics === undefined ? [] : array(e.metrics, `${path}.metrics`).map((id, j) => string(id, `${path}.metrics.${j}`)),
+        null_hypothesis: string(e.null_hypothesis, `${path}.null_hypothesis`),
+        alternative_hypothesis: string(e.alternative_hypothesis, `${path}.alternative_hypothesis`),
+        hypothesis_language: e.hypothesis_language === 'en' ? 'en' : '',
+        description: description(e.description, `${path}.description`),
+      };
+    }),
+    evaluations: root.evaluations === undefined ? [] : array(root.evaluations, 'evaluations').map((value, i) => {
+      const path = `evaluations.${i}`;
+      const e = object(value, path, ['id', 'concept', 'experiment'], ['metrics', 'executions', 'description']);
+      return {
+        id: string(e.id, `${path}.id`), concept: string(e.concept, `${path}.concept`), experiment: string(e.experiment, `${path}.experiment`),
+        metrics: e.metrics === undefined ? [] : array(e.metrics, `${path}.metrics`).map((id, j) => string(id, `${path}.metrics.${j}`)),
+        executions: e.executions === undefined ? [] : array(e.executions, `${path}.executions`).map((id, j) => string(id, `${path}.executions.${j}`)),
+        description: description(e.description, `${path}.description`),
+      };
+    }),
     executions: root.executions === undefined ? [] : array(root.executions, 'executions').map((value, i) => {
       const path = `executions.${i}`;
       const e = object(value, path, ['id', 'concept', 'task', 'agent'], ['method']);

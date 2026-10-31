@@ -840,5 +840,206 @@
       "label": "Virtual Reality Input Parsinf Method",
       "definition": "A method that involves parsing virtual reality input."
     }
+  ],
+  "Experiment": [
+    {
+      "id": "CampusEnergyAllocationExperiment",
+      "label": "Campus Energy Allocation Experiment",
+      "definition": "An experiment designed to allocate energy in a campus."
+    },
+    {
+      "id": "DeliberationSupportExperiment",
+      "label": "Deliberation Support Experiment",
+      "definition": "An experiment focused on assessing the support provided by Hybrid Intelligence systems during group deliberation processes."
+    },
+    {
+      "id": "DiagnosisExperiment",
+      "label": "Diagnosis Experiment",
+      "definition": "An experiment designed to give a diagnosis."
+    },
+    {
+      "id": "FineManipulationExperiment",
+      "label": "Fine Manipulation Experiment",
+      "definition": "An experiment that measures how reliably fine manipulation tasks are performed."
+    },
+    {
+      "id": "OnlineTutoringExperiment",
+      "label": "Online Tutoring Experiment",
+      "definition": "An experiment designed to assess online tutoring."
+    },
+    {
+      "id": "ReinforcementLearningWithKnowledgeGraphsExperiment",
+      "label": "Reinforcement Learning with Knowledge Graphs Experiment",
+      "definition": "An experiment that evaluates the effectiveness of combining reinforcement learning with knowledge graph querying in Hybrid Intelligence systems."
+    },
+    {
+      "id": "SafetyComplianceExperiment",
+      "label": "Safety Compliance Experiment",
+      "definition": "An experiment that evaluates safety compliance during risky manipulation operations."
+    },
+    {
+      "id": "TransparencyTrustExperiment",
+      "label": "Transparency and Trust Experiment",
+      "definition": "An experiment designed to assess the impact of transparency on user trust in Hybrid Intelligence systems."
+    },
+    {
+      "id": "VirtualRealityEffectivenessExperiment",
+      "label": "Virtual Reality Effectiveness Experiment",
+      "definition": "An experiment designed to measure the effectiveness of virtual reality."
+    }
+  ],
+  "Evaluation": [
+    {
+      "id": "AIInterventionImpactEvaluation",
+      "label": "AI Intervention Impact Evaluation",
+      "definition": "An evaluation that measures the impact of AI interventions on user decision-making and outcomes."
+    },
+    {
+      "id": "CabinetOpenSafetyEvaluation",
+      "label": "Cabinet Opening Safety Evaluation",
+      "definition": "Evaluation of safety and correctness during cabinet opening."
+    },
+    {
+      "id": "CabinetUnlockQualityEvaluation",
+      "label": "Cabinet Unlock Quality Evaluation",
+      "definition": "Evaluation of precision, smoothness, and safety during cabinet unlocking."
+    },
+    {
+      "id": "ConfinedReachSafetyEvaluation",
+      "label": "Confined Reach Safety Evaluation",
+      "definition": "Evaluation of robot safety when reaching in confined environments."
+    },
+    {
+      "id": "ConflictResolutionAccuracyEvaluation",
+      "label": "Conflict Resolution Accuracy Evaluation",
+      "definition": "An evaluation of how accurately inconsistencies are detected and resolved."
+    },
+    {
+      "id": "DataCollectionQualityEvaluation",
+      "label": "Data Collection Quality Evaluation",
+      "definition": "An evaluation assessing the quality, completeness, and reliability of collected data."
+    },
+    {
+      "id": "FineManipulationEvaluation",
+      "label": "Fine Manipulation Evaluation",
+      "definition": "Evaluation of precision and correctness for fine manipulation tasks such as unlocking and precise insertion."
+    },
+    {
+      "id": "HeavyLiftStabilityEvaluation",
+      "label": "Heavy Lift Stability Evaluation",
+      "definition": "Evaluation of stability, safety, and execution success during heavy lifting."
+    },
+    {
+      "id": "KGQueryAccuracyEvaluation",
+      "label": "Knowledge Graph Query Accuracy Evaluation",
+      "definition": "Evaluation of how accurately knowledge graph queries support decision-making in manipulation sequences."
+    },
+    {
+      "id": "NegotationImpactEvaluation",
+      "label": "Negotation Impact Evaluation",
+      "definition": "An evaluation that measures the impact of a negotiation."
+    },
+    {
+      "id": "ReinforcementLearningWithKnowledgeGraphEvaluation",
+      "label": "Reinforcement Learning with Knowledge Graph Evaluation",
+      "definition": "An evaluation that assesses the integration of reinforcement learning and knowledge graph querying in Hybrid Intelligence systems."
+    },
+    {
+      "id": "RLExplanationClarityEvaluation",
+      "label": "RL Explanation Clarity Evaluation",
+      "definition": "Evaluation of explanation quality during reinforcement-learning-based actions."
+    },
+    {
+      "id": "TransparencyEvaluation",
+      "label": "Transparency Evaluation",
+      "definition": "An evaluation focused on measuring the transparency aspects of Hybrid Intelligence systems."
+    },
+    {
+      "id": "TutorImpactEvaluation",
+      "label": "Tutor Impact Evaluation",
+      "definition": "An evaluation that measures the impact of an AI online tutor."
+    },
+    {
+      "id": "VirtualRealityImpactEvaluation",
+      "label": "Virtual Reality Impact Evaluation",
+      "definition": "An evaluation that measures the impact of a virtual reality."
+    }
+  ],
+  "Metric": [
+    {
+      "id": "AnswerAccuracyMetric",
+      "label": "Answer Accuracy Metric",
+      "definition": "A metric that quantifies the accuracy of an answer."
+    },
+    {
+      "id": "CO2ReductionMetric",
+      "label": "CO2 Reduction Metric",
+      "definition": "A metric that quantifies the CO2 reduction."
+    },
+    {
+      "id": "DiagnosisAccuracyMetric",
+      "label": "Diagnosis Accuracy Metric",
+      "definition": "A metric that quantifies the accuracy of a diagnosis."
+    },
+    {
+      "id": "EnergyEfficiencyMetric",
+      "label": "Energy Efficiency Metric",
+      "definition": "A metric that quantifies energy efficiency."
+    },
+    {
+      "id": "EngagementTimeMetric",
+      "label": "Engagement Time Metric",
+      "definition": "A metric that quantifies the engagement time."
+    },
+    {
+      "id": "ExplanationClarityMetric",
+      "label": "Explanation Clarity Metric",
+      "definition": "A metric that assesses the clarity and comprehensibility of explanations provided by Hybrid Intelligence systems."
+    },
+    {
+      "id": "FairOutcomeMetric",
+      "label": "Fair Outcome Metric",
+      "definition": "A metric that measures the fairness of outcomes produced by Hybrid Intelligence systems."
+    },
+    {
+      "id": "LearningGainMetric",
+      "label": "Learning Gain Metric",
+      "definition": "A metric that quantifies the learning gain."
+    },
+    {
+      "id": "RecommendationRelevanceMetric",
+      "label": "Recommendation Relevance Metric",
+      "definition": "A metric that quantifies the relevance of recommendations."
+    },
+    {
+      "id": "SafetyComplianceMetric",
+      "label": "Safety Compliance Metric",
+      "definition": "A metric that evaluates the adherence of Hybrid Intelligence systems to safety standards and protocols."
+    },
+    {
+      "id": "TaskSuccessRateMetric",
+      "label": "Task Success Rate Metric",
+      "definition": "A metric that measures the success rate of task completion by Hybrid Intelligence systems."
+    },
+    {
+      "id": "TimeMetric",
+      "label": "Time Metric",
+      "definition": "A metric that quantifies the time."
+    },
+    {
+      "id": "TrustPreservationMetric",
+      "label": "Trust Preservation Metric",
+      "definition": "A metric that quantifies the extent to which user trust is maintained in Hybrid Intelligence systems."
+    },
+    {
+      "id": "UndueInfluenceMetric",
+      "label": "Undue Influence Metric",
+      "definition": "A metric that quantifies the level of undue influence exerted by Hybrid Intelligence systems over users."
+    },
+    {
+      "id": "UserComfortMetric",
+      "label": "User Comfort Metric",
+      "definition": "A metric that quantifies the user comfort."
+    }
   ]
 }

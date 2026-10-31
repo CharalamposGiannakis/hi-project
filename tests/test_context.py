@@ -23,6 +23,8 @@ def payload():
     data = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
     data.pop("capabilities", None)  # Isolate the Context projection and legacy contract.
     data.pop("executions", None)
+    data.pop("experiments", None)
+    data.pop("evaluations", None)
     return data
 
 

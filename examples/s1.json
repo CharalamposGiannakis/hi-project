@@ -83,6 +83,55 @@
       "method": "PostHocExplanationMethod"
     }
   ],
+  "experiments": [
+    {
+      "id": "data-collection-quality",
+      "concept": "TransparencyTrustExperiment",
+      "metrics": ["RecommendationRelevanceMetric"],
+      "null_hypothesis": "Data collection quality does not improve user outcomes.",
+      "alternative_hypothesis": "Better data collection improves personalization and outcomes."
+    },
+    {
+      "id": "conflict-accuracy",
+      "concept": "DeliberationSupportExperiment",
+      "metrics": ["FairOutcomeMetric"],
+      "null_hypothesis": "Conflict resolution does not improve data consistency.",
+      "alternative_hypothesis": "Argumentation-based conflict resolution increases consistency."
+    },
+    {
+      "id": "transparency-trust",
+      "concept": "TransparencyTrustExperiment",
+      "metrics": ["TrustPreservationMetric"],
+      "null_hypothesis": "Transparency does not affect trust.",
+      "alternative_hypothesis": "Transparency improves user trust."
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "data-collection-quality",
+      "concept": "DataCollectionQualityEvaluation",
+      "metrics": ["RecommendationRelevanceMetric"],
+      "experiment": "data-collection-quality",
+      "executions": ["data-collection"],
+      "description": "Evaluates the completeness, reliability, and relevance of collected data."
+    },
+    {
+      "id": "conflict-accuracy",
+      "concept": "ConflictResolutionAccuracyEvaluation",
+      "metrics": ["FairOutcomeMetric"],
+      "experiment": "conflict-accuracy",
+      "executions": ["conflict-resolution"],
+      "description": "Evaluates how accurately inconsistencies are identified and resolved."
+    },
+    {
+      "id": "transparency-impact",
+      "concept": "TransparencyEvaluation",
+      "metrics": ["TrustPreservationMetric"],
+      "experiment": "transparency-trust",
+      "executions": ["explanation"],
+      "description": "Evaluates how explanation clarity influences user trust under inconsistent data."
+    }
+  ],
   "agents": [
     {
       "id": "human-user",

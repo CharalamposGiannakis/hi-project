@@ -139,9 +139,9 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(await storedTriples(id)).toBe(0); // Previewing stores nothing.
 
     await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 84 triples');
+    expect(text()).toContain('Saved in GraphDB · repository hi · 117 triples');
     expect(text()).toContain(graphIri(id));
-    expect(await storedTriples(id)).toBe(84);
+    expect(await storedTriples(id)).toBe(117);
 
     click('Show team composition (CQ1)');
     await until(() => text().includes('CQ1 over the saved graph'));
@@ -164,6 +164,8 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await mountApp(api);
     await openJson(scenario(id, (data) => {
       delete data.executions; // Exercise the capability workflow without execution assignments.
+      delete data.experiments;
+      delete data.evaluations;
       data.agents.forEach((/** @type {import('../src/lib/scenario.js').Agent} */ agent) => { agent.name = 'Same display name'; });
       data.capabilities = [{
         id: 'shared', concept: 'ReasoningCapability',
@@ -194,6 +196,8 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     const id = `${RUN}-executions`;
     await mountApp(api);
     await openJson(scenario(id, (data) => {
+      delete data.experiments;
+      delete data.evaluations;
       data.executions = [
         { id: 'first', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'human-user', method: 'DataCollectionMethod' },
         { id: 'second', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'ai-assistant' },
@@ -223,6 +227,50 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     })]);
   }, 60_000);
 
+  it('persists shared evaluations, multiple metrics, descriptions, and tagged hypotheses', async () => {
+    const id = `${RUN}-assessment`;
+    await mountApp(api);
+    await openJson(scenario(id, (data) => {
+      const metrics = ['FairOutcomeMetric', 'UndueInfluenceMetric', 'ExplanationClarityMetric'];
+      data.experiments = [{
+        ...data.experiments[0], id: 'shared', concept: 'DeliberationSupportExperiment', metrics,
+        hypothesis_language: 'en', description: 'Shared experiment description.',
+      }];
+      data.evaluations = [{
+        id: 'shared', concept: 'AIInterventionImpactEvaluation', metrics, experiment: 'shared',
+        executions: data.executions.map((/** @type {{ id: string }} */ e) => e.id), description: 'Shared evaluation description.',
+      }];
+    }));
+    await saveAndTrack(id);
+    expect(await storedTriples(id)).toBe(102);
+    const base = `urn:hi-app:scenario:${id}:`;
+    const rows = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      SELECT ?execution ?evaluation ?experiment ?metric WHERE { GRAPH <${graphIri(id)}> {
+        ?execution hi:evaluatedBy ?evaluation .
+        ?evaluation a hi:Evaluation ; hi:hasEvaluationConcept <https://w3id.org/hi-thesaurus/AIInterventionImpactEvaluation> ;
+          hi:hasExperiment ?experiment ; hi:hasMetricConcept ?metric .
+        ?experiment a hi:Experiment ; hi:hasMetricTested ?metric .
+      } }
+    `);
+    expect(rows).toHaveLength(9);
+    expect(new Set(rows.map((row) => row.evaluation.value))).toEqual(new Set([`${base}evaluation:shared`]));
+    expect(new Set(rows.map((row) => row.experiment.value))).toEqual(new Set([`${base}experiment:shared`]));
+    expect(new Set(rows.map((row) => row.execution.value))).toEqual(new Set(example.executions.map((e) => `${base}execution:${e.id}`)));
+    const literals = await select(`
+      PREFIX hi: <https://w3id.org/hi-ontology#>
+      PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+      SELECT ?null ?alternative ?experimentDescription ?evaluationDescription WHERE { GRAPH <${graphIri(id)}> {
+        <${base}experiment:shared> hi:hasNullHypothesis ?null ; hi:hasAlternativeHypothesis ?alternative ; rdfs:comment ?experimentDescription .
+        <${base}evaluation:shared> rdfs:comment ?evaluationDescription .
+      } }
+    `);
+    expect(literals).toHaveLength(1);
+    expect(literals[0].null).toMatchObject({ value: example.experiments[0].null_hypothesis, 'xml:lang': 'en' });
+    expect(literals[0].alternative).toMatchObject({ 'xml:lang': 'en' });
+    expect(literals[0].evaluationDescription.value).toBe('Shared evaluation description.');
+  }, 60_000);
+
   it('three agents: CQ1 lists every member with its own roles', async () => {
     const id = `${RUN}-three`;
     await mountApp(api);
@@ -230,7 +278,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       data.agents.push({ id: 'second-human', name: 'Clinician', kind: 'human', roles: ['HumanUserRole', 'ClinicianRole'] });
     }));
     await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 90 triples');
+    expect(text()).toContain('Saved in GraphDB · repository hi · 123 triples');
     click('Show team composition (CQ1)');
     await until(() => text().includes('3 members'));
     expect(teamRows()).toEqual([
@@ -266,7 +314,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(text()).toContain(graphIri(newId));
     expect(await storedLabel(newId, 'human-user')).toEqual(['Renamed participant']);
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']); // Original untouched.
-    expect(await storedTriples(id)).toBe(84);
+    expect(await storedTriples(id)).toBe(117);
   }, 60_000);
 
   it('409: an existing ID is reported and never overwritten', async () => {
@@ -285,7 +333,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await until(() => text().includes('Not saved: this scenario ID already exists in GraphDB.'));
     expect(text()).not.toContain('Saved in GraphDB');
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']);
-    expect(await storedTriples(id)).toBe(84);
+    expect(await storedTriples(id)).toBe(117);
     expect(document.querySelector('.save button.primary')?.textContent?.trim()).toBe('Save as new scenario');
   }, 60_000);
 
@@ -313,6 +361,6 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     await until(() => text().includes('The team query failed. The scenario is still saved.'));
     expect(text()).toContain('GraphDB is unavailable');
     expect(text()).toContain('Saved in GraphDB');
-    expect(await storedTriples(id)).toBe(84);
+    expect(await storedTriples(id)).toBe(117);
   }, 60_000);
 });
