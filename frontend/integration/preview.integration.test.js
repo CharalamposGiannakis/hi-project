@@ -12,12 +12,19 @@ import s2 from '../../examples/s2.json';
 import s3 from '../../examples/s3.json';
 import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
+import s6 from '../../examples/s6.json';
 import { requestPreview } from '../src/lib/api.js';
 import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
-const reconstructions = [{ label: 'S2', canonical: s2, triples: 195 }, { label: 'S3', canonical: s3, triples: 135 }, { label: 'S4', canonical: s4, triples: 154 }, { label: 'S5', canonical: s5, triples: 139 }];
+const reconstructions = [
+  { label: 'S2', canonical: s2, triples: 195 },
+  { label: 'S3', canonical: s3, triples: 135 },
+  { label: 'S4', canonical: s4, triples: 154 },
+  { label: 'S5', canonical: s5, triples: 139 },
+  { label: 'S6', canonical: s6, triples: 150 },
+];
 
 /** @type {{ url: string, stop: () => void } | undefined} */
 let backend;
@@ -211,7 +218,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       selectChecks(section, 'Metrics', experiment.metrics);
       enterText(section, 'Null hypothesis', experiment.null_hypothesis);
       enterText(section, 'Alternative hypothesis', experiment.alternative_hypothesis);
-      if ('hypothesis_language' in experiment) selectValue(section, 'Hypothesis literal format', String(experiment.hypothesis_language));
+      selectValue(section, 'Hypothesis literal format', 'hypothesis_language' in experiment ? String(experiment.hypothesis_language) : '');
       if ('description' in experiment && typeof experiment.description === 'string') enterText(section, 'Description in English (optional)', experiment.description);
     }
     for (const evaluation of canonical.evaluations) {
@@ -262,6 +269,12 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const described = [canonical.context, ...canonical.tasks, ...canonical.experiments, ...canonical.evaluations, ...canonical.interactions]
       .filter((entity) => 'description' in entity && typeof entity.description === 'string');
     expect(rdf.match(/<http:\/\/www.w3.org\/2000\/01\/rdf-schema#comment>/g) ?? []).toHaveLength(described.length);
+    for (const experiment of canonical.experiments) {
+      const language = 'hypothesis_language' in experiment ? `@${experiment.hypothesis_language}` : '';
+      const subject = `<urn:hi-app:scenario:${entered.id}:experiment:${ids.experiments[experiment.id]}>`;
+      expect(rdf).toContain(`${subject} <https://w3id.org/hi-ontology#hasNullHypothesis> ${JSON.stringify(experiment.null_hypothesis)}${language} .`);
+      expect(rdf).toContain(`${subject} <https://w3id.org/hi-ontology#hasAlternativeHypothesis> ${JSON.stringify(experiment.alternative_hypothesis)}${language} .`);
+    }
     const preview = await requestPreview(expected, { baseUrl });
     expect(preview.kind).toBe('ok');
     if (preview.kind !== 'ok') throw new Error(JSON.stringify(preview));

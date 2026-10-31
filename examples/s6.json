@@ -1,0 +1,141 @@
+{
+  "id": "s6",
+  "use_case": {
+    "id": "campus-energy-negotiation",
+    "name": "Campus energy negotiation",
+    "concept": "EnergyNegotiationUseCase",
+    "domain": "SmartCampusDomain"
+  },
+  "goal": {
+    "id": "fair-efficient-heating",
+    "name": "Fair and efficient heating",
+    "concept": "FairEfficientHeatingGoal",
+    "required_tasks": ["learn-occupancy", "learn-energy-behavior", "negotiate-allocation", "coordinate-with-operator", "explain-decision"]
+  },
+  "context": {
+    "concept": "SmartCampusContext",
+    "phenomena": ["LoadVariabilityPhenomenon", "CooperativeLearningDynamicsPhenomenon"],
+    "constraints": ["SustainabilityConstraint", "UserComfortConstraint", "TransparencyConstraint"]
+  },
+  "tasks": [
+    { "id": "learn-occupancy", "name": "Learn occupancy", "concept": "LearnOccupancyTask" },
+    { "id": "learn-energy-behavior", "name": "Learn energy behavior", "concept": "LearnEnergyBehaviorTask" },
+    { "id": "negotiate-allocation", "name": "Negotiate allocation", "concept": "AllocationNegotationTask" },
+    { "id": "coordinate-with-operator", "name": "Coordinate with operator", "concept": "OperatorCoordinationTask" },
+    { "id": "explain-decision", "name": "Explain decision", "concept": "ExplanationTask" }
+  ],
+  "agents": [
+    { "id": "human-grid-operator", "name": "Human grid operator", "kind": "human", "roles": ["GridOperatorRole"] },
+    { "id": "ai-building-agent", "name": "AI building agent", "kind": "artificial", "roles": ["BuilderRole"] }
+  ],
+  "capabilities": [
+    {
+      "id": "pattern-learning",
+      "concept": "PatternLearningCapability",
+      "agents": ["ai-building-agent"],
+      "tasks": ["learn-occupancy"]
+    },
+    {
+      "id": "negotiation",
+      "concept": "NegotiationCapability",
+      "agents": ["ai-building-agent"],
+      "tasks": ["negotiate-allocation"]
+    },
+    {
+      "id": "kg-query",
+      "concept": "KnowledgeGraphQueryingCapability",
+      "agents": ["ai-building-agent"],
+      "tasks": ["learn-energy-behavior"]
+    },
+    {
+      "id": "explaining",
+      "concept": "ExplainingCapability",
+      "agents": ["ai-building-agent", "human-grid-operator"],
+      "tasks": ["explain-decision"]
+    },
+    {
+      "id": "operator-coordination",
+      "concept": "OperatorCoordinationCapability",
+      "agents": ["human-grid-operator"],
+      "tasks": ["coordinate-with-operator"]
+    }
+  ],
+  "executions": [
+    {
+      "id": "learn-occupancy",
+      "concept": "LearnOccupancyTaskExecution",
+      "task": "learn-occupancy",
+      "agent": "ai-building-agent",
+      "method": "CooperativeLearningMethod"
+    },
+    {
+      "id": "learn-energy-behavior",
+      "concept": "LearnEnergyBehaviorTaskExecution",
+      "task": "learn-energy-behavior",
+      "agent": "ai-building-agent",
+      "method": "KnowledgeGraphQueryMethod"
+    },
+    {
+      "id": "negotiate",
+      "concept": "NegotiationTaskExecution",
+      "task": "negotiate-allocation",
+      "agent": "ai-building-agent",
+      "method": "ProtocolNegotiationMethod"
+    },
+    {
+      "id": "coordinate-with-operator",
+      "concept": "CoordinationTaskExecution",
+      "task": "coordinate-with-operator",
+      "agent": "human-grid-operator",
+      "method": "ProtocolNegotiationMethod"
+    },
+    {
+      "id": "explain-decision",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-decision",
+      "agent": "ai-building-agent",
+      "method": "PostHocExplanationMethod"
+    },
+    {
+      "id": "explain-operator",
+      "concept": "ExplanationTaskExecution",
+      "task": "explain-decision",
+      "agent": "human-grid-operator",
+      "method": "PostHocExplanationMethod"
+    }
+  ],
+  "experiments": [
+    {
+      "id": "campus-energy",
+      "concept": "CampusEnergyAllocationExperiment",
+      "metrics": ["EnergyEfficiencyMetric", "UserComfortMetric", "FairOutcomeMetric", "CO2ReductionMetric"],
+      "null_hypothesis": "Negotiation and co-learning do not improve fairness or efficiency compared to independent building control.",
+      "alternative_hypothesis": "Co-learning and negotiation improve efficiency, fairness, and comfort while reducing CO2 emissions."
+    }
+  ],
+  "evaluations": [
+    {
+      "id": "negotiation-impact",
+      "concept": "NegotationImpactEvaluation",
+      "metrics": ["EnergyEfficiencyMetric", "UserComfortMetric", "FairOutcomeMetric", "CO2ReductionMetric"],
+      "experiment": "campus-energy",
+      "executions": ["learn-occupancy", "learn-energy-behavior", "negotiate", "coordinate-with-operator", "explain-decision", "explain-operator"]
+    }
+  ],
+  "interactions": [
+    {
+      "id": "negotiation",
+      "intent": "NegotiationIntent",
+      "modality": "NetworkProtocolModality",
+      "agents": ["ai-building-agent", "human-grid-operator"],
+      "executions": ["negotiate"]
+    },
+    {
+      "id": "explain-allocation",
+      "intent": "ExplanationIntent",
+      "modality": "DashboardModality",
+      "agents": ["ai-building-agent", "human-grid-operator"],
+      "executions": ["explain-decision"]
+    }
+  ]
+}
