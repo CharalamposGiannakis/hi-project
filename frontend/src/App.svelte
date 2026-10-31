@@ -185,11 +185,15 @@
     <fieldset>
       <legend>Team goal</legend>
       <div class="field">
-        <label for="goal-name">Description</label>
+        <label for="goal-name">Name</label>
         <input id="goal-name" bind:value={scenario.goal.name} placeholder="e.g. Maintain and improve user wellbeing" aria-invalid={errorFor('goal.name') ? 'true' : undefined} />
         {#if errorFor('goal.name')}<p class="error">{errorFor('goal.name')}</p>{/if}
       </div>
       <ConceptSelect label="Goal type" category="Goal" bind:value={scenario.goal.concept} error={errorFor('goal.concept')} />
+      <div class="field">
+        <label for="goal-description">Description in English (optional)</label>
+        <textarea id="goal-description" rows="2" bind:value={scenario.goal.description}></textarea>
+      </div>
     </fieldset>
 
     <fieldset>
@@ -202,11 +206,15 @@
             <button type="button" class="link" onclick={() => removeEntity(scenario, 'tasks', task.id)} disabled={scenario.tasks.length <= 1}>Remove</button>
           </div>
           <div class="field">
-            <label for="task-{task.id}">Description</label>
+            <label for="task-{task.id}">Name</label>
             <input id="task-{task.id}" bind:value={task.name} aria-invalid={errorFor(`tasks.${i}.name`) ? 'true' : undefined} />
             {#if errorFor(`tasks.${i}.name`)}<p class="error">{errorFor(`tasks.${i}.name`)}</p>{/if}
           </div>
           <ConceptSelect label="Task type" category="Task" bind:value={task.concept} error={errorFor(`tasks.${i}.concept`)} />
+          <div class="field">
+            <label for="task-description-{task.id}">Description in English (optional)</label>
+            <textarea id="task-description-{task.id}" rows="2" bind:value={task.description}></textarea>
+          </div>
         </section>
       {/each}
       <button type="button" onclick={addTask}>Add task</button>

@@ -9,7 +9,8 @@
   "goal": {
     "id": "user-wellbeing",
     "name": "Maintain and improve user wellbeing",
-    "concept": "UserWellbeingGoal"
+    "concept": "UserWellbeingGoal",
+    "description": "Maintain and improve user wellbeing using data fusion, conflict resolution and explanations."
   },
   "context": {
     "concept": "HealthMonitoringContext",
@@ -21,17 +22,20 @@
     {
       "id": "data-collection",
       "name": "Collect self-reports and sensor activity data",
-      "concept": "DataCollectionTask"
+      "concept": "DataCollectionTask",
+      "description": "Collect user self-reports and sensor-based activity data."
     },
     {
       "id": "conflict-resolution",
       "name": "Resolve inconsistencies between reported and sensed data",
-      "concept": "ConflictResolutionTask"
+      "concept": "ConflictResolutionTask",
+      "description": "Detect and resolve inconsistencies between reported and sensed data."
     },
     {
       "id": "explanation",
       "name": "Provide explanations to maintain trust and engagement",
-      "concept": "ExplanationTask"
+      "concept": "ExplanationTask",
+      "description": "Provide explanations to maintain trust and engagement."
     }
   ],
   "capabilities": [

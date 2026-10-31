@@ -48,7 +48,7 @@ def test_s1_adds_exactly_thirty_three_original_assessment_triples(payload):
     payload.pop("experiments")
     payload.pop("evaluations")
     legacy = to_rdf(Scenario.model_validate(payload))
-    assert len(expected) == 33 and len(graph) == 117
+    assert len(expected) == 33 and len(graph) == 121
     assert set(graph) - set(legacy) == expected and set(legacy) <= set(graph)
     assert all(value.language is None and value.datatype is None for value in graph.objects(None, HI.hasNullHypothesis))
     assert not list(graph.triples((None, HI.hasInteractionEpisode, None)))
@@ -164,9 +164,9 @@ def test_optional_collections_descriptions_and_stable_order(payload):
     assert Literal("Optional experiment description.", lang="en") in set(changed.objects(None, RDFS.comment))
     payload["experiments"] = []
     payload["evaluations"] = []
-    assert len(to_rdf(Scenario.model_validate(payload))) == 84
+    assert len(to_rdf(Scenario.model_validate(payload))) == 88
     del payload["experiments"], payload["evaluations"]
-    assert len(to_rdf(Scenario.model_validate(payload))) == 84
+    assert len(to_rdf(Scenario.model_validate(payload))) == 88
 
 
 @pytest.mark.parametrize(("collection", "field", "value", "code"), [

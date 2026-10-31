@@ -76,6 +76,33 @@ function enterText(root, label, value) {
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('enters all four S1 goal and task descriptions and previews English comments independently of names', async () => {
+    await mountApp();
+    clickButton('Load S1 example');
+    const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
+    const tasks = example.tasks.map((task) => /** @type {Element} */ (document.querySelector(`#task-${task.id}`)?.closest('section')));
+    for (const section of [goal, ...tasks]) {
+      expect([...section.querySelectorAll('label')].some((label) => label.textContent === 'Name')).toBe(true);
+      enterText(section, 'Description in English (optional)', '');
+    }
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('123 triples · not saved'); // Legacy S1 without these comments.
+
+    enterText(goal, 'Description in English (optional)', example.goal.description);
+    expect(document.querySelector('pre.rdf')).toBeNull();
+    example.tasks.forEach((task, i) => enterText(tasks[i], 'Description in English (optional)', task.description));
+    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(example);
+    clickButton('Validate & preview RDF');
+    await until(() => text().includes('Valid:'));
+    expect(text()).toContain('127 triples · not saved');
+    const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
+    for (const { kind, entity } of [{ kind: 'goal', entity: example.goal }, ...example.tasks.map((task) => ({ kind: 'task', entity: task }))]) {
+      expect(rdf).toContain(`<urn:hi-app:scenario:s1:${kind}:${entity.id}> <http://www.w3.org/2000/01/rdf-schema#comment> "${entity.description}"@en .`);
+      expect(rdf).toContain(`<urn:hi-app:scenario:s1:${kind}:${entity.id}> <http://www.w3.org/2000/01/rdf-schema#label> "${entity.name}" .`);
+    }
+  });
+
   it('enters S1 interaction explicitly and supports unlinked descriptions', async () => {
     await mountApp();
     clickButton('Load S1 example');
@@ -102,13 +129,13 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(entered).toMatchObject({ intent: 'ExplanationIntent', modality: 'VerbalDialogueModality', agents: example.interactions[0].agents, executions: ['explanation'] });
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('123 triples · not saved');
+    expect(text()).toContain('127 triples · not saved');
     /** @type {HTMLInputElement} */ (section.querySelector('input[value="explanation"]')).click();
     flushSync();
     expect(document.querySelector('pre.rdf')).toBeNull();
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('122 triples · not saved');
+    expect(text()).toContain('126 triples · not saved');
     enterText(section, 'Description in English (optional)', 'User-entered interaction description.');
     const changed = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').interactions[0];
     expect(changed.id).toBe(entered.id);
@@ -189,7 +216,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(entered.evaluations.map(({ id, experiment, ...facts }) => facts)).toEqual(example.evaluations.map(({ id, experiment, ...facts }) => facts));
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('123 triples · not saved');
+    expect(text()).toContain('127 triples · not saved');
     const firstExperiment = /** @type {Element} */ (document.querySelector('[data-experiment-id]'));
     selectValue(firstExperiment, 'Hypothesis literal format', 'en');
     expect(document.querySelector('pre.rdf')).toBeNull();
@@ -205,7 +232,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     flushSync();
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('126 triples · not saved');
+    expect(text()).toContain('130 triples · not saved');
   });
 
   it.each(['experiment', 'execution'])('keeps evaluation data when a referenced %s is deleted and supports repair', async (kind) => {
@@ -258,13 +285,13 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(new Set(entered.executions.map((e) => e.id)).size).toBe(3);
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('84 triples · not saved');
+    expect(text()).toContain('88 triples · not saved');
     selectValue(/** @type {Element} */ (document.querySelector('[data-execution-id]')), 'Method (optional)', '');
     expect(document.querySelector('pre.rdf')).toBeNull();
     expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions[0]).not.toHaveProperty('method');
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('83 triples · not saved');
+    expect(text()).toContain('87 triples · not saved');
   });
 
   it.each(['agent', 'task'])('preserves executions after deleting a referenced %s and requires repair', async (kind) => {
@@ -321,7 +348,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(new Set(entered.capabilities.map((c) => c.id)).size).toBe(4);
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('123 triples · not saved');
+    expect(text()).toContain('127 triples · not saved');
 
     const first = document.querySelector('[data-capability-id]');
     for (const id of ['human-user', 'conflict-resolution']) {
@@ -335,7 +362,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(document.querySelector('pre.rdf')).toBeNull();
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('126 triples · not saved');
+    expect(text()).toContain('130 triples · not saved');
   });
 
   it('enters the complete original S1 Context through the form', async () => {
@@ -367,7 +394,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('123 triples · not saved');
+    expect(text()).toContain('127 triples · not saved');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain('<urn:hi-app:scenario:s1:context>');
     expect(rdf).toContain(`"${example.context.description}"@en`);
@@ -385,6 +412,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     await until(() => text().includes('Loaded context.json'));
     expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(example);
     expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#context-description')).value).toBe(example.context.description);
+    expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#goal-description')).value).toBe(example.goal.description);
+    for (const task of example.tasks) {
+      expect(/** @type {HTMLTextAreaElement} */ (document.querySelector(`#task-description-${task.id}`)).value).toBe(task.description);
+    }
   });
 
   it('previews S1 with exactly the RDF the Python pipeline generates, and invalidates it on edit', async () => {
@@ -400,7 +431,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Load S1 example');
     clickButton('Validate & preview RDF');
     await until(() => text().includes('Valid:'));
-    expect(text()).toContain('123 triples · not saved');
+    expect(text()).toContain('127 triples · not saved');
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected);
 
     const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));

@@ -6,6 +6,7 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {{ id: string, label: string, definition: string }} Concept
  * @typedef {'UseCase' | 'Domain' | 'Goal' | 'Task' | 'Role' | 'Context' | 'Phenomenon' | 'Constraint' | 'Capability' | 'TaskExecution' | 'Method' | 'Experiment' | 'Evaluation' | 'Metric' | 'InteractionIntent' | 'InteractionModality'} Category
  * @typedef {{ id: string, name: string, concept: string }} Entity
+ * @typedef {Entity & { description: string }} DescribedEntity
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
  * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
  * @typedef {{ concept: string, phenomena: string[], constraints: string[], description: string }} Context
@@ -14,7 +15,7 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {{ id: string, concept: string, metrics: string[], null_hypothesis: string, alternative_hypothesis: string, hypothesis_language: '' | 'en', description: string }} Experiment
  * @typedef {{ id: string, concept: string, metrics: string[], experiment: string, executions: string[], description: string }} Evaluation
  * @typedef {{ id: string, intent: string, modality: string, agents: string[], executions: string[], description: string }} Interaction
- * @typedef {{ id: string, use_case: UseCase, goal: Entity, tasks: Entity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
+ * @typedef {{ id: string, use_case: UseCase, goal: DescribedEntity, tasks: DescribedEntity[], agents: Agent[], context: Context | null, capabilities: Capability[], executions: Execution[], experiments: Experiment[], evaluations: Evaluation[], interactions: Interaction[] }} Scenario
  * @typedef {{ path: string, message: string }} Issue
  */
 
@@ -52,9 +53,9 @@ export function newId(taken = []) {
   }
 }
 
-/** @param {Iterable<string>} [taken] @returns {Entity} */
+/** @param {Iterable<string>} [taken] @returns {DescribedEntity} */
 export function newTask(taken) {
-  return { id: newId(taken), name: '', concept: '' };
+  return { id: newId(taken), name: '', concept: '', description: '' };
 }
 
 /**
@@ -115,7 +116,7 @@ export function emptyScenario() {
   return {
     id: crypto.randomUUID(),
     use_case: { id: newId(), name: '', concept: '', domain: '' },
-    goal: { id: newId(), name: '', concept: '' },
+    goal: { id: newId(), name: '', concept: '', description: '' },
     tasks: [newTask()],
     agents: [human, newAgent('artificial', [human.id])],
     context: null,
@@ -264,11 +265,13 @@ export function toContract(scenario) {
   const { use_case: useCase, context } = scenario;
   /** @param {Entity} e */
   const entity = (e) => ({ id: e.id, name: e.name.trim(), concept: e.concept });
+  /** @param {DescribedEntity} e */
+  const describedEntity = (e) => ({ ...entity(e), ...(e.description.trim() ? { description: e.description.trim() } : {}) });
   return {
     id: scenario.id,
     use_case: { ...entity(useCase), ...(useCase.domain ? { domain: useCase.domain } : {}) },
-    goal: entity(scenario.goal),
-    tasks: scenario.tasks.map(entity),
+    goal: describedEntity(scenario.goal),
+    tasks: scenario.tasks.map(describedEntity),
     agents: scenario.agents.map((a) => ({ id: a.id, name: a.name.trim(), kind: a.kind, roles: [...a.roles] })),
     ...(scenario.capabilities.length ? { capabilities: scenario.capabilities.map((c) => ({
       id: c.id, concept: c.concept, agents: [...c.agents], tasks: [...c.tasks],
@@ -359,18 +362,20 @@ export function fromContract(input) {
     }
     return value;
   };
-  /** @param {unknown} value @param {string} path @returns {Entity} */
-  const entity = (value, path) => {
-    const e = object(value, path, ['id', 'name', 'concept']);
-    return { id: string(e.id, `${path}.id`), name: string(e.name, `${path}.name`), concept: string(e.concept, `${path}.concept`) };
-  };
-
   /** @param {unknown} value @param {string} path */
   const description = (value, path) => {
     if (value == null) return '';
     const text = string(value, path);
     if (typeof value === 'string' && !text.trim()) problems.push(`${path}: expected nonblank text.`);
     return text;
+  };
+  /** @param {unknown} value @param {string} path @returns {DescribedEntity} */
+  const describedEntity = (value, path) => {
+    const e = object(value, path, ['id', 'name', 'concept'], ['description']);
+    return {
+      id: string(e.id, `${path}.id`), name: string(e.name, `${path}.name`), concept: string(e.concept, `${path}.concept`),
+      description: description(e.description, `${path}.description`),
+    };
   };
 
   const root = object(data, '', ['id', 'use_case', 'goal', 'tasks', 'agents'], ['context', 'capabilities', 'executions', 'experiments', 'evaluations', 'interactions']);
@@ -452,8 +457,8 @@ export function fromContract(input) {
       concept: string(uc.concept, 'use_case.concept'),
       domain,
     },
-    goal: entity(root.goal, 'goal'),
-    tasks: array(root.tasks, 'tasks').map((t, i) => entity(t, `tasks.${i}`)),
+    goal: describedEntity(root.goal, 'goal'),
+    tasks: array(root.tasks, 'tasks').map((t, i) => describedEntity(t, `tasks.${i}`)),
     agents: array(root.agents, 'agents').map((value, i) => {
       const path = `agents.${i}`;
       const a = object(value, path, ['id', 'name', 'kind', 'roles']);

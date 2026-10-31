@@ -55,7 +55,7 @@ def test_s1_reproduces_all_twenty_one_supported_execution_triples(payload):
     legacy = to_rdf(Scenario.model_validate(payload))
     assert len(expected) == 21
     assert set(graph) - set(legacy) == expected
-    assert set(legacy) <= set(graph) and len(graph) == 84
+    assert set(legacy) <= set(graph) and len(graph) == 88
     for predicate in (HI.evaluatedBy, HI.hasInteractionEpisode, HI.isEligibleForTask, HI.executesTask, HI.isAssignedToTask):
         assert not list(graph.triples((None, predicate, None)))
     conforms, _, report = validate_rdf(graph)
@@ -109,14 +109,14 @@ def test_optional_methods_legacy_json_and_explicit_performance_without_capabilit
     payload.pop("executions")
     legacy = to_rdf(Scenario.model_validate(payload))
     payload["executions"] = []
-    assert len(legacy) == 63
+    assert len(legacy) == 67
     assert to_ntriples(to_rdf(Scenario.model_validate(payload))) == to_ntriples(legacy)
     payload["capabilities"] = []
     payload["executions"] = [{
         "id": "explicit", "concept": "DataCollectionTaskExecution", "task": "data-collection", "agent": "ai-assistant",
     }]
     graph = to_rdf(Scenario.model_validate(payload))
-    assert len(graph) == 49
+    assert len(graph) == 53
     assert not list(graph.triples((None, HI.hasMethodConcept, None)))
     payload["executions"][0]["method"] = None
     assert set(to_rdf(Scenario.model_validate(payload))) == set(graph)
