@@ -83,6 +83,12 @@ def assert_protected(state, before):
         assert after[iri] == graph
 
 
+def assert_created_report(output, iris):
+    prefix = "Created this run (confirmed save responses): "
+    reports = [line for line in output.splitlines() if line.startswith(prefix)]
+    assert reports == [prefix + (", ".join(iris) or "none")]
+
+
 def test_inventory_complete_semantic_validation_and_counts(entries):
     assert [(e.id, e.count) for e in entries] == [
         ("s1", 127), ("s2", 195), ("s3", 135), ("s4", 154),
@@ -118,6 +124,7 @@ def test_first_apply_second_apply_and_read_only_verify(database, entries, capsys
     assert canonical.run("plan", store, entries) == 0  # Missing is actionable, not a plan error.
     assert not state["writes"]
     assert canonical.run("apply", store, entries) == 0
+    assert_created_report(capsys.readouterr().out, [entry.iri for entry in entries])
     assert len(state["writes"]) == 7
     for entry in entries:
         stored = state["data"].graph(URIRef(entry.iri))
@@ -127,7 +134,7 @@ def test_first_apply_second_apply_and_read_only_verify(database, entries, capsys
     assert_protected(state, before)
     imported = snapshot(state["data"])
     assert canonical.run("apply", store, entries) == 0
-    assert "Created this run (confirmed save responses): none" in capsys.readouterr().out
+    assert_created_report(capsys.readouterr().out, [])
     assert len(state["writes"]) == 7
     assert canonical.run("verify", store, entries) == 0
     assert snapshot(state["data"]) == imported
@@ -187,27 +194,32 @@ def test_interrupted_apply_reports_confirmed_and_uncertain_graphs_and_resumes(da
     state.update(fail_at=3, lose_response=lose_response)
     assert canonical.run("apply", store, entries) == 1
     output = capsys.readouterr().out
-    assert f"Created this run (confirmed save responses): {entries[0].iri}, {entries[1].iri}" in output
-    assert f"Save outcome for <{entries[2].iri}> may be uncertain" in output
+    assert_created_report(output, [entry.iri for entry in entries[:2]])
+    assert [line for line in output.splitlines() if line.startswith("Save outcome for <")] == [
+        f"Save outcome for <{entries[2].iri}> may be uncertain; inspect it with plan/verify before resuming.",
+    ]
     present = entries[:3 if lose_response else 2]
+    assert set(snapshot(state["data"])) == set(before) | {entry.iri for entry in present}
     for entry in present:
         assert set(state["data"].graph(URIRef(entry.iri))) == set(entry.graph)
     assert_protected(state, before)
     state["fail_at"] = None
     state["writes"].clear()
     assert canonical.run("apply", store, entries) == 0
+    assert_created_report(capsys.readouterr().out, [entry.iri for entry in entries[len(present):]])
     assert len(state["writes"]) == 7 - len(present)
     for entry in entries:
         assert set(state["data"].graph(URIRef(entry.iri))) == set(entry.graph)
     assert_protected(state, before)
 
 
-def test_partially_imported_corpus_is_completed_without_touching_existing_graphs(database, entries):
+def test_partially_imported_corpus_is_completed_without_touching_existing_graphs(database, entries, capsys):
     store, state = database
     for entry in entries[:3]:
         seed(state, entry)
     before = snapshot(state["data"])
     assert canonical.run("apply", store, entries) == 0
+    assert_created_report(capsys.readouterr().out, [entry.iri for entry in entries[3:]])
     assert len(state["writes"]) == 4
     assert_protected(state, before)
 
@@ -256,6 +268,44 @@ def test_verify_reports_missing_and_incomplete_graphs_without_writes(database, e
     assert entries[2].state == canonical.MISSING
     assert not state["writes"]
     assert snapshot(state["data"]) == before
+
+
+@pytest.mark.parametrize("present", [0, 2])
+def test_verify_fails_for_missing_graphs_without_conflicts(database, entries, present):
+    store, state = database
+    for entry in entries[:present]:
+        seed(state, entry)
+    before = snapshot(state["data"])
+    assert canonical.run("verify", store, entries) == 1
+    assert [entry.state for entry in entries] == [canonical.IDENTICAL] * present + [canonical.MISSING] * (7 - present)
+    assert not state["writes"]
+    assert snapshot(state["data"]) == before
+
+
+def test_apply_fails_post_import_verification_without_cleanup_or_overwrite(database, entries, monkeypatch, capsys):
+    store, state = database
+    before = snapshot(state["data"])
+    after_creation = {}
+    real_save = store.save
+
+    def save_then_change_graph(scenario_id, graph):
+        location = real_save(scenario_id, graph)
+        if scenario_id == entries[-1].id:
+            # Simulate an external edit after all save responses were confirmed.
+            stored = state["data"].graph(URIRef(entries[0].iri))
+            use_case = next(stored.subjects(RDF.type, HI.UseCase))
+            stored.set((use_case, RDFS.label, Literal("Changed after successful creation")))
+            after_creation.update(snapshot(state["data"]))
+        return location
+
+    monkeypatch.setattr(store, "save", save_then_change_graph)
+    assert canonical.run("apply", store, entries) == 1
+    assert_created_report(capsys.readouterr().out, [entry.iri for entry in entries])
+    assert [entry.state for entry in entries] == [canonical.CONFLICT] + [canonical.IDENTICAL] * 6
+    assert len(state["writes"]) == 7  # Only the original guarded INSERTs; no repair writes.
+    assert set(after_creation) == set(before) | {entry.iri for entry in entries}
+    assert snapshot(state["data"]) == after_creation  # Retain even the conflicting graph.
+    assert_protected(state, before)
 
 
 def test_verify_checks_cq1_roles_and_distinct_identities_not_only_graph_equality(database, entries, monkeypatch):

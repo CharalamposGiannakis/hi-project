@@ -1,6 +1,6 @@
 # Canonical scenario semantic reconciliation
 
-This reference describes how the canonical S1–S7 JSON examples relate to the asserted research RDF. It records the current representation and its known differences, not research approval or a change to the source. See [README](../README.md) for application setup and canonical import operations, and the [deployment runbook](deployment.md) for operations and access controls. Pending implementation work belongs in [Issue #1](https://github.com/CharalamposGiannakis/hi-project/issues/1) and other GitHub Issues.
+This reference describes how the canonical S1–S7 JSON examples relate to the asserted research RDF. It records the current representation and its known differences, not research approval or a change to the source. See [README](../README.md) for application setup and canonical import operations, and the [deployment runbook](deployment.md) for operations and access controls. Unresolved work is tracked in [GitHub Issues](https://github.com/CharalamposGiannakis/hi-project/issues); broader CQ investigation belongs to [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15).
 
 ## Sources and comparison method
 
@@ -160,19 +160,34 @@ The original ontology and HINT occupy `urn:hi-app:reference:ontology` and `urn:h
 
 ## Competency-query coverage
 
-**Only CQ1 is implemented and verified by the application and canonical importer.** The [GraphDB adapter](../hi_scenario/graphdb.py) adapts the research team-composition query to explicit scenario/reference graphs and retains each member IRI. Agents sharing a name, type, or role therefore remain distinct. Names come from scenario RDF, type labels from the ontology, and role labels/definitions from HINT; missing labels return `null`, not invented text. The [persistence/API tests](../tests/test_persistence_api.py) and importer tests check this behavior.
+**Only the application's adapted CQ1 is implemented and verified in GraphDB**, including by the canonical importer. The [GraphDB adapter](../hi_scenario/graphdb.py) adapts the research team-composition query to explicit scenario/reference graphs and retains each member IRI. Agents sharing a name, type, or role therefore remain distinct. Names come from scenario RDF, type labels from the ontology, and role labels/definitions from HINT; missing labels return `null`, not invented text. The [persistence/API tests](../tests/test_persistence_api.py) and importer tests check this behavior.
 
 The upstream research notebook `TEST/HI-Ontology-Test/cqs.ipynb` (not bundled in this application repository) defines the following further questions. They are **not implemented or verified by the application**, even where the corpus contains relevant facts:
 
 | Research CQ | Subject and current applicability |
 | --- | --- |
-| CQ2–3 | Capability/task matching and candidate team compositions. Relevant capability and goal/task facts exist; query results and eligibility interpretation have not been validated here. |
+| CQ2–3 | Capability/task matching and candidate team compositions. Relevant capability and goal/task facts exist; application queries and research interpretations remain unverified. |
 | CQ4 | Inferred eligibility, assignment, or contextual influence. The notebook points to rules; those are not provided by the application's `empty` ruleset. |
 | CQ5 | Interactions during task execution. The notebook requires an execution episode, task comment, and direct goal requirement; interactions without those links/comments are excluded. |
-| CQ6 | Methods associated with goals and tasks. Execution method/task/goal links are represented, but the query has not been adapted or verified here. |
-| CQ7–8 | Metrics, experiments, and hypotheses. These relationships are represented; their research queries have not been adapted or verified here. |
+| CQ6 | Methods associated with goals and tasks. Execution method/task/goal links are represented, but there is no application query or GraphDB verification. |
+| CQ7–8 | Metrics, experiments, and hypotheses. These relationships are represented, but there are no application queries or GraphDB verification. |
 | CQ9–10 | Constraints and associated teams/use cases. Context influence is an application convention in S5, and Team constraints remain distinct from Context constraints. CQ10's notebook query does not itself establish that constraints are shared across distinct use cases or agents. |
-| CQ11 | Contextual phenomena associated with a use case. Relevant facts exist; the query has not been adapted or verified here. |
+| CQ11 | Contextual phenomena associated with a use case. Relevant facts exist; the notebook hard-codes a source scenario IRI and requires adaptation to application identities. |
 | CQ12 | Compliance with or violation of contextual constraints. The required compliance representation is absent from the current model. |
 
 The availability of these facts and query definitions does not establish additional CQ coverage, automated eligibility, or normative compliance reasoning.
+
+### Independent offline comparison
+
+Claude independently executed original research notebook queries against the original scenarios and the reconstructed corpus offline. The reported result counts differed as follows:
+
+| Research CQ | Original results | Reconstructed results | Associated reconstruction difference |
+| --- | ---: | ---: | --- |
+| CQ3 | 10 | 5 | S3's additional entailed capability inverse. |
+| CQ7 | 9 | 10 | S3's provisional HINT concept alignment. |
+| CQ9 | 6 | 8 | S5's additional Context influence assertion. |
+| CQ10 | 13 | 15 | The same S5 Context influence assertion. |
+
+CQ2, CQ5, CQ6, and CQ8 returned matching results in that offline comparison. The original notebook's CQ1 and CQ11 hard-code source scenario IRIs and require adaptation to application identities; the application already uses an adapted CQ1.
+
+These are independent offline observations, not additional application or GraphDB verification. They do not establish that either result reflects the correct research interpretation. Broader investigation is tracked in [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15); Ilaria has indicated that researcher-facing outputs can wait.

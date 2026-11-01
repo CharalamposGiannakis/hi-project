@@ -105,7 +105,7 @@ The importer accepts only `GRAPHDB_URL=http://127.0.0.1:7200` or `http://localho
 
 Run `apply` as the **sole writer**, with API/UI saves, other importers, and direct Workbench edits paused. The process-local save lock does not provide a transaction spanning the corpus or coordinate other processes.
 
-Importing these curated reference scenarios does **not** approve researcher submissions or implement administrator-only publication. The save API and UI authorization behavior are unchanged. Pending work remains tracked in [Issue #1](https://github.com/CharalamposGiannakis/hi-project/issues/1) and other GitHub Issues; the [reference document](docs/semantic-reconciliation.md#competency-query-coverage) records current CQ coverage.
+Importing these curated reference scenarios does **not** approve researcher submissions or implement administrator-only publication. The save API and UI authorization behavior are unchanged. Broader CQ investigation is tracked in [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15); other unresolved work belongs in [GitHub Issues](https://github.com/CharalamposGiannakis/hi-project/issues). The [reference document](docs/semantic-reconciliation.md#competency-query-coverage) records current CQ coverage and independent offline observations.
 
 ## API overview
 
