@@ -80,6 +80,36 @@ npm run test:integration
 
 The frontend integration suite starts its own backend. Its GraphDB workflow runs when the local Compose database is reachable and otherwise skips. The ordinary Python suite does not require a live database.
 
+## Canonical corpus import
+
+The operator-run importer loads exactly `examples/s1.json` through `examples/s7.json` into the **local development Compose** repository `hi`. After the local setup above, run from the repository root:
+
+```powershell
+.\.venv\Scripts\python -m infra.canonical plan
+.\.venv\Scripts\python -m infra.canonical apply
+.\.venv\Scripts\python -m infra.canonical verify
+```
+
+`plan` is read-only: it validates all seven inputs (model, HINT, SHACL and expected counts), checks repository/reference configuration, and classifies each complete RDF graph as missing, identical, or conflicting. `apply` performs that full preflight before writing, creates only missing graphs through the existing guarded adapter, skips identical graphs, and refuses all writes if any input or graph conflicts. It then verifies the corpus. Repeating `apply` creates nothing. No operation clears or replaces graphs; the two reference graphs and unrelated scenarios are never written. A failed import reports confirmed creations and any uncertain save outcome; inspect with `plan`/`verify`, then rerun `apply` to resume. Conflicts require operator investigation, not automatic repair.
+
+| Scenario | Named graph | Triples |
+| --- | --- | ---: |
+| S1 | `urn:hi-app:graph:scenario:s1` | 127 |
+| S2 | `urn:hi-app:graph:scenario:s2` | 195 |
+| S3 | `urn:hi-app:graph:scenario:s3` | 135 |
+| S4 | `urn:hi-app:graph:scenario:s4` | 154 |
+| S5 | `urn:hi-app:graph:scenario:s5` | 139 |
+| S6 | `urn:hi-app:graph:scenario:s6` | 150 |
+| S7 | `urn:hi-app:graph:scenario:s7` | 173 |
+
+`verify` is read-only and checks exact counts, RDF isomorphism, entity identities, SHACL, and CQ1 membership/roles against the canonical RDF and reference labels. Both reference graphs are independently compared with the checked-in originals. Exit status is nonzero for errors/conflicts; missing graphs are a successful plan but fail verification. The importer refuses `GRAPHDB_URL` other than `http://127.0.0.1:7200` or `http://localhost:7200`, and `GRAPHDB_REPOSITORY` other than `hi`; it does not follow redirects or use proxy settings. Use the local Compose service, never a tunnel to another environment. Run `apply` as the **sole writer**, with API/UI saves, other importers, and direct Workbench edits paused: the existing save lock is process-local, not a transaction spanning the corpus. No repository setup, reference refresh, or restart is performed by the importer.
+
+Only **CQ1 (team composition and roles)** is implemented and verified. The research `TEST/HI-Ontology-Test/cqs.ipynb` also defines capability/task matching (CQ2), candidate teams (CQ3), interactions (CQ5), methods (CQ6), metrics (CQ7), experiments/hypotheses (CQ8), constraints (CQ9–10), and phenomena (CQ11). These are candidates for named-graph adaptation and research validation, not supported application queries. CQ5's required task comments/goal links exclude some source interactions; CQ10's query does not establish shared constraints by itself. CQ4 requires eligibility/assignment rules absent from the `empty` ruleset, and CQ12 concerns compliance data not represented here. None of CQ2–12 is verified by this utility.
+
+This is a curated reference-corpus import, **not administrator approval or publication of research submissions**. The save API and UI behavior are unchanged and provide no administrator-only publication policy. Separation of researcher drafts, administrator review, and shared publication remains a separate high-priority workflow requirement. The scenario-specific source exceptions and provisional alignments above still apply.
+
+For isolated live importer tests (temporary graphs cleaned up; no restart), use `HI_GRAPHDB_LIVE=1` with `python -m pytest tests/test_canonical_live.py -q`. The existing `tests/test_graphdb_live.py` additionally restarts local GraphDB to test persistence; run it only when that interruption is acceptable.
+
 ## API
 
 All scenario POST requests accept the same JSON model as [S1](examples/s1.json). The local base URL is `http://127.0.0.1:8000`; deployment serves the API under `/api`.
