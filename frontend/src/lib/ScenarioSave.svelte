@@ -8,11 +8,12 @@
    *   json: string,
    *   issueCount: number,
    *   onIncomplete: () => void,
+   *   onValidationIssues?: (issues: import('./api.js').InputIssue[], sentJson: string) => void,
    *   onNewScenarioId: (id: string) => void,
    *   fetch?: typeof globalThis.fetch,
    * }}
    */
-  let { json, issueCount, onIncomplete, onNewScenarioId, fetch = undefined } = $props();
+  let { json, issueCount, onIncomplete, onValidationIssues, onNewScenarioId, fetch = undefined } = $props();
 
   /** @typedef {{ sentJson: string, outcome: import('./api.js').SaveResult }} SaveAttempt */
   /** @typedef {{ sentJson: string, outcome: import('./api.js').TeamResult }} TeamAttempt */
@@ -48,6 +49,8 @@
     const result = await saveScenario(JSON.parse(sentJson), options());
     if (result.kind === 'ok') savedInSession[result.saved.scenario_id] = sentJson;
     attempt = { sentJson, outcome: result };
+    if (result.kind === 'rejected' && result.status === 422) onValidationIssues?.(result.error.issues, sentJson);
+    else if (result.kind === 'ok') onValidationIssues?.([], sentJson);
     saving = false;
   }
 

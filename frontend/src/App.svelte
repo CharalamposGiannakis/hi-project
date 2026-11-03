@@ -1,5 +1,8 @@
 <script>
+  import { tick } from 'svelte';
   import example from '../../examples/s1.json';
+  import EditorSection from './lib/EditorSection.svelte';
+  import { vocabularyLabel } from './lib/vocabulary-labels.js';
   import ConceptSelect from './lib/ConceptSelect.svelte';
   import ConceptChecklist from './lib/ConceptChecklist.svelte';
   import ReferenceChecklist from './lib/ReferenceChecklist.svelte';
@@ -7,7 +10,6 @@
   import RdfPreview from './lib/RdfPreview.svelte';
   import ScenarioSave from './lib/ScenarioSave.svelte';
   import {
-    concepts,
     emptyScenario,
     findConcept,
     fromContract,
@@ -30,13 +32,23 @@
   let showErrors = $state(false);
   let status = $state('');
   let loadError = $state('');
+  const sectionIds = ['use_case', 'context', 'team_constraints', 'goal', 'tasks', 'agents', 'capabilities', 'executions', 'experiments', 'evaluations', 'interactions'];
+  const compactSections = () => Object.fromEntries(sectionIds.map((id) => [id, id === 'use_case']));
+  let expanded = $state(compactSections());
+  let revealRequest = $state(0);
+  let jsonExpanded = $state(false);
+  // Backend feedback only applies to the exact submitted JSON.
+  let backendFeedback = $state(/** @type {{ json: string, issues: import('./lib/scenario.js').Issue[] } | null} */ (null));
 
   let issues = $derived(validate(scenario));
   let json = $derived(serialize(scenario));
-  let experimentOptions = $derived(scenario.experiments.map((e) => ({ id: e.id, name: findConcept('Experiment', e.concept)?.label ?? 'Experiment' })));
+  let visibleIssues = $derived(showErrors ? [...issues, ...(backendFeedback?.json === json ? backendFeedback.issues : [])] : []);
+  let attentionIssues = $derived(showErrors ? visibleIssues : issues);
+  let sectionErrors = $derived(Object.fromEntries(sectionIds.map((id) => [id, visibleIssues.filter((issue) => sectionFor(issue.path) === id).length])));
+  let experimentOptions = $derived(scenario.experiments.map((e) => ({ id: e.id, name: vocabularyLabel('Experiment', findConcept('Experiment', e.concept)?.label ?? 'Experiment') })));
   let executionOptions = $derived(scenario.executions.map((e) => ({
     id: e.id,
-    name: `${findConcept('TaskExecution', e.concept)?.label ?? 'Execution'} · ${scenario.agents.find((a) => a.id === e.agent)?.name || e.agent} · ${scenario.tasks.find((t) => t.id === e.task)?.name || e.task}`,
+    name: `${vocabularyLabel('TaskExecution', findConcept('TaskExecution', e.concept)?.label ?? 'Execution')} · ${scenario.agents.find((a) => a.id === e.agent)?.name || e.agent} · ${scenario.tasks.find((t) => t.id === e.task)?.name || e.task}`,
   })));
   // JSON at the last new/load, to ask before discarding edits.
   let pristine = $state(serialize(initial));
@@ -48,11 +60,54 @@
 
   /** @param {string} path */
   function errorFor(path) {
-    if (!showErrors) return '';
-    return issues
+    return visibleIssues
       .filter((issue) => issue.path === path)
       .map((issue) => issue.message)
       .join(' ');
+  }
+
+  /** @param {string} path */
+  function sectionFor(path) {
+    const root = path.split('.')[0];
+    return root === 'id' ? 'use_case' : root;
+  }
+
+  function revealErrors() {
+    showErrors = true;
+    revealRequest += 1;
+  }
+
+  /** @param {import('./lib/api.js').InputIssue[]} errors @param {string} sentJson */
+  function revealBackendErrors(errors, sentJson) {
+    if (sentJson !== json) return;
+    if (errors.length === 0) {
+      backendFeedback = null;
+      return;
+    }
+    backendFeedback = { json: sentJson, issues: errors.map((issue) => ({
+      path: issue.location.filter((part) => part !== 'body').join('.'), message: issue.message,
+    })) };
+    revealErrors();
+  }
+
+  /** @param {boolean} open */
+  function setAllSections(open) {
+    expanded = Object.fromEntries(sectionIds.map((id) => [id, open]));
+  }
+
+  /** @param {string} path */
+  async function goToIssue(path) {
+    const section = sectionFor(path);
+    expanded[section] = true;
+    await tick();
+    const summary = document.querySelector(`#section-${section} > summary`);
+    if (summary instanceof HTMLElement) summary.focus();
+  }
+
+  async function toggleJsonSize() {
+    jsonExpanded = !jsonExpanded;
+    await tick();
+    document.getElementById('json-panel')?.scrollIntoView?.({ block: 'start' });
   }
 
   /** @param {string} message */
@@ -65,6 +120,8 @@
     scenario = emptyScenario();
     pristine = serialize(scenario);
     showErrors = false;
+    expanded = compactSections();
+    backendFeedback = null;
     loadError = '';
     status = '';
   }
@@ -75,6 +132,8 @@
       scenario = fromContract(data);
       pristine = serialize(scenario);
       showErrors = true;
+      expanded = compactSections();
+      backendFeedback = null;
       loadError = '';
       status = `Loaded ${source}.`;
     } catch (error) {
@@ -103,11 +162,6 @@
     scenario.agents.push(newAgent(kind, scenario.agents.map((a) => a.id)));
   }
 
-  /** @param {import('./lib/scenario.js').Agent} agent @param {string} role */
-  function toggleRole(agent, role) {
-    agent.roles = agent.roles.includes(role) ? agent.roles.filter((r) => r !== role) : [...agent.roles, role];
-  }
-
   async function copyJson() {
     try {
       await navigator.clipboard.writeText(json);
@@ -118,7 +172,7 @@
   }
 
   function downloadJson() {
-    showErrors = true;
+    revealErrors();
     if (issues.length) {
       status = 'Resolve the listed items before downloading.';
       return;
@@ -137,13 +191,12 @@
 <header>
   <h1>HI Scenario Builder</h1>
   <p class="lead">
-    Describe one Hybrid Intelligence use case: its goal, the tasks the goal requires, and the human and
-    artificial agents in the team. Every choice list comes from the HINT thesaurus.
+    Describe a Hybrid Intelligence scenario using the HINT vocabulary.
   </p>
   <div class="toolbar">
     <button type="button" onclick={startNew}>New scenario</button>
     <button type="button" onclick={loadExample}>Load S1 example</button>
-    <label class="button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} hidden /></label>
+    <label class="button file-button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} /></label>
   </div>
   <p class="notice">
     Previewing stores nothing. Only <strong>Save to GraphDB</strong> stores a scenario, as a new graph that cannot
@@ -152,10 +205,13 @@
   {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
 </header>
 
-<main>
+<main class:json-expanded={jsonExpanded}>
   <form onsubmit={(e) => e.preventDefault()} novalidate>
-    <fieldset>
-      <legend>Use case</legend>
+    <div class="toolbar section-controls" aria-label="Editor sections">
+      <button type="button" onclick={() => setAllSections(true)}>Expand all</button>
+      <button type="button" onclick={() => setAllSections(false)}>Collapse all</button>
+    </div>
+    <EditorSection id="use_case" title="Use case" bind:open={expanded.use_case} errorCount={sectionErrors.use_case} {revealRequest}>
       <div class="field">
         <label for="use-case-name">Name</label>
         <input id="use-case-name" bind:value={scenario.use_case.name} placeholder="e.g. Personal assistant HI system" aria-invalid={errorFor('use_case.name') ? 'true' : undefined} />
@@ -163,10 +219,9 @@
       </div>
       <ConceptSelect label="Use case type" category="UseCase" bind:value={scenario.use_case.concept} error={errorFor('use_case.concept')} />
       <ConceptSelect label="Domain" category="Domain" optional bind:value={scenario.use_case.domain} error={errorFor('use_case.domain')} />
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Context (optional)</legend>
+    <EditorSection id="context" title="Context" bind:open={expanded.context} errorCount={sectionErrors.context} {revealRequest} count={scenario.context ? 1 : 0} optional>
       <p class="hint">Describe the conditions in which the team operates.</p>
       {#if scenario.context}
         <ConceptSelect label="Context type" category="Context" bind:value={scenario.context.concept} error={errorFor('context.concept')} />
@@ -180,12 +235,13 @@
       {:else}
         <button type="button" onclick={() => (scenario.context = newContext())}>Add context</button>
       {/if}
-    </fieldset>
+    </EditorSection>
 
-    <ConceptChecklist label="Team constraints (optional)" category="Constraint" bind:values={scenario.team_constraints} error={errorFor('team_constraints')} />
+    <EditorSection id="team_constraints" title="Team constraints" optional count={scenario.team_constraints.length} bind:open={expanded.team_constraints} errorCount={sectionErrors.team_constraints} {revealRequest}>
+      <ConceptChecklist label="Team constraints (optional)" category="Constraint" bind:values={scenario.team_constraints} error={errorFor('team_constraints')} />
+    </EditorSection>
 
-    <fieldset>
-      <legend>Team goal</legend>
+    <EditorSection id="goal" title="Team goal" bind:open={expanded.goal} errorCount={sectionErrors.goal} {revealRequest}>
       <div class="field">
         <label for="goal-name">Name</label>
         <input id="goal-name" bind:value={scenario.goal.name} placeholder="e.g. Maintain and improve user wellbeing" aria-invalid={errorFor('goal.name') ? 'true' : undefined} />
@@ -197,10 +253,9 @@
         <textarea id="goal-description" rows="2" bind:value={scenario.goal.description}></textarea>
       </div>
       <ReferenceChecklist label="Tasks required by this goal" options={scenario.tasks} bind:values={scenario.goal.required_tasks} error={errorFor('goal.required_tasks')} />
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Tasks</legend>
+    <EditorSection id="tasks" title="Tasks" bind:open={expanded.tasks} errorCount={sectionErrors.tasks} {revealRequest} count={scenario.tasks.length}>
       {#if errorFor('tasks')}<p class="error">{errorFor('tasks')}</p>{/if}
       {#each scenario.tasks as task, i (task.id)}
         <section class="item">
@@ -221,10 +276,9 @@
         </section>
       {/each}
       <button type="button" onclick={addTask}>Add task</button>
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Team members</legend>
+    <EditorSection id="agents" title="Team members" bind:open={expanded.agents} errorCount={sectionErrors.agents} {revealRequest} count={scenario.agents.length}>
       {#if errorFor('agents')}<p class="error">{errorFor('agents')}</p>{/if}
       {#each scenario.agents as agent, i (agent.id)}
         <section class="item">
@@ -242,36 +296,22 @@
             <label class="inline"><input type="radio" bind:group={agent.kind} value="human" /> Human</label>
             <label class="inline"><input type="radio" bind:group={agent.kind} value="artificial" /> Artificial</label>
           </div>
-          <fieldset class="roles">
-            <legend>Roles (HINT)</legend>
-            {#each concepts.Role as role (role.id)}
-              <label class="inline" title={role.definition}>
-                <input type="checkbox" checked={agent.roles.includes(role.id)} onchange={() => toggleRole(agent, role.id)} />
-                {role.label}
-              </label>
-            {/each}
-            {#each agent.roles as roleId (roleId)}
-              {@const role = findConcept('Role', roleId)}
-              <p class="hint"><code>hint:{roleId}</code> — {role ? role.definition : 'not a HINT role'}</p>
-            {/each}
-            {#if errorFor(`agents.${i}.roles`)}<p class="error">{errorFor(`agents.${i}.roles`)}</p>{/if}
-          </fieldset>
+          <ConceptChecklist label="Roles" category="Role" bind:values={agent.roles} error={errorFor(`agents.${i}.roles`)} />
         </section>
       {/each}
       <div class="toolbar">
         <button type="button" onclick={() => addAgent('human')}>Add human agent</button>
         <button type="button" onclick={() => addAgent('artificial')}>Add artificial agent</button>
       </div>
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Capabilities (optional)</legend>
+    <EditorSection id="capabilities" title="Capabilities" bind:open={expanded.capabilities} errorCount={sectionErrors.capabilities} {revealRequest} count={scenario.capabilities.length} optional>
       <p class="hint">Define each capability once and link it to agents and tasks. Removing an agent or task removes its links here.</p>
       {#if errorFor('capabilities')}<p class="error">{errorFor('capabilities')}</p>{/if}
       {#each scenario.capabilities as capability, i (capability.id)}
         <section class="item" data-capability-id={capability.id}>
           <div class="item-head">
-            <h3>{findConcept('Capability', capability.concept)?.label ?? `Capability ${i + 1}`}</h3>
+            <h3>{vocabularyLabel('Capability', findConcept('Capability', capability.concept)?.label ?? '') || `Capability ${i + 1}`}</h3>
             <button type="button" class="link" onclick={() => scenario.capabilities.splice(i, 1)}>Remove capability</button>
           </div>
           <ConceptSelect label="Capability type" category="Capability" bind:value={capability.concept} error={errorFor(`capabilities.${i}.concept`)} />
@@ -280,16 +320,15 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.capabilities.push(newCapability(scenario.capabilities.map((c) => c.id)))}>Add capability</button>
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Task executions (optional)</legend>
+    <EditorSection id="executions" title="Task executions" bind:open={expanded.executions} errorCount={sectionErrors.executions} {revealRequest} count={scenario.executions.length} optional>
       <p class="hint">Describe who performs each task and how, towards the team goal. Deleting an agent or task keeps these records for repair.</p>
       {#if errorFor('executions')}<p class="error">{errorFor('executions')}</p>{/if}
       {#each scenario.executions as execution, i (execution.id)}
         <section class="item" data-execution-id={execution.id}>
           <div class="item-head">
-            <h3>{findConcept('TaskExecution', execution.concept)?.label ?? `Execution ${i + 1}`}</h3>
+            <h3>{vocabularyLabel('TaskExecution', findConcept('TaskExecution', execution.concept)?.label ?? '') || `Execution ${i + 1}`}</h3>
             <button type="button" class="link" onclick={() => scenario.executions.splice(i, 1)}>Remove execution</button>
           </div>
           <ConceptSelect label="Execution type" category="TaskExecution" bind:value={execution.concept} error={errorFor(`executions.${i}.concept`)} />
@@ -299,15 +338,14 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.executions.push(newExecution(scenario.executions.map((e) => e.id)))}>Add execution</button>
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Experiments (optional)</legend>
+    <EditorSection id="experiments" title="Experiments" bind:open={expanded.experiments} errorCount={sectionErrors.experiments} {revealRequest} count={scenario.experiments.length} optional>
       {#if errorFor('experiments')}<p class="error">{errorFor('experiments')}</p>{/if}
       {#each scenario.experiments as experiment, i (experiment.id)}
         <section class="item" data-experiment-id={experiment.id}>
           <div class="item-head">
-            <h3>{findConcept('Experiment', experiment.concept)?.label ?? `Experiment ${i + 1}`}</h3>
+            <h3>{vocabularyLabel('Experiment', findConcept('Experiment', experiment.concept)?.label ?? '') || `Experiment ${i + 1}`}</h3>
             <button type="button" class="link" onclick={() => scenario.experiments.splice(i, 1)}>Remove experiment</button>
           </div>
           <ConceptSelect label="Experiment type" category="Experiment" bind:value={experiment.concept} error={errorFor(`experiments.${i}.concept`)} />
@@ -336,16 +374,15 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.experiments.push(newExperiment(scenario.experiments.map((e) => e.id)))}>Add experiment</button>
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Evaluations (optional)</legend>
+    <EditorSection id="evaluations" title="Evaluations" bind:open={expanded.evaluations} errorCount={sectionErrors.evaluations} {revealRequest} count={scenario.evaluations.length} optional>
       <p class="hint">Define each evaluation once and select all executions it evaluates. Deleting an experiment or execution keeps these records for repair.</p>
       {#if errorFor('evaluations')}<p class="error">{errorFor('evaluations')}</p>{/if}
       {#each scenario.evaluations as evaluation, i (evaluation.id)}
         <section class="item" data-evaluation-id={evaluation.id}>
           <div class="item-head">
-            <h3>{findConcept('Evaluation', evaluation.concept)?.label ?? `Evaluation ${i + 1}`}</h3>
+            <h3>{vocabularyLabel('Evaluation', findConcept('Evaluation', evaluation.concept)?.label ?? '') || `Evaluation ${i + 1}`}</h3>
             <button type="button" class="link" onclick={() => scenario.evaluations.splice(i, 1)}>Remove evaluation</button>
           </div>
           <ConceptSelect label="Evaluation type" category="Evaluation" bind:value={evaluation.concept} error={errorFor(`evaluations.${i}.concept`)} />
@@ -359,16 +396,15 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.evaluations.push(newEvaluation(scenario.evaluations.map((e) => e.id)))}>Add evaluation</button>
-    </fieldset>
+    </EditorSection>
 
-    <fieldset>
-      <legend>Interactions (optional)</legend>
+    <EditorSection id="interactions" title="Interactions" bind:open={expanded.interactions} errorCount={sectionErrors.interactions} {revealRequest} count={scenario.interactions.length} optional>
       <p class="hint">Select at least two participants explicitly; performers are not added automatically. Related executions are optional. Deleting a referenced record keeps the interaction for repair.</p>
       {#if errorFor('interactions')}<p class="error">{errorFor('interactions')}</p>{/if}
       {#each scenario.interactions as interaction, i (interaction.id)}
         <section class="item" data-interaction-id={interaction.id}>
           <div class="item-head">
-            <h3>{findConcept('InteractionIntent', interaction.intent)?.label ?? `Interaction ${i + 1}`}</h3>
+            <h3>{vocabularyLabel('InteractionIntent', findConcept('InteractionIntent', interaction.intent)?.label ?? '') || `Interaction ${i + 1}`}</h3>
             <button type="button" class="link" onclick={() => scenario.interactions.splice(i, 1)}>Remove interaction</button>
           </div>
           <ConceptSelect label="Interaction intent" category="InteractionIntent" bind:value={interaction.intent} error={errorFor(`interactions.${i}.intent`)} />
@@ -382,29 +418,41 @@
         </section>
       {/each}
       <button type="button" onclick={() => scenario.interactions.push(newInteraction(scenario.interactions.map((interaction) => interaction.id)))}>Add interaction</button>
-    </fieldset>
+    </EditorSection>
   </form>
 
-  <aside>
-    <RdfPreview {json} issueCount={issues.length} onIncomplete={() => (showErrors = true)} />
+  <aside aria-label="Preview and save">
+    <RdfPreview {json} issueCount={issues.length} onIncomplete={revealErrors} onValidationIssues={revealBackendErrors} />
     <ScenarioSave
       {json}
       issueCount={issues.length}
-      onIncomplete={() => (showErrors = true)}
+      onIncomplete={revealErrors}
+      onValidationIssues={revealBackendErrors}
       onNewScenarioId={(id) => (scenario.id = id)}
     />
+  </aside>
 
-    <h2>Scenario JSON</h2>
-    {#if issues.length === 0}
+  <section class="json-panel" id="json-panel" aria-labelledby="json-heading">
+    <div class="item-head">
+      <h2 id="json-heading">Scenario JSON</h2>
+      <button type="button" aria-expanded={jsonExpanded} aria-controls="scenario-json" onclick={toggleJsonSize}>{jsonExpanded ? 'Restore JSON size' : 'Expand JSON'}</button>
+    </div>
+    {#if attentionIssues.length === 0}
       <p class="ok">Form complete (local check).</p>
     {:else}
       <p class="warn">
-        Draft — {issues.length} {issues.length === 1 ? 'item needs' : 'items need'} attention.
-        <button type="button" class="link" onclick={() => (showErrors = true)}>Show in form</button>
+        Draft — {attentionIssues.length} {attentionIssues.length === 1 ? 'item needs' : 'items need'} attention.
+        <button type="button" class="link" onclick={revealErrors}>Show in form</button>
       </p>
       {#if showErrors}
         <ul class="issues">
-          {#each issues as issue, i (i)}<li><code>{issue.path}</code> {issue.message}</li>{/each}
+          {#each visibleIssues as issue, i (i)}
+            <li>
+              {#if sectionIds.includes(sectionFor(issue.path))}
+                <button type="button" class="link" onclick={() => goToIssue(issue.path)}><code>{issue.path}</code> {issue.message}</button>
+              {:else}<code>{issue.path}</code> {issue.message}{/if}
+            </li>
+          {/each}
         </ul>
       {/if}
     {/if}
@@ -413,7 +461,8 @@
       <button type="button" onclick={downloadJson}>Download JSON</button>
     </div>
     {#if status}<p class="status" role="status">{status}</p>{/if}
-    <pre class="json">{json}</pre>
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need access to the scrollable JSON.) -->
+    <pre class="json" id="scenario-json" role="region" tabindex="0" aria-label="Scenario JSON (read-only)">{json}</pre>
     <p class="hint">IDs are generated once and kept when you rename entities; they identify the RDF resources.</p>
-  </aside>
+  </section>
 </main>

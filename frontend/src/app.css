@@ -10,7 +10,7 @@
 }
 
 body { margin: 0; }
-header, main { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+header, main { max-width: 1680px; margin: 0 auto; padding: 0 1.5rem; }
 header { padding-top: 1.5rem; }
 h1 { margin: 0 0 0.25rem; font-size: 1.6rem; }
 h2 { margin-top: 0; font-size: 1.15rem; }
@@ -19,14 +19,42 @@ h3 { margin: 0; font-size: 1rem; }
 
 main {
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: 'editor actions' 'editor json';
+  grid-template-rows: auto 1fr;
   gap: 1.5rem;
   align-items: start;
   padding-bottom: 3rem;
 }
-@media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+form { grid-area: editor; min-width: 0; }
+aside { grid-area: actions; }
+.json-panel { grid-area: json; min-width: 0; scroll-margin-top: 1rem; }
+main.json-expanded { grid-template-areas: 'editor actions' 'json json'; }
+@media (max-width: 1000px) {
+  main, main.json-expanded { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'actions' 'json'; }
+}
+@media (max-width: 600px) {
+  header, main { padding-left: 0.75rem; padding-right: 0.75rem; }
+  .item-head { flex-wrap: wrap; gap: 0.5rem; }
+}
+
+.editor-section { margin-bottom: 0.65rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.editor-section > summary { padding: 0.8rem 1rem; color: inherit; }
+.editor-section > summary h2 { display: inline; margin: 0; font-size: 1rem; }
+.section-body { padding: 0 1rem 1rem; }
+.section-body > fieldset { border: 0; margin: 0; padding: 0; }
+.count { margin-left: 0.5rem; border-radius: 1rem; background: #eef3f8; padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+.section-optional { margin-left: 0.5rem; font-size: 0.8rem; color: var(--muted); }
+.error-count { margin-left: 0.5rem; font-size: 0.8rem; color: var(--error); font-weight: 600; }
+.section-controls { margin-top: 0; }
+.concept-help { margin-top: 0.4rem; }
+.concept-help summary { font-size: 0.8rem; }
+.concept-help dt { margin-top: 0.5rem; }
+.concept-help dd { margin-left: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 
 fieldset {
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fff;
@@ -71,6 +99,10 @@ button.primary { background: var(--accent); color: #fff; }
 button.primary:hover { background: #244a6f; }
 button:disabled { opacity: 0.4; cursor: default; }
 button.link { border: none; background: none; padding: 0; text-decoration: underline; }
+:is(button, summary, input, select, textarea, a):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.file-button { position: relative; overflow: hidden; }
+.file-button input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+.file-button:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }
 
 .hint { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--muted); }
 .error { margin: 0.2rem 0 0; font-size: 0.85rem; color: var(--error); white-space: pre-wrap; }
@@ -81,17 +113,15 @@ pre.error { font-family: inherit; }
 .status { font-size: 0.9rem; color: var(--muted); }
 .issues { font-size: 0.85rem; padding-left: 1.2rem; }
 
-aside {
-  position: sticky;
-  top: 1rem;
-  max-height: calc(100vh - 2rem);
-  overflow-y: auto;
+aside, .json-panel {
   box-sizing: border-box;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 1rem 1.25rem;
 }
+.json-panel .item-head h2 { margin: 0; }
+.json-panel .item-head { gap: 0.5rem; }
 pre.json, pre.rdf, pre.report {
   max-height: 40vh;
   overflow: auto;
@@ -101,6 +131,8 @@ pre.json, pre.rdf, pre.report {
   font-size: 0.8rem;
 }
 code { font-size: 0.85em; }
+pre.json { min-height: min(24rem, 65vh); max-height: 65vh; white-space: pre; }
+main.json-expanded pre.json { height: 75vh; max-height: none; }
 pre.rdf { white-space: pre; font-size: 0.72rem; max-height: 16rem; }
 pre.report { white-space: pre-wrap; font-size: 0.75rem; }
 .preview, .save { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem; }

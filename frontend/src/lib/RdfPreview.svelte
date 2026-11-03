@@ -7,10 +7,11 @@
    *   json: string,
    *   issueCount: number,
    *   onIncomplete: () => void,
+   *   onValidationIssues?: (issues: import('./api.js').InputIssue[], sentJson: string) => void,
    *   fetch?: typeof globalThis.fetch,
    * }}
    */
-  let { json, issueCount, onIncomplete, fetch = undefined } = $props();
+  let { json, issueCount, onIncomplete, onValidationIssues, fetch = undefined } = $props();
 
   /** @typedef {{ sentJson: string, outcome: import('./api.js').PreviewResult }} Result */
   let result = $state(/** @type {Result | null} */ (null));
@@ -34,6 +35,8 @@
     const sentJson = json;
     const outcome = await requestPreview(JSON.parse(sentJson), fetch ? { fetch } : {});
     result = { sentJson, outcome };
+    if (outcome.kind === 'rejected' && outcome.status === 422) onValidationIssues?.(outcome.error.issues, sentJson);
+    else if (outcome.kind === 'ok') onValidationIssues?.([], sentJson);
     loading = false;
   }
 

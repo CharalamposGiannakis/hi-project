@@ -7,7 +7,7 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 ## Researcher workflow
 
 1. Load the bundled S1 example, open a canonical example or another local JSON file with **Open JSON file…**, or enter a scenario in the form.
-2. Edit the scenario and download its JSON draft. The backend is the authoritative validator; the form provides immediate feedback.
+2. Edit the scenario in collapsible sections and download its JSON draft. Use **Expand all** / **Collapse all** to navigate; validation opens sections with errors. HINT details and definitions are available below vocabulary fields. **Expand JSON** opens the read-only JSON viewer across the page. The backend is the authoritative validator; the form provides immediate feedback.
 3. Preview the validated N-Triples and SHACL result without saving.
 4. Save a new scenario, then use Explore to retrieve its team composition (CQ1) and open its named graph in GraphDB Workbench.
 

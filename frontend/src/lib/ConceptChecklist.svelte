@@ -1,5 +1,6 @@
 <script>
-  import { concepts, findConcept } from './scenario.js';
+  import { concepts } from './scenario.js';
+  import { vocabularyLabel } from './vocabulary-labels.js';
 
   /**
    * @type {{
@@ -17,17 +18,22 @@
   }
 </script>
 
-<fieldset class="concepts">
+<fieldset class="concepts" class:roles={category === 'Role'}>
   <legend>{label}</legend>
   {#each concepts[category] as concept (concept.id)}
-    <label class="inline" title={concept.definition}>
+    <label class="inline">
       <input type="checkbox" value={concept.id} checked={values.includes(concept.id)} onchange={() => toggle(concept.id)} />
-      {concept.label}
+      {vocabularyLabel(category, concept.label)}
     </label>
   {/each}
-  {#each values as id, i (i)}
-    {@const concept = findConcept(category, id)}
-    <p class="hint"><code>hint:{id}</code> — {concept?.definition ?? 'not a HINT concept'}</p>
-  {/each}
+  <details class="concept-help">
+    <summary>HINT definitions for {label.toLowerCase()}</summary>
+    <dl class="hint">
+      {#each concepts[category] as concept (concept.id)}
+        <dt><strong>{concept.label}</strong> · <code>hint:{concept.id}</code></dt>
+        <dd>{concept.definition}</dd>
+      {/each}
+    </dl>
+  </details>
   {#if error}<p class="error">{error}</p>{/if}
 </fieldset>
