@@ -37,7 +37,7 @@ form { grid-area: editor; min-width: 0; }
   grid-template-areas: 'actions' 'json';
   gap: 1.5rem;
 }
-aside { grid-area: actions; }
+aside { grid-area: actions; min-width: 0; }
 .json-panel { grid-area: json; min-width: 0; }
 @media (max-width: 1000px) {
   main { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'sidebar'; }
