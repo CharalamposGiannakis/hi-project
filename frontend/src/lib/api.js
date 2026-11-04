@@ -99,7 +99,15 @@ function isTeam(body) {
 
 /** @param {any} body @returns {body is SubmissionError} */
 function isSubmissionError(body) {
-  return isString(body?.code) && isString(body.message) && Array.isArray(body.issues);
+  return isString(body?.code) && isString(body.message) && Array.isArray(body.issues) &&
+    body.issues.every((/** @type {any} */ issue) =>
+      Array.isArray(issue?.location) && issue.location.every((/** @type {unknown} */ part) => isString(part) || Number.isInteger(part)) &&
+      isString(issue.message) && isString(issue.type));
+}
+
+/** @param {(string | number)[]} location */
+export function issuePath(location) {
+  return (location[0] === 'body' ? location.slice(1) : location).join('.') || 'scenario';
 }
 
 /**

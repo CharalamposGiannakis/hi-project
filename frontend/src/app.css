@@ -20,18 +20,32 @@ h3 { margin: 0; font-size: 1rem; }
 main {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  grid-template-areas: 'editor actions' 'editor json';
-  grid-template-rows: auto 1fr;
+  grid-template-areas: 'editor sidebar';
   gap: 1.5rem;
   align-items: start;
   padding-bottom: 3rem;
 }
 form { grid-area: editor; min-width: 0; }
+.sidebar {
+  grid-area: sidebar;
+  position: sticky;
+  top: 1rem;
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  min-width: 0;
+  display: grid;
+  grid-template-areas: 'actions' 'json';
+  gap: 1.5rem;
+}
 aside { grid-area: actions; }
 .json-panel { grid-area: json; min-width: 0; scroll-margin-top: 1rem; }
 main.json-expanded { grid-template-areas: 'editor actions' 'json json'; }
+main.json-expanded .sidebar { display: contents; }
+main.json-expanded aside { position: sticky; top: 1rem; max-height: calc(100dvh - 2rem); overflow-y: auto; }
 @media (max-width: 1000px) {
-  main, main.json-expanded { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'actions' 'json'; }
+  main { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'sidebar'; }
+  main.json-expanded { grid-template-areas: 'editor' 'actions' 'json'; }
+  .sidebar, main.json-expanded aside { position: static; max-height: none; overflow: visible; }
 }
 @media (max-width: 600px) {
   header, main { padding-left: 0.75rem; padding-right: 0.75rem; }
@@ -99,7 +113,9 @@ button.primary { background: var(--accent); color: #fff; }
 button.primary:hover { background: #244a6f; }
 button:disabled { opacity: 0.4; cursor: default; }
 button.link { border: none; background: none; padding: 0; text-decoration: underline; }
-:is(button, summary, input, select, textarea, a):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+:is(button, summary, input, select, textarea, a, [tabindex]):focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+[data-field-path] { scroll-margin: 1rem; }
+.sidebar .issues { overflow-wrap: anywhere; }
 .file-button { position: relative; overflow: hidden; }
 .file-button input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 .file-button:focus-within { outline: 3px solid var(--accent); outline-offset: 3px; }

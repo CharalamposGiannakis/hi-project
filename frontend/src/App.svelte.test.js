@@ -49,6 +49,12 @@ function enter(input, value) {
   flushSync();
 }
 
+/** Wait for the native details toggle event as well as Svelte's effects. */
+async function settleDisclosure() {
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  flushSync();
+}
+
 describe('Scenario Builder navigation', () => {
   it('starts compact, exposes native disclosure state, and expands/collapses every section', async () => {
     render();
@@ -110,6 +116,58 @@ describe('Scenario Builder navigation', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it('keeps erroneous sections manually collapsed across native toggle events, unrelated edits, and error resolution', async () => {
+    render();
+    click('Show in form');
+    const before = jsonNode().textContent;
+    section('tasks').querySelector('summary')?.click();
+    await settleDisclosure();
+    expect(section('tasks').open).toBe(false);
+    expect(section('tasks').querySelector('summary')?.getAttribute('aria-expanded')).toBe('false');
+    expect(jsonNode().textContent).toBe(before);
+    enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Unrelated edit');
+    await settleDisclosure();
+    expect(section('tasks').open).toBe(false);
+    click('Collapse all');
+    await settleDisclosure();
+    expect(sections().every((element) => !element.open)).toBe(true);
+    // Clearing one issue does not reopen this or another manually collapsed section.
+    enter(/** @type {HTMLInputElement} */ (document.getElementById('goal-name')), 'Team goal');
+    await settleDisclosure();
+    expect(sections().every((element) => !element.open)).toBe(true);
+    click('Show in form');
+    await settleDisclosure();
+    expect(section('tasks').open).toBe(true);
+    expect(section('goal').open).toBe(true);
+  });
+
+  it('reveals a newly introduced error even when the section error count stays the same', async () => {
+    render();
+    await importJson(s7);
+    const first = /** @type {HTMLInputElement} */ (document.getElementById(`task-${s7.tasks[0].id}`));
+    const second = /** @type {HTMLInputElement} */ (document.getElementById(`task-${s7.tasks[1].id}`));
+    enter(first, '');
+    expect(section('tasks').open).toBe(true);
+    click('Collapse all');
+    await settleDisclosure();
+    expect(section('tasks').open).toBe(false);
+    // Apply a validation transition in one reactive turn: one issue resolved,
+    // another introduced. A count-only dependency would miss this change.
+    flushSync(() => {
+      first.value = s7.tasks[0].name;
+      first.dispatchEvent(new Event('input', { bubbles: true }));
+      second.value = '';
+      second.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await settleDisclosure();
+    expect(section('tasks').open).toBe(true);
+    expect(section('tasks').querySelector('.error-count')?.textContent?.trim()).toBe('1 issue');
+    expect(section('executions').open).toBe(false);
+    section('tasks').querySelector('summary')?.click();
+    await settleDisclosure();
+    expect(section('tasks').open).toBe(false);
+  });
+
   it('reveals nested optional entities and newly broken references, and focuses error destinations', async () => {
     render();
     await importJson(s7);
@@ -129,19 +187,38 @@ describe('Scenario Builder navigation', () => {
     const link = [...document.querySelectorAll('.issues button')].find((button) => button.textContent?.includes('experiments.1.null_hypothesis'));
     if (!(link instanceof HTMLButtonElement)) throw new Error('Missing nested issue link');
     link.click();
-    await until(() => expect(document.activeElement).toBe(section('experiments').querySelector('summary')));
+    const experimentId = draft().experiments[1].id;
+    await until(() => expect(document.activeElement).toBe(document.getElementById(`null-hypothesis-${experimentId}`)));
     expect(section('experiments').open).toBe(true);
 
-    click('Expand all');
-    const agent = document.getElementById(`agent-${s7.agents[0].id}`)?.closest('.item');
+  });
+
+  it('actually removes a referenced S7 agent and reveals the broken execution and interaction references', async () => {
+    const data = structuredClone(s7);
+    data.agents.push({ ...data.agents[0], id: 'additional-visitor', name: 'Additional visitor' });
+    render();
+    await importJson(data);
     click('Collapse all');
     section('agents').querySelector('summary')?.click();
-    await until(() => expect(section('agents').open).toBe(true));
-    // Removing a referenced member leaves explicit execution/interaction repair errors.
-    agent?.querySelector('button')?.click();
+    await settleDisclosure();
+    const removedId = s7.agents[0].id;
+    const agent = document.getElementById(`agent-${removedId}`)?.closest('.item');
+    const remove = /** @type {HTMLButtonElement} */ (agent?.querySelector('button'));
+    expect(remove.disabled).toBe(false);
+    remove.click();
     flushSync();
+    await settleDisclosure();
+    expect(draft().agents).toHaveLength(2);
+    expect(draft().agents.some((/** @type {{id: string}} */ agent) => agent.id === removedId)).toBe(false);
+    expect(document.getElementById(`agent-${removedId}`)).toBeNull();
+    expect(draft().executions[0].agent).toBe(removedId);
+    expect(draft().interactions[0].agents).toContain(removedId);
     expect(section('executions').open).toBe(true);
     expect(section('interactions').open).toBe(true);
+    expect(section('executions').textContent).toContain(`Agent "${removedId}" no longer exists`);
+    expect(section('interactions').textContent).toContain(`Unknown agent ID: ${removedId}`);
+    expect(document.querySelector('.issues')?.textContent).toContain('executions.0.agent');
+    expect(document.querySelector('.issues')?.textContent).toContain('interactions.0.agents');
   });
 
   it.each(['Validate & preview RDF', 'Save to GraphDB'])('%s opens sections for backend validation locations and clears stale feedback after editing', async (action) => {
@@ -168,6 +245,77 @@ describe('Scenario Builder navigation', () => {
     expect(section('experiments').querySelector('.error-count')).toBeNull();
   });
 
+  it('navigates repeated entities, indexed checklists, and section/root errors without guessing fields', async () => {
+    const paths = [
+      ['body', 'tasks', 2, 'name'], ['body', 'executions', 4, 'agent'],
+      ['body', 'context', 'phenomena', 1], ['body', 'team_constraints', 1],
+      ['body', 'agents', 1, 'roles', 0], ['body', 'goal', 'required_tasks', 2],
+      ['body', 'experiments', 0, 'id'], ['body', 'evaluations', 0, 'unknown_field'],
+      ['body', 'interactions'], ['body'], ['body', 'unknown_section', 'name'],
+    ];
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      code: 'invalid_request', message: 'Review the fields.', shacl_report: null,
+      issues: paths.map((location) => ({ location, message: 'Review this value.', type: 'value_error' })),
+    }), { status: 422 })));
+    render();
+    await importJson(s7);
+    click('Validate & preview RDF');
+    await until(() => expect(document.querySelector('.issues')?.textContent).toContain('tasks.2.name'));
+    const destinations = [
+      ['tasks.2.name', `#task-${s7.tasks[2].id}`],
+      ['executions.4.agent', '[data-field-path="executions.4.agent"] select'],
+      ['context.phenomena.1', '#section-context input[value="KnowledgeMismatchPhenomenon"]'],
+      ['team_constraints.1', '#section-team_constraints input[value="TransparencyConstraint"]'],
+      ['agents.1.roles.0', '[data-field-path="agents.1.roles"] input[value="VirtualGuideRole"]'],
+      ['goal.required_tasks.2', '#section-goal input[value="compute-similarity"]'],
+      ['experiments.0.id', '[data-experiment-id="vr-guide-effectiveness"]'],
+      ['evaluations.0.unknown_field', '[data-evaluation-id="vr-guide-impact"]'],
+      ['interactions', '#section-interactions > summary'],
+    ];
+    // Use the navigable issue list in the actions pane, not backend report text.
+    const summaryList = document.querySelector('aside > .issues');
+    expect(summaryList).not.toBeNull();
+    const scroll = vi.fn();
+    for (const [path, selector] of destinations) {
+      click('Collapse all');
+      await settleDisclosure();
+      const target = document.querySelector(selector);
+      expect(target, path).not.toBeNull();
+      Object.defineProperty(target, 'scrollIntoView', { configurable: true, value: scroll });
+      scroll.mockClear();
+      const link = [...(summaryList?.querySelectorAll('button') ?? [])].find((button) => button.querySelector('code')?.textContent === path);
+      if (!(link instanceof HTMLButtonElement)) throw new Error(`Missing issue link: ${path}`);
+      link.click();
+      await until(() => expect(document.activeElement, path).toBe(target));
+      expect(target?.closest('details.editor-section')?.hasAttribute('open')).toBe(true);
+      expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    }
+    expect(summaryList?.textContent).toContain('scenario');
+    expect(summaryList?.textContent).toContain('unknown_section.name');
+    expect(summaryList?.querySelectorAll('button')).toHaveLength(destinations.length);
+    // Indexed array errors also describe the field accessibly.
+    const checkbox = /** @type {HTMLInputElement} */ (document.querySelector('#section-context input[value="KnowledgeMismatchPhenomenon"]'));
+    const description = document.getElementById(checkbox.getAttribute('aria-describedby') ?? '');
+    expect(description?.textContent).toContain('Review this value.');
+    const name = document.getElementById(`task-${s7.tasks[2].id}`);
+    expect(document.getElementById(name?.getAttribute('aria-describedby') ?? '')?.textContent).toContain('Review this value.');
+    expect(draft()).toEqual(s7);
+  });
+
+  it('keeps navigation indexes correct after an earlier repeated entity is removed', async () => {
+    render();
+    await importJson(s7);
+    click('Expand all');
+    enter(/** @type {HTMLInputElement} */ (document.getElementById(`task-${s7.tasks[2].id}`)), '');
+    document.getElementById(`task-${s7.tasks[0].id}`)?.closest('.item')?.querySelector('button')?.click();
+    flushSync();
+    click('Collapse all');
+    const link = [...document.querySelectorAll('aside > .issues button')].find((button) => button.querySelector('code')?.textContent === 'tasks.1.name');
+    if (!(link instanceof HTMLButtonElement)) throw new Error('Missing reindexed issue link');
+    link.click();
+    await until(() => expect(document.activeElement).toBe(document.getElementById(`task-${s7.tasks[2].id}`)));
+  });
+
   it('ignores validation feedback returned for a scenario edited during the request', async () => {
     /** @type {(response: Response) => void} */
     let respond = () => {};
@@ -188,6 +336,33 @@ describe('Scenario Builder navigation', () => {
 });
 
 describe('Scenario JSON and submission workflows', () => {
+  it('anchors JSON expansion to its control and restores the sidebar scroll position', async () => {
+    render();
+    await importJson(s7);
+    const sidebar = /** @type {HTMLElement} */ (document.querySelector('.sidebar'));
+    sidebar.scrollTop = 240;
+    const button = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Expand JSON');
+    if (!button) throw new Error('Missing JSON expansion button');
+    const bounds = vi.spyOn(button, 'getBoundingClientRect');
+    const rect = (/** @type {number} */ top) => /** @type {DOMRect} */ ({ top });
+    bounds.mockReturnValueOnce(rect(300)).mockReturnValueOnce(rect(1800));
+    const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    const pre = jsonNode();
+    pre.scrollTop = 500;
+    click('Expand JSON');
+    await until(() => expect(scroll).toHaveBeenCalledWith({ top: 1500, behavior: 'instant' }));
+    sidebar.scrollTop = 0;
+    bounds.mockReturnValueOnce(rect(300)).mockReturnValueOnce(rect(-1200));
+    click('Restore JSON size');
+    await until(() => expect(scroll).toHaveBeenCalledWith({ top: -1500, behavior: 'instant' }));
+    expect(sidebar.scrollTop).toBe(240);
+    expect(jsonNode()).toBe(pre);
+    expect(pre.scrollTop).toBe(500);
+    expect(draft()).toEqual(s7);
+    expect(sidebar.querySelectorAll('.preview')).toHaveLength(1);
+    expect(sidebar.querySelectorAll('.save')).toHaveLength(1);
+  });
+
   it('expands a single read-only viewer, preserves JSON through Copy/Download, and restores the layout', async () => {
     const clipboard = vi.fn(async (/** @type {string} */ value) => { void value; });
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
