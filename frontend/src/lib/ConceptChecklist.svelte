@@ -1,5 +1,6 @@
 <script>
-  import { concepts, findConcept } from './scenario.js';
+  import { concepts } from './scenario.js';
+  import { vocabularyLabel } from './vocabulary-labels.js';
 
   /**
    * @type {{
@@ -7,9 +8,11 @@
    *   category: import('./scenario.js').Category,
    *   values: string[],
    *   error?: string,
+   *   path?: string,
    * }}
    */
-  let { label, category, values = $bindable(), error = '' } = $props();
+  let { label, category, values = $bindable(), error = '', path } = $props();
+  const id = $props.id();
 
   /** @param {string} id */
   function toggle(id) {
@@ -17,17 +20,22 @@
   }
 </script>
 
-<fieldset class="concepts">
+<fieldset class="concepts" class:roles={category === 'Role'} data-field-path={path} tabindex="-1" aria-describedby={error ? `${id}-error` : undefined}>
   <legend>{label}</legend>
   {#each concepts[category] as concept (concept.id)}
-    <label class="inline" title={concept.definition}>
-      <input type="checkbox" value={concept.id} checked={values.includes(concept.id)} onchange={() => toggle(concept.id)} />
-      {concept.label}
+    <label class="inline">
+      <input type="checkbox" value={concept.id} checked={values.includes(concept.id)} onchange={() => toggle(concept.id)} aria-describedby={error ? `${id}-error` : undefined} />
+      {vocabularyLabel(category, concept.label)}
     </label>
   {/each}
-  {#each values as id, i (i)}
-    {@const concept = findConcept(category, id)}
-    <p class="hint"><code>hint:{id}</code> — {concept?.definition ?? 'not a HINT concept'}</p>
-  {/each}
-  {#if error}<p class="error">{error}</p>{/if}
+  <details class="concept-help">
+    <summary>HINT definitions for {label.toLowerCase()}</summary>
+    <dl class="hint">
+      {#each concepts[category] as concept (concept.id)}
+        <dt><strong>{concept.label}</strong> · <code>hint:{concept.id}</code></dt>
+        <dd>{concept.definition}</dd>
+      {/each}
+    </dl>
+  </details>
+  {#if error}<p class="error" id="{id}-error">{error}</p>{/if}
 </fieldset>

@@ -487,7 +487,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       ['Human user', 'Human Agent', 'User Role'],
     ]);
 
-    const link = /** @type {HTMLAnchorElement} */ (document.querySelector('a.button'));
+    const link = /** @type {HTMLAnchorElement} */ (document.querySelector('.save a.button'));
     expect(link.href).toBe(`${GRAPHDB}/resource?uri=${encodeURIComponent(graphIri(id))}&role=context`);
     // Browsers request HTML and get the Workbench page (other Accept headers get RDF4J's 400).
     const page = await fetch(link.href, { headers: { Accept: 'text/html' } });
@@ -706,7 +706,8 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     flushSync();
     expect(text()).not.toContain('Saved in GraphDB');
     expect(document.querySelector('table.team')).toBeNull();
-    expect(document.querySelector('a.button')).toBeNull();
+    expect(document.querySelector('.save a.button')).toBeNull();
+    expect(document.querySelector('.json-panel a')?.textContent).toBe('Open JSON in new tab');
     expect(text()).toContain(`The form has changed since scenario ${id} was saved`);
 
     click('Save as new scenario');

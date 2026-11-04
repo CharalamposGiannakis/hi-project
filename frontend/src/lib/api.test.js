@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiUrl, fetchTeam, requestPreview, saveScenario } from './api.js';
+import { apiUrl, fetchTeam, issuePath, requestPreview, saveScenario } from './api.js';
 
 it('uses a relative API route when the deployed bundle requests it', () => {
   vi.stubEnv('VITE_API_URL', '/api');
@@ -55,10 +55,22 @@ describe('requestPreview', () => {
     [200, { ...preview, validation: { conforms: false, report: '' } }],
     [404, { detail: 'Not Found' }],
     [502, '<html>Bad gateway</html>'],
+    [422, { code: 'invalid_request', message: 'Bad', issues: [null] }],
+    [422, { code: 'invalid_request', message: 'Bad', issues: [{ location: 'tasks.0', message: 'Bad', type: 'x' }] }],
+    [422, { code: 'invalid_request', message: 'Bad', issues: [{ location: ['body', {}], message: 'Bad', type: 'x' }] }],
   ])('treats malformed or foreign responses as unexpected (%i)', async (status, body) => {
     const result = await requestPreview({}, { fetch: reply(status, body) });
     expect(result).toEqual({ kind: 'unexpected', message: `Unexpected backend response (HTTP ${status}).` });
   });
+});
+
+it.each([
+  [[], 'scenario'], [['body'], 'scenario'],
+  [['body', 'tasks', 2, 'name'], 'tasks.2.name'],
+  [['tasks', 2, 'name'], 'tasks.2.name'],
+  [['body', 'context', 'body'], 'context.body'],
+])('formats a backend location %j without dropping nested field names', (location, expected) => {
+  expect(issuePath(/** @type {(string | number)[]} */ (location))).toBe(expected);
 });
 
 const location = {

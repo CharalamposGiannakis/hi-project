@@ -15,7 +15,6 @@ import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
 import s7 from '../../examples/s7.json';
 import { requestPreview } from '../src/lib/api.js';
-import { concepts } from '../src/lib/scenario.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
@@ -55,6 +54,8 @@ async function mountApp(apiUrl = baseUrl) {
   vi.stubEnv('VITE_API_URL', apiUrl);
   const { default: App } = await import('../src/App.svelte');
   app = mount(App, { target: document.body });
+  flushSync();
+  clickButton('Expand all');
 }
 
 const text = () => document.body.textContent ?? '';
@@ -158,7 +159,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       ids[collection][sourceId] = draft()[collection].at(-1).id;
       return section;
     }
-    const useCase = /** @type {Element} */ (document.querySelector('form > fieldset'));
+    const useCase = /** @type {Element} */ (document.querySelector('#section-use_case fieldset'));
     enterText(useCase, 'Name', canonical.use_case.name);
     selectValue(useCase, 'Use case type', canonical.use_case.concept);
     selectValue(useCase, 'Domain (optional)', canonical.use_case.domain);
@@ -197,8 +198,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       const section = /** @type {Element} */ (document.querySelector(`#agent-${id}`)?.closest('section'));
       enterText(section, 'Name', agent.name);
       for (const role of agent.roles) {
-        const label = concepts.Role.find((concept) => concept.id === role)?.label;
-        const control = [...section.querySelectorAll('fieldset.roles label')].find((element) => element.textContent?.trim() === label)?.querySelector('input');
+        const control = /** @type {HTMLInputElement | null} */ (section.querySelector(`fieldset.roles input[value="${role}"]`));
         if (!control) throw new Error(`No role ${role}`);
         control.click();
         flushSync();
@@ -693,10 +693,9 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     select.dispatchEvent(new Event('change', { bubbles: true }));
     flushSync();
     for (const id of [...example.context.phenomena, ...example.context.constraints]) {
-      const concept = [...concepts.Phenomenon, ...concepts.Constraint].find((c) => c.id === id);
-      const checkboxLabel = [...document.querySelectorAll('fieldset.concepts label')].find((l) => l.textContent?.trim() === concept?.label);
-      expect(checkboxLabel, `HINT option ${id}`).toBeDefined();
-      /** @type {HTMLInputElement} */ (checkboxLabel?.querySelector('input')).click();
+      const checkbox = document.querySelector(`#section-context input[value="${id}"]`);
+      expect(checkbox, `HINT option ${id}`).not.toBeNull();
+      /** @type {HTMLInputElement} */ (checkbox).click();
       flushSync();
     }
     const description = /** @type {HTMLTextAreaElement} */ (document.querySelector('#context-description'));
