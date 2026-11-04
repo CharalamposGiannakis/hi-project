@@ -7,9 +7,11 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 ## Researcher workflow
 
 1. Load the bundled S1 example, open a canonical example or another local JSON file with **Open JSON file…**, or enter a scenario in the form.
-2. Edit the scenario in collapsible sections and download its JSON draft. Use **Expand all** / **Collapse all** to navigate; validation opens sections with errors and links to affected fields. Sections can be collapsed while errors remain. HINT details and definitions are available below vocabulary fields. **Expand JSON** opens the read-only JSON viewer across the page. The backend is the authoritative validator; the form provides immediate feedback.
+2. Edit the scenario in collapsible sections and download its JSON draft. Use **Expand all** / **Collapse all** to navigate; validation opens sections with errors and links to affected fields. Sections can be collapsed while errors remain. HINT details and definitions are available below vocabulary fields. The backend is the authoritative validator; the form provides immediate feedback.
 3. Preview the validated N-Triples and SHACL result without saving.
 4. Save a new scenario, then use Explore to retrieve its team composition (CQ1) and open its named graph in GraphDB Workbench.
+
+**Open JSON in new tab** opens a read-only snapshot viewer. **Refresh JSON** or reloading the viewer retrieves the latest form state, including unsaved edits, without a backend request. Keep the original Builder tab open; reloading that tab requires opening a new viewer. Snapshots do not update automatically and are not stored in the browser. The viewer requires browser support for BroadcastChannel and reports when it cannot retrieve an update.
 
 Editing the form hides stale preview, save, and query results. The interface does not list or reopen stored scenarios for editing, so keep downloaded drafts. The API enforces **create-only** saving: an existing scenario ID returns `409`, even for identical JSON. Use *Save as new scenario* for a fresh ID. Direct GraphDB administration can bypass this policy. After an uncertain save outcome, check `GET /scenarios/{scenario_id}/team` or the named graph in Workbench before retrying.
 

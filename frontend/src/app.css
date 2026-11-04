@@ -38,14 +38,10 @@ form { grid-area: editor; min-width: 0; }
   gap: 1.5rem;
 }
 aside { grid-area: actions; }
-.json-panel { grid-area: json; min-width: 0; scroll-margin-top: 1rem; }
-main.json-expanded { grid-template-areas: 'editor actions' 'json json'; }
-main.json-expanded .sidebar { display: contents; }
-main.json-expanded aside { position: sticky; top: 1rem; max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.json-panel { grid-area: json; min-width: 0; }
 @media (max-width: 1000px) {
   main { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'sidebar'; }
-  main.json-expanded { grid-template-areas: 'editor' 'actions' 'json'; }
-  .sidebar, main.json-expanded aside { position: static; max-height: none; overflow: visible; }
+  .sidebar { position: static; max-height: none; overflow: visible; }
 }
 @media (max-width: 600px) {
   header, main { padding-left: 0.75rem; padding-right: 0.75rem; }
@@ -137,7 +133,7 @@ aside, .json-panel {
   padding: 1rem 1.25rem;
 }
 .json-panel .item-head h2 { margin: 0; }
-.json-panel .item-head { gap: 0.5rem; }
+.json-panel .item-head { gap: 0.5rem; flex-wrap: wrap; }
 pre.json, pre.rdf, pre.report {
   max-height: 40vh;
   overflow: auto;
@@ -148,7 +144,6 @@ pre.json, pre.rdf, pre.report {
 }
 code { font-size: 0.85em; }
 pre.json { min-height: min(24rem, 65vh); max-height: 65vh; white-space: pre; }
-main.json-expanded pre.json { height: 75vh; max-height: none; }
 pre.rdf { white-space: pre; font-size: 0.72rem; max-height: 16rem; }
 pre.report { white-space: pre-wrap; font-size: 0.75rem; }
 .preview, .save { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem; }

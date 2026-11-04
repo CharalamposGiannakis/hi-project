@@ -1,6 +1,7 @@
 <script>
-  import { tick } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { issuePath } from './lib/api.js';
+  import { createJsonSource } from './lib/json-viewer-channel.js';
   import example from '../../examples/s1.json';
   import EditorSection from './lib/EditorSection.svelte';
   import { vocabularyLabel } from './lib/vocabulary-labels.js';
@@ -37,9 +38,8 @@
   const compactSections = () => Object.fromEntries(sectionIds.map((id) => [id, id === 'use_case']));
   let expanded = $state(compactSections());
   let revealRequest = $state(0);
-  let jsonExpanded = $state(false);
-  let sidebar = $state(/** @type {HTMLDivElement | undefined} */ (undefined));
-  let sidebarScroll = 0;
+  let viewerUrl = $state('');
+  let viewerError = $state('');
   // Backend feedback only applies to the exact submitted JSON.
   let backendFeedback = $state(/** @type {{ json: string, issues: import('./lib/scenario.js').Issue[] } | null} */ (null));
 
@@ -55,6 +55,18 @@
   })));
   // JSON at the last new/load, to ask before discarding edits.
   let pristine = $state(serialize(initial));
+
+  onMount(() => {
+    try {
+      const source = createJsonSource(() => json);
+      const url = new URL('json-viewer.html', document.baseURI);
+      url.hash = source.id;
+      viewerUrl = url.href;
+      return () => source.close();
+    } catch {
+      viewerError = 'The separate JSON viewer is unavailable in this browser. Use Copy or Download JSON instead.';
+    }
+  });
 
   /** @param {import('./lib/scenario.js').Scenario} value */
   function serialize(value) {
@@ -127,19 +139,6 @@
       target.focus({ preventScroll: true });
       target.scrollIntoView?.({ block: 'nearest' });
     }
-  }
-
-  /** @param {MouseEvent} event */
-  async function toggleJsonSize(event) {
-    const button = /** @type {HTMLButtonElement} */ (event.currentTarget);
-    const top = button.getBoundingClientRect().top;
-    if (!jsonExpanded) sidebarScroll = sidebar?.scrollTop ?? 0;
-    jsonExpanded = !jsonExpanded;
-    await tick();
-    if (!jsonExpanded && sidebar) sidebar.scrollTop = sidebarScroll;
-    // Keep the clicked control in place when the panel changes grid rows.
-    const offset = button.getBoundingClientRect().top - top;
-    if (offset) window.scrollBy({ top: offset, behavior: 'instant' });
   }
 
   /** @param {string} message */
@@ -237,7 +236,7 @@
   {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
 </header>
 
-<main class:json-expanded={jsonExpanded}>
+<main>
   <form onsubmit={(e) => e.preventDefault()} novalidate>
     <div class="toolbar section-controls" aria-label="Editor sections">
       <button type="button" onclick={() => setAllSections(true)}>Expand all</button>
@@ -453,7 +452,7 @@
     </EditorSection>
   </form>
 
-  <div class="sidebar" bind:this={sidebar}>
+  <div class="sidebar">
     <aside aria-label="Preview, save, and validation">
       <RdfPreview {json} issueCount={issues.length} onIncomplete={revealErrors} onValidationIssues={revealBackendErrors} />
       <ScenarioSave
@@ -487,8 +486,9 @@
     <section class="json-panel" id="json-panel" aria-labelledby="json-heading">
       <div class="item-head">
         <h2 id="json-heading">Scenario JSON</h2>
-        <button type="button" aria-expanded={jsonExpanded} aria-controls="scenario-json" onclick={toggleJsonSize}>{jsonExpanded ? 'Restore JSON size' : 'Expand JSON'}</button>
+        {#if viewerUrl}<a class="button" href={viewerUrl} target="_blank" rel="noopener noreferrer">Open JSON in new tab</a>{/if}
       </div>
+      {#if viewerError}<p class="error" role="status">{viewerError}</p>{/if}
       <div class="toolbar">
         <button type="button" onclick={copyJson}>Copy</button>
         <button type="button" onclick={downloadJson}>Download JSON</button>

@@ -4,6 +4,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
 import s5 from '../../examples/s5.json';
 import s7 from '../../examples/s7.json';
+import { requestScenarioJson } from './lib/json-viewer-channel.js';
 
 /** @type {Record<string, any> | undefined} */
 let app;
@@ -336,34 +337,53 @@ describe('Scenario Builder navigation', () => {
 });
 
 describe('Scenario JSON and submission workflows', () => {
-  it('anchors JSON expansion to its control and restores the sidebar scroll position', async () => {
+  it('opens an isolated, reloadable viewer URL and serves current unsaved form data without changing the editor', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
     render();
     await importJson(s7);
-    const sidebar = /** @type {HTMLElement} */ (document.querySelector('.sidebar'));
-    sidebar.scrollTop = 240;
-    const button = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Expand JSON');
-    if (!button) throw new Error('Missing JSON expansion button');
-    const bounds = vi.spyOn(button, 'getBoundingClientRect');
-    const rect = (/** @type {number} */ top) => /** @type {DOMRect} */ ({ top });
-    bounds.mockReturnValueOnce(rect(300)).mockReturnValueOnce(rect(1800));
-    const scroll = vi.spyOn(window, 'scrollBy').mockImplementation(() => {});
+    click('Collapse all');
+    const sidebar = document.querySelector('.sidebar');
     const pre = jsonNode();
-    pre.scrollTop = 500;
-    click('Expand JSON');
-    await until(() => expect(scroll).toHaveBeenCalledWith({ top: 1500, behavior: 'instant' }));
-    sidebar.scrollTop = 0;
-    bounds.mockReturnValueOnce(rect(300)).mockReturnValueOnce(rect(-1200));
-    click('Restore JSON size');
-    await until(() => expect(scroll).toHaveBeenCalledWith({ top: -1500, behavior: 'instant' }));
-    expect(sidebar.scrollTop).toBe(240);
+    const link = /** @type {HTMLAnchorElement} */ (document.querySelector('.json-panel a'));
+    expect(link.textContent).toBe('Open JSON in new tab');
+    expect(link.target).toBe('_blank');
+    expect(link.rel).toContain('noopener');
+    expect(link.rel).toContain('noreferrer');
+    const url = new URL(link.href);
+    expect(url.pathname).toBe('/json-viewer.html');
+    expect(url.search).toBe('');
+    expect(url.hash).not.toContain(s7.id);
+    const snapshot = await requestScenarioJson(url.hash.slice(1));
+    expect(JSON.parse(snapshot)).toEqual(s7);
+    enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Unsaved museum edits');
+    expect(JSON.parse(snapshot)).toEqual(s7);
+    const latest = JSON.parse(await requestScenarioJson(url.hash.slice(1)));
+    expect(latest).toEqual({ ...s7, use_case: { ...s7.use_case, name: 'Unsaved museum edits' } });
+    expect(document.querySelector('.sidebar')).toBe(sidebar);
     expect(jsonNode()).toBe(pre);
-    expect(pre.scrollTop).toBe(500);
-    expect(draft()).toEqual(s7);
-    expect(sidebar.querySelectorAll('.preview')).toHaveLength(1);
-    expect(sidebar.querySelectorAll('.save')).toHaveLength(1);
+    expect(sections().every((element) => !element.open)).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+
+    await unmount(/** @type {Record<string, any>} */ (app));
+    app = undefined;
+    document.body.innerHTML = '';
+    render();
+    const next = /** @type {HTMLAnchorElement} */ (document.querySelector('.json-panel a'));
+    expect(new URL(next.href).hash).not.toBe(url.hash);
   });
 
-  it('expands a single read-only viewer, preserves JSON through Copy/Download, and restores the layout', async () => {
+  it('keeps the editor usable when separate-tab communication is unavailable', () => {
+    vi.stubGlobal('BroadcastChannel', undefined);
+    render();
+    expect(document.querySelector('.json-panel a')).toBeNull();
+    expect(document.body.textContent).toContain('Use Copy or Download JSON instead');
+    expect(document.getElementById('use-case-name')).not.toBeNull();
+    expect(jsonNode()).not.toBeNull();
+    expect([...document.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(expect.arrayContaining(['Copy', 'Download JSON', 'Validate & preview RDF', 'Save to GraphDB']));
+  });
+
+  it('preserves the inline read-only JSON and Copy/Download workflows', async () => {
     const clipboard = vi.fn(async (/** @type {string} */ value) => { void value; });
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
     const createObjectURL = vi.fn(() => 'blob:test-json');
@@ -373,8 +393,6 @@ describe('Scenario JSON and submission workflows', () => {
     render();
     await importJson(s7);
     const pre = jsonNode();
-    click('Expand JSON');
-    expect(document.querySelector('main')?.classList.contains('json-expanded')).toBe(true);
     expect(document.querySelectorAll('pre.json')).toHaveLength(1);
     expect(jsonNode()).toBe(pre);
     expect(pre.tabIndex).toBe(0);
@@ -389,14 +407,12 @@ describe('Scenario JSON and submission workflows', () => {
     expect(/** @type {HTMLAnchorElement} */ (download.mock.contexts[0]).download).toBe('scenario-s7.json');
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:test-json');
     expect(document.body.textContent).toContain('JSON downloaded to your computer.');
-    click('Restore JSON size');
-    expect(document.querySelector('main')?.classList.contains('json-expanded')).toBe(false);
     expect(jsonNode()).toBe(pre);
     expect(draft()).toEqual(s7);
     Reflect.deleteProperty(navigator, 'clipboard');
   });
 
-  it('preserves preview and save outcomes across navigation and JSON expansion, invalidating them only on data edits', async () => {
+  it('preserves preview and save outcomes while inspecting JSON, invalidating them only on data edits', async () => {
     const validation = { conforms: true, report: 'Conforms: True' };
     const fetch = vi.fn(async (/** @type {string} */ url) => new Response(JSON.stringify(url.endsWith('/preview') ? {
       scenario_id: 's7', rdf_format: 'nt', rdf: '<urn:s7> <urn:p> "test" .', triple_count: 173, validation,
@@ -414,8 +430,7 @@ describe('Scenario JSON and submission workflows', () => {
     await until(() => expect(document.body.textContent).toContain('Saved in GraphDB'));
     click('Expand all');
     click('Collapse all');
-    click('Expand JSON');
-    click('Restore JSON size');
+    expect(document.querySelector('.json-panel a')?.getAttribute('target')).toBe('_blank');
     expect(document.body.textContent).toContain('173 triples · not saved');
     expect(document.body.textContent).toContain('Saved in GraphDB');
     expect(fetch).toHaveBeenCalledTimes(2);

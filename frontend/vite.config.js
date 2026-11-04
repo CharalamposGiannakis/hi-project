@@ -1,8 +1,18 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { resolve } from 'node:path';
 
 export default defineConfig({
   plugins: [svelte()],
+  // Both pages are real static files, so viewer reloads also work behind Caddy.
+  build: {
+    rolldownOptions: {
+      input: {
+        builder: resolve(import.meta.dirname, 'index.html'),
+        jsonViewer: resolve(import.meta.dirname, 'json-viewer.html'),
+      },
+    },
+  },
   server: {
     // The backend's CORS policy allows only this origin, so never fall back to another port.
     port: 5173,
