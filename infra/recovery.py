@@ -2,27 +2,24 @@
 
 import argparse
 from datetime import datetime, timezone
-import hashlib
 import json
 from pathlib import Path
 import re
 import subprocess
 import tarfile
-from typing import BinaryIO
 
 import httpx
 
 from hi_scenario.graphdb import GraphDBError, GraphDBSettings, GraphDBStore
 from infra import canonical
 from infra.graphdb import ENDPOINT, REPOSITORY, ROOT, setup_repository
+from infra.recovery_bundle import ARCHIVE, MANIFEST, archive_digest
 
 
 VERSION = "10.8.14"
 IMAGE = f"ontotext/graphdb:{VERSION}"
 PROJECT = re.compile(r"hi-recovery-[a-z0-9]+(?:-[a-z0-9]+)*-(source|restore)")
 REPOSITORIES = "/rest/repositories"
-ARCHIVE = "hi.tar"
-MANIFEST = "manifest.json"
 
 
 def docker(context: str, *args: str) -> str:
@@ -102,21 +99,6 @@ def snapshot(client: httpx.Client) -> dict:
         "named_graphs": {row["g"]["value"]: int(row["n"]["value"]) for row in named},
         "default_triples": int(default.text),
     }
-
-
-def archive_digest(stream: BinaryIO) -> str:
-    # Require a populated tar and both end blocks, which tarfile can otherwise accept as missing.
-    with tarfile.open(fileobj=stream, mode="r:") as archive:
-        if not any(member.isfile() and member.size for member in archive.getmembers()):
-            raise ValueError("Backup archive has no file data.")
-        stream.seek(archive.offset)
-        end_size = 2 * tarfile.BLOCKSIZE
-        if stream.read(end_size) != bytes(end_size):
-            raise ValueError("Backup archive is incomplete (missing tar end blocks).")
-    stream.seek(0)
-    digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    stream.seek(0)
-    return digest
 
 
 def backup(client: httpx.Client, bundle: Path) -> None:
