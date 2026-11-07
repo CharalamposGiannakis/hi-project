@@ -1,0 +1,22 @@
+services:
+  graphdb:
+    image: ontotext/graphdb:10.8.14
+    labels:
+      org.hi-project.recovery: "true"
+    ports:
+      - target: 7200
+        host_ip: 127.0.0.1
+    volumes:
+      - graphdb-data:/opt/graphdb/home
+    environment:
+      GDB_JAVA_OPTS: "-Xms256m -Xmx1g"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:7200/rest/repositories"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    stop_grace_period: 60s
+
+volumes:
+  graphdb-data:
