@@ -81,7 +81,7 @@ $env:HI_GRAPHDB_LIVE = '1'
 Remove-Item Env:HI_GRAPHDB_LIVE
 ```
 
-That test cleans up only its temporary graphs and does not restart GraphDB. The separate opt-in [persistence test](tests/test_graphdb_live.py) restarts local GraphDB; run it only when that interruption is acceptable. Local tests do not establish hosted HTTPS behavior. Persistent volumes, deployment security, and the absence of a verified backup-and-restore procedure are covered in the [deployment runbook](docs/deployment.md).
+That test cleans up only its temporary graphs and does not restart GraphDB. The separate opt-in [persistence test](tests/test_graphdb_live.py) restarts local GraphDB; run it only when that interruption is acceptable. Local tests do not establish hosted HTTPS behavior. The [deployment runbook](docs/deployment.md) covers persistent volumes, deployment security, and the [local recovery rehearsal](docs/deployment.md#local-graphdb-recovery-rehearsal).
 
 ## Canonical scenario import
 
