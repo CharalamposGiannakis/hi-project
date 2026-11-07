@@ -60,9 +60,9 @@ def local_url(context: str, project: str, role: str) -> str:
     volume_labels = json.loads(volume_labels) or {}
     if (volume_labels.get("com.docker.compose.project"), volume_labels.get("com.docker.compose.volume")) != (project, "graphdb-data"):
         raise ValueError("Volume is not owned by the named recovery Compose project.")
-    ports = json.loads(ports)
-    bindings = ports.get("7200/tcp") or []
-    if len(ports) != 1 or len(bindings) != 1 or bindings[0].get("HostIp") != "127.0.0.1":
+    published = {port: bindings for port, bindings in (json.loads(ports) or {}).items() if bindings}
+    bindings = published.get("7200/tcp", [])
+    if len(published) != 1 or len(bindings) != 1 or bindings[0].get("HostIp") != "127.0.0.1":
         raise ValueError("Recovery GraphDB must publish only one loopback port.")
     port = int(bindings[0]["HostPort"])
     if not 1 <= port <= 65535 or port == 7200:
@@ -145,7 +145,7 @@ def backup(client: httpx.Client, bundle: Path) -> None:
     print(f"Backed up {REPOSITORY} to {bundle / ARCHIVE} ({(bundle / ARCHIVE).stat().st_size} bytes, SHA-256 {digest}).")
 
 
-def restore_or_verify(client: httpx.Client, bundle: Path, *, restore: bool) -> None:
+def restore_or_verify(client: httpx.Client, bundle: Path, *, restore: bool, verify_canonical: bool = False) -> None:
     manifest = json.loads((bundle / MANIFEST).read_text(encoding="utf-8"))
     if (manifest["repository"], manifest["graphdb_version"]) != (REPOSITORY, VERSION):
         raise ValueError("Manifest does not describe repository hi on the pinned GraphDB version.")
@@ -157,24 +157,35 @@ def restore_or_verify(client: httpx.Client, bundle: Path, *, restore: bool) -> N
         if digest != manifest["sha256"]:
             raise ValueError("Backup SHA-256 does not match the manifest.")
         print(f"Verified archive SHA-256 {digest}.", flush=True)
-        if restore:
-            if list_repositories(client):
-                raise ValueError("Restore target already contains repositories. Use a fresh recovery volume.")
-            params = {"repositories": [REPOSITORY], "restoreSystemData": False, "removeStaleRepositories": False}
-            client.post("/rest/recovery/restore", files={
-                "params": (None, json.dumps(params), "application/json"),
-                "file": (ARCHIVE, stream, "application/x-tar"),
-            }).raise_for_status()
-    if list_repositories(client) != [REPOSITORY]:
-        raise ValueError("Recovery target must contain exactly repository hi.")
-    actual = snapshot(client)
-    for key, value in actual.items():
-        if value != expected[key]:
-            raise ValueError(f"Restored repository differs from the manifest in {key}.")
-    print("Verified repository settings and explicit triple counts:")
-    for iri, count in sorted(actual["named_graphs"].items()):
-        print(f"  <{iri}> {count}")
-    print(f"  Default context: {actual['default_triples']}")
+        if restore and list_repositories(client):
+            raise ValueError("Restore target already contains repositories. Use a fresh recovery volume.")
+        try:
+            if restore:
+                params = {"repositories": [REPOSITORY], "restoreSystemData": False, "removeStaleRepositories": False}
+                client.post("/rest/recovery/restore", files={
+                    "params": (None, json.dumps(params), "application/json"),
+                    "file": (ARCHIVE, stream, "application/x-tar"),
+                }).raise_for_status()
+            if list_repositories(client) != [REPOSITORY]:
+                raise ValueError("Recovery target must contain exactly repository hi.")
+            actual = snapshot(client)
+            for key, value in actual.items():
+                if value != expected[key]:
+                    raise ValueError(f"Restored repository differs from the manifest in {key}.")
+            print("Verified repository settings and explicit triple counts:")
+            for iri, count in sorted(actual["named_graphs"].items()):
+                print(f"  <{iri}> {count}")
+            print(f"  Default context: {actual['default_triples']}")
+            if verify_canonical:
+                run_canonical(client, "verify")
+        except (GraphDBError, httpx.HTTPError, OSError, RuntimeError, ValueError, KeyError, TypeError,
+                KeyboardInterrupt) as exc:
+            if restore:
+                raise RuntimeError(
+                    f"{str(exc) or 'Restore interrupted.'}\n"
+                    "Discard the disposable restore target and retry in a fresh recovery environment."
+                ) from exc
+            raise
 
 
 def run_canonical(client: httpx.Client, command: str) -> None:
@@ -227,9 +238,9 @@ def main() -> None:
             elif args.command == "backup":
                 backup(client, args.bundle)
             else:
-                restore_or_verify(client, args.bundle, restore=args.command == "restore")
-                if args.canonical:
-                    run_canonical(client, "verify")
+                restore_or_verify(
+                    client, args.bundle, restore=args.command == "restore", verify_canonical=args.canonical,
+                )
     except (GraphDBError, httpx.HTTPError, OSError, RuntimeError, ValueError, KeyError, TypeError,
             subprocess.CalledProcessError, tarfile.TarError) as exc:
         parser.exit(1, f"Recovery {args.command} failed: {exc}\n")

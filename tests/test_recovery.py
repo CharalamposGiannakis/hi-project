@@ -1,3 +1,6 @@
+from email import policy
+from email.parser import BytesParser
+import hashlib
 import io
 import json
 import tarfile
@@ -20,7 +23,9 @@ def test_restore_project_guard_runs_before_docker(monkeypatch, project):
         recovery.local_url("default", project, "restore")
 
 
-@pytest.mark.parametrize("problem", [None, "remote", "wrong volume", "bind volume", "public", "dev port"])
+@pytest.mark.parametrize("problem", [
+    None, "unpublished port", "extra published port", "remote", "wrong volume", "bind volume", "public", "dev port",
+])
 def test_disposable_docker_identity(monkeypatch, problem):
     def docker(_context, command, *args):
         if command == "context":
@@ -32,10 +37,15 @@ def test_disposable_docker_identity(monkeypatch, problem):
             volume = "hi-project_graphdb-data" if problem == "wrong volume" else f"{TARGET}_graphdb-data"
             port = "7200" if problem == "dev port" else "49000"
             host = "0.0.0.0" if problem == "public" else "127.0.0.1"
+            ports = {"7200/tcp": [{"HostIp": host, "HostPort": port}]}
+            if problem == "unpublished port":
+                ports["7300/tcp"] = None
+            elif problem == "extra published port":
+                ports["7300/tcp"] = [{"HostIp": "127.0.0.1", "HostPort": "49001"}]
             return "\n".join((
                 json.dumps({"org.hi-project.recovery": "true"}), recovery.IMAGE,
                 json.dumps([{"Type": "volume", "Name": volume, "Destination": "/opt/graphdb/home"}]),
-                json.dumps({"7200/tcp": [{"HostIp": host, "HostPort": port}]}),
+                json.dumps(ports),
             ))
         assert command == "volume"
         options = {"o": "bind"} if problem == "bind volume" else None
@@ -44,7 +54,7 @@ def test_disposable_docker_identity(monkeypatch, problem):
         })))
 
     monkeypatch.setattr(recovery, "docker", docker)
-    if problem:
+    if problem not in (None, "unpublished port"):
         with pytest.raises(ValueError):
             recovery.local_url("default", TARGET, "restore")
     else:
@@ -77,6 +87,14 @@ def archive_bytes():
     return stream.getvalue()
 
 
+def write_bundle(path, archive_bytes, *, bad_digest=False):
+    (path / recovery.ARCHIVE).write_bytes(archive_bytes)
+    (path / recovery.MANIFEST).write_text(json.dumps({
+        "repository": "hi", "graphdb_version": recovery.VERSION, "snapshot": SNAPSHOT,
+        "sha256": "0" * 64 if bad_digest else hashlib.sha256(archive_bytes).hexdigest(),
+    }), encoding="utf-8")
+
+
 @pytest.mark.parametrize("failure", ["http", "json", "truncated", "inventory drift"])
 def test_backup_failure_never_publishes_archive(tmp_path, monkeypatch, archive_bytes, failure):
     changed = {**SNAPSHOT, "named_graphs": {}} if failure == "inventory drift" else SNAPSHOT
@@ -106,12 +124,7 @@ def test_backup_failure_never_publishes_archive(tmp_path, monkeypatch, archive_b
     ("extra graph lost", "named_graphs"), ("default lost", "default_triples"),
 ])
 def test_recovery_checks_checksum_target_and_inventory(tmp_path, monkeypatch, archive_bytes, problem, message):
-    digest = recovery.archive_digest(io.BytesIO(archive_bytes))
-    (tmp_path / recovery.ARCHIVE).write_bytes(archive_bytes)
-    (tmp_path / recovery.MANIFEST).write_text(json.dumps({
-        "repository": "hi", "graphdb_version": recovery.VERSION, "snapshot": SNAPSHOT,
-        "sha256": "0" * 64 if problem == "digest" else digest,
-    }), encoding="utf-8")
+    write_bundle(tmp_path, archive_bytes, bad_digest=problem == "digest")
     repository = {**SNAPSHOT, "named_graphs": {}} if problem == "extra graph lost" else {**SNAPSHOT, "default_triples": 0}
     monkeypatch.setattr(recovery, "snapshot", lambda _: repository)
 
@@ -124,3 +137,59 @@ def test_recovery_checks_checksum_target_and_inventory(tmp_path, monkeypatch, ar
     with httpx.Client(transport=httpx.MockTransport(respond), base_url="http://test") as client:
         with pytest.raises(ValueError, match=message):
             recovery.restore_or_verify(client, tmp_path, restore=problem in ("digest", "nonempty"))
+
+
+@pytest.mark.parametrize("failure", [None, "timeout", "settings", "named_graphs"])
+def test_restore_upload_and_verification(tmp_path, archive_bytes, failure):
+    write_bundle(tmp_path, archive_bytes)
+    requests = []
+    inventory = ("GET", "/rest/repositories")
+    upload = ("POST", "/rest/recovery/restore")
+    settings = ("GET", "/rest/repositories/hi")
+    named_graphs = ("POST", "/repositories/hi")
+    default_graph = ("GET", "/repositories/hi/size")
+
+    def respond(request):
+        route = (request.method, request.url.path)
+        requests.append(route)
+        if route == inventory:
+            return httpx.Response(200, json=[] if requests == [inventory] else [{"id": "hi"}])
+        if route == upload:
+            assert requests == [inventory, upload]
+            header = f"Content-Type: {request.headers['Content-Type']}\r\n\r\n".encode("ascii")
+            multipart = BytesParser(policy=policy.default).parsebytes(header + request.read())
+            parts = {part.get_param("name", header="Content-Disposition"): part for part in multipart.iter_parts()}
+            assert set(parts) == {"params", "file"}
+            assert parts["params"].get_content_type() == "application/json"
+            params = json.loads(parts["params"].get_payload(decode=True))
+            assert params.pop("restoreSystemData") is False
+            assert params.pop("removeStaleRepositories") is False
+            assert params == {"repositories": ["hi"]}
+            assert parts["file"].get_filename() == "hi.tar"
+            assert parts["file"].get_content_type() == "application/x-tar"
+            assert parts["file"].get_payload(decode=True) == archive_bytes
+            if failure == "timeout":
+                raise httpx.ReadTimeout("Restore response timed out", request=request)
+            return httpx.Response(200)
+        if route == settings:
+            params = {"ruleset": {"value": "rdfs"}} if failure == "settings" else SNAPSHOT["settings"]
+            return httpx.Response(200, json={"params": params})
+        if route == named_graphs:
+            row = {"g": {"type": "uri", "value": EXTRA_GRAPH}, "n": {"value": "1"}}
+            return httpx.Response(200, json={"results": {"bindings": [] if failure == "named_graphs" else [row]}})
+        assert route == default_graph
+        assert request.url.params["context"] == "null"
+        return httpx.Response(200, text="1")
+
+    with httpx.Client(transport=httpx.MockTransport(respond), base_url="http://test") as client:
+        if failure is None:
+            recovery.restore_or_verify(client, tmp_path, restore=True)
+        else:
+            with pytest.raises(RuntimeError, match="Discard the disposable restore target") as error:
+                recovery.restore_or_verify(client, tmp_path, restore=True)
+            assert ("timed out" if failure == "timeout" else failure) in str(error.value)
+
+    expected = [inventory, upload]
+    if failure != "timeout":
+        expected.extend((inventory, settings, named_graphs, default_graph))
+    assert requests == expected

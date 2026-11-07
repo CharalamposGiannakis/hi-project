@@ -119,6 +119,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Restore or verification failed.' }
 
 The restore checks the archive and SHA-256 before uploading it, then compares the recovered settings and populated graph inventory against the manifest. The stored default context is counted separately through RDF4J because GraphDB's SPARQL default can include named graph statements. `--canonical` also checks RDF equality up to blank-node renaming, SHACL, scenario identities, and CQ1 using the existing canonical verifier. Expect both references, all seven scenarios, the extra named graph with one triple, and one default-context triple. Run this before starting any backend or running `infra.graphdb setup`, which refreshes the reference graphs. To repeat just the checks, use `verify` in place of `restore`. Content changes that preserve counts in additional graphs require a separate RDF comparison.
 
+If the restore request fails or verification fails after upload, use the cleanup command below for the disposable target project and its volume. Retry in a fresh recovery environment.
+
 For an application check, point standalone FastAPI at the verified restore. Use the rehearsal shell with the variables from above and close it after cleanup so the GraphDB URL stays scoped to the rehearsal.
 
 ```powershell
