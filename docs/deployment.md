@@ -149,6 +149,8 @@ docker --context $context compose -f compose.recovery.yaml -p $source down --vol
 
 The native archive covers repository `hi`. GraphDB system data, Caddy state, deployment secrets, and unsaved JSON drafts are outside its scope. Keep bundles outside the checkout in restricted storage. Use only archives from trusted operators.
 
+To rehearse the Azure capture transport locally, start a fresh recovery source and leave its repository list empty. Set `HI_AZURE_CAPTURE_TEST_PROJECT` to that source project and `HI_AZURE_CAPTURE_TEST_CONTEXT` to its local Docker context. Run `python -m pytest -s tests/test_azure_capture_live.py` from the recovery checkout. The test seeds the source, exercises a temporary transaction and the real in-container capture, and prints the verified fixture bundle path. It substitutes the Azure topology in the test process. Clean up only the disposable source when finished.
+
 ## Azure backup and isolated recovery
 
 Production execution requires separate approval. The source tool uses the VM's local Docker socket and runs `curl` against loopback **inside the GraphDB container**. The existing local CLI remains the restore entry point and requires a fresh disposable Compose target. The bundle contains `hi.tar`, `source.nq` (a complete explicit RDF export), `manifest.json`, and `SHA256SUMS`. Treat all four as protected research data.
@@ -157,11 +159,11 @@ Production execution requires separate approval. The source tool uses the VM's l
 
 - Approve the Azure VM resource identity and SSH host key, deployed Git SHA, maintenance window and maximum pause, restricted staging on encrypted disk, independent encrypted storage and custodians, retention, and the separate recovery host. Approve the source preflight, pause and resume, capture, transfer and retrieval, isolated restore and app checks, and cleanup before running those commands. Agree on any separate preservation of GraphDB Workbench system data and Caddy access settings.
 - Use the trusted deployment record to confirm the exact SHA that built the running app. The checkout SHA and image IDs alone cannot identify the source of an already-built image. Have the reviewed recovery checkout available separately from the deployment checkout. The VM capture uses Python 3.11+ standard library, Git, Docker and the existing GraphDB image. The recovery host uses the project's existing Python dependencies and local Docker Compose.
-- Confirm access and disk space for the archive, explicit export, off-VM copy, and a restored volume. Keep a second approved session available to resume service if the capture shell disconnects. Confirm that application saves, Workbench updates, imports, deployment operations and direct Docker writers have drained. Check Workbench **Monitor → Queries and Updates** before pausing. Defer the operation if any write path cannot be paused.
+- Confirm access and disk space for the archive, explicit export, off-VM copy, and a restored volume. Use an existing `tmux` installation or approved equivalent for the capture and keep a second authorized SSH session available. Confirm that application saves, Workbench updates, imports, deployment operations and direct Docker writers have drained. Check Workbench **Monitor → Queries and Updates** before pausing. Defer the operation if any write path cannot be paused.
 
 ### 2. Source preflight and backup execution
 
-**Approval required.** Connect to the verified Azure VM and run this read-only preflight from the reviewed recovery checkout. Substitute the approved OS hostname, deployment checkout, and full deployed SHA. Compare the output with the deployment record and save the full `web` and `backend` container IDs for the next step. Stop on any discrepancy.
+**Approval required.** Before scheduling the window, connect to the verified Azure VM and run this read-only preflight from the reviewed recovery checkout. Substitute the approved OS hostname, deployment checkout, and full deployed SHA. Use the same Python executable for capture. Preflight requires Python 3.11+, reports the repository digest and platform, and lists all populated named graphs and the default-context count. If a concurrent write causes inconsistent counts, retry preflight during a quiet period. Review the inventory, including S1–S7 and both reference graphs, and retain it in the restricted operator record. Save the full `graphdb`, `web`, and `backend` IDs. Resolve any discrepancy before scheduling capture. If Python is unsupported, select an approved existing interpreter or defer.
 
 ```bash
 cd '/path/to/reviewed-recovery-checkout'
@@ -169,10 +171,11 @@ azure_host='<approved OS hostname>'
 deployment='/path/to/active-deployment-checkout'
 deployed_sha='<full deployed Git SHA>'
 source_args=(--host "$azure_host" --deployment "$deployment" --revision "$deployed_sha")
-python3 -m infra.azure_backup check "${source_args[@]}"
+capture_python='python3'  # Or an approved absolute interpreter path.
+"$capture_python" -m infra.azure_backup check "${source_args[@]}"
 ```
 
-**Approval required.** Run the capture during the approved window. Pausing Caddy and the backend temporarily interrupts both public entry points and prevents in-flight application validation from starting a later GraphDB write. GraphDB stays online. The capture requires zero open GraphDB connections and active transactions, checks the complete explicit inventory against repository size, and checks that identity, the write pause, settings and counts still match at the end. It takes a native backup of `hi` with GraphDB system data excluded. [GraphDB backup behavior](https://graphdb.ontotext.com/documentation/10.8/backup-and-restore.html#planning-a-backup) · [Docker container pause](https://docs.docker.com/reference/cli/docker/container/pause/)
+**Approval required.** Start `tmux new-session -s hi-azure-backup` on the verified VM. Re-run the preflight block inside it so the variables are available and the IDs are current. Run capture during the approved window. Pausing Caddy and the backend temporarily interrupts both public entry points and prevents in-flight application validation from starting a later GraphDB write. GraphDB stays online. The capture requires zero open connections and active transactions, checks the complete explicit inventory against repository size, and checks that identity, pause, settings, and counts still match at the end. It takes a native backup of `hi` with GraphDB system data excluded. [GraphDB backup behavior](https://graphdb.ontotext.com/documentation/10.8/backup-and-restore.html#planning-a-backup) · [Docker container pause](https://docs.docker.com/reference/cli/docker/container/pause/)
 
 ```bash
 web='<full web container ID from preflight>'
@@ -191,34 +194,87 @@ pause_limit='<approved capture time limit, for example 180s>'
     [[ "$(hostname)" == "$azure_host" ]]
     confirm_container "$web" web
     confirm_container "$backend" backend
-    web_paused=false
-    backend_paused=false
+    web_attempted=false
+    backend_attempted=false
+    resume_if_paused() {
+        local state
+        state=$(d container inspect --format '{{.State.Paused}}' "$1") || return 1
+        case "$state" in
+            true) d container unpause "$1" ;;
+            false) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
     resume() {
         local status=0
-        if "$backend_paused"; then d container unpause "$backend" || status=1; fi
-        if "$web_paused"; then d container unpause "$web" || status=1; fi
+        trap '' HUP INT TERM
+        if "$backend_attempted"; then resume_if_paused "$backend" || status=1; fi
+        if "$web_attempted"; then resume_if_paused "$web" || status=1; fi
         if (( status )); then printf '%s\n' 'Resume failed. Check the recorded container IDs immediately.' >&2; exit 1; fi
     }
     trap resume EXIT
+    trap 'exit 129' HUP
     trap 'exit 130' INT
     trap 'exit 143' TERM
+    web_attempted=true
     d container pause "$web"
-    web_paused=true
+    backend_attempted=true
     d container pause "$backend"
-    backend_paused=true
-    timeout --foreground --kill-after=5s "$pause_limit" python3 -m infra.azure_backup capture "${source_args[@]}" \
+    timeout --foreground --kill-after=5s "$pause_limit" "$capture_python" -m infra.azure_backup capture "${source_args[@]}" \
         --paused-web "$web" --paused-backend "$backend" --bundle "$bundle"
 )
 ```
 
-Confirm both containers resumed and an authorized read through the app succeeds. If the shell disconnects, use the second approved session to inspect the recorded IDs and unpause any container still paused, backend first. If capture failed, preserve the partial bundle for diagnosis and use a fresh directory for any approved retry. Resume and investigate if the repository is still busy, the pause deadline is reached, or the source state changes. After a timeout, check GraphDB's **Monitor → Backup and Restore** before starting another capture. [GraphDB recovery monitor](https://graphdb.ontotext.com/documentation/10.8/backup-and-restore.html#monitoring-your-recovery-operations)
+**Interrupted session or capture.** Reconnect to the verified VM and use `tmux attach-session -t hi-azure-backup` to check the original run. Avoid a second capture while its status is uncertain. At the pause deadline, interrupt the capture in that session with `Ctrl+C`. If the session is gone or cleanup fails, use the approved second session and the recorded IDs below. A terminated SSH or `docker exec` client can leave `curl` running inside GraphDB until its 120-second request timeout, and the server-side backup can outlive `curl`. Treat any interrupted bundle as incomplete. Before retrying in a fresh directory, verify the original exec exited or wait past its request timeout, then confirm the recovery monitor is idle. [GraphDB recovery monitor](https://graphdb.ontotext.com/documentation/10.8/backup-and-restore.html#monitoring-your-recovery-operations)
+
+**Approval required for emergency resume.** Set `azure_host`, `backend`, `web`, and `graphdb` from the approved preflight record in the second session. The block prints the live states, resumes paused services backend first, and reads the backup monitor. A successful JSON response of `{}` indicates no active backup or restore. Resolve any other response before retrying capture. For routine resume verification, use the same block with both services already unpaused. Compare `StartedAt` with preflight, then confirm an authorized `GET /api/scenarios/s1/team` and Workbench access through the normal HTTPS hostnames.
+
+```bash
+(
+    set -euo pipefail
+    d() { env -u DOCKER_HOST -u DOCKER_CONTEXT docker --host unix:///var/run/docker.sock "$@"; }
+    state_format='{{index .Config.Labels "com.docker.compose.project"}}/{{index .Config.Labels "com.docker.compose.service"}}/{{.State.Running}}/{{.State.Paused}} {{.State.StartedAt}}'
+    [[ "$(hostname)" == "$azure_host" ]]
+    inspect_service() {
+        local id=$1 service=$2 state
+        [[ "$id" =~ ^[0-9a-f]{64}$ ]] || return 1
+        state=$(d container inspect --format "$state_format" "$id") || return 1
+        [[ "$state" == "hi-project-deploy/$service/true/"* ]] || return 1
+        printf '%s\n' "$state"
+    }
+    for service in backend web; do
+        id=${!service}
+        state=$(inspect_service "$id" "$service")
+        printf '%s\n' "$state"
+        if [[ "$state" == "hi-project-deploy/$service/true/true "* ]]; then d container unpause "$id"; fi
+        state=$(inspect_service "$id" "$service")
+        printf '%s\n' "$state"
+        [[ "$state" == "hi-project-deploy/$service/true/false "* ]]
+    done
+    inspect_service "$graphdb" graphdb
+    d exec "$graphdb" curl --disable --noproxy '*' --fail --silent --show-error --max-time 15 --header 'Accept: application/json' \
+        http://127.0.0.1:7200/rest/monitor/backup
+)
+```
 
 ### 3. Independent transfer and retrieval
 
-**Approval required.** On the VM, check every file and record the hash of `SHA256SUMS` in the restricted operator record. A complete capture has the four files above and no `.partial` files.
+**Approval required.** On the VM, run these checks as the same SSH account that will transfer the bundle. The directory and each file must belong to that account, be readable by it, and have private permissions. Resolve any ownership or access issue through the approved custody process before transfer. Record the hash of `SHA256SUMS` in the restricted operator record.
 
 ```bash
-(cd "$bundle" && sha256sum --check --strict SHA256SUMS && sha256sum SHA256SUMS)
+(
+    set -euo pipefail
+    [[ -d "$bundle" && ! -L "$bundle" && -O "$bundle" && -r "$bundle" && -x "$bundle" ]]
+    [[ "$(stat -c '%a' -- "$bundle")" == 700 ]]
+    cd "$bundle"
+    [[ -z "$(find . -maxdepth 1 -name '*.partial' -print -quit)" ]]
+    for file in hi.tar source.nq manifest.json SHA256SUMS; do
+        [[ -f "$file" && ! -L "$file" && -O "$file" && -r "$file" ]]
+        [[ "$(stat -c '%a' -- "$file")" == 600 ]]
+    done
+    sha256sum --check --strict SHA256SUMS
+    sha256sum SHA256SUMS
+)
 ```
 
 Pull over SSH to an approved encrypted off-VM location. The PowerShell example uses an existing approved storage mount and a known SSH host key. Copy from that storage to a fresh protected recovery directory so the rehearsal uses the retrieved copy.
@@ -249,30 +305,60 @@ foreach ($copy in @($stored, $retrieved)) {
 
 ### 4. Isolated restoration
 
-**Approval required.** On the approved recovery host, use the local rehearsal's context, project and fresh-volume checks above. Start **only** its `$target` project with `compose.recovery.yaml`, using `foreach ($project in @($target))` in that block. Leave the target empty and skip `seed`. Use the retrieved bundle and the pinned GraphDB 10.8.14 Free image. Compare the target image ID and platform with the recorded source before restoring. For canonical checks, confirm that the verifier's app code, ontology, HINT, SHACL and examples match the recorded deployment revision. Resolve any differences before treating the result as evidence.
+**Approval required.** On the recovery host, start only a fresh restore target and leave its repository list empty. Pull the recorded Ontotext repository digest for the matching platform. Use the pinned tag only if it already points at a verified image or is absent and can be added. The restore command checks the running image's repository digest and exact platform before upload, then checks GraphDB 10.8.14 Free. If one daemon reports an index digest and the other a platform digest with no matching recorded reference, stop and resolve the image provenance. [Pull an image by digest](https://docs.docker.com/reference/cli/docker/image/pull/#pull-an-image-by-digest-immutable-identifier)
 
 ```powershell
 $manifest = Get-Content -Raw -LiteralPath (Join-Path $retrieved 'manifest.json') | ConvertFrom-Json
-$targetId = docker --context $context compose -f compose.recovery.yaml -p $target ps -q graphdb
-if ($LASTEXITCODE -ne 0 -or -not $targetId) { throw 'Isolated GraphDB was not found.' }
-$image = docker --context $context container inspect --format '{{.Image}}' $targetId
-if ($LASTEXITCODE -ne 0 -or $image -ne $manifest.source.services.graphdb.image_id) { throw 'GraphDB image differs.' }
-$platform = docker --context $context image inspect --format '{{.Os}}/{{.Architecture}}' $image
-if ($LASTEXITCODE -ne 0 -or $platform -ne $manifest.source.graphdb_platform) { throw 'GraphDB platform differs.' }
+$context = 'desktop-linux'  # Use the approved recovery host's local socket context.
+$endpoint = docker --context $context context inspect $context --format '{{.Endpoints.docker.Host}}'
+if ($LASTEXITCODE -ne 0 -or $endpoint -notmatch '^(npipe:////\./pipe/|unix:///)') { throw 'Use a local Docker socket context.' }
+$target = 'hi-recovery-' + [Guid]::NewGuid().ToString('N').Substring(0, 12) + '-restore'
+$volumes = docker --context $context volume ls --format '{{.Name}}'
+if ($LASTEXITCODE -ne 0 -or $volumes -contains "${target}_graphdb-data") { throw 'Could not verify a fresh volume.' }
+$containers = docker --context $context ps -aq --filter "label=com.docker.compose.project=$target"
+if ($LASTEXITCODE -ne 0 -or $containers) { throw 'Could not verify a fresh project.' }
+$sourceRef = $manifest.source.graphdb_repo_digests | Select-Object -First 1
+if ($sourceRef -notmatch '^ontotext/graphdb@sha256:[0-9a-f]{64}$') { throw 'Missing approved Ontotext image digest.' }
+docker --context $context image pull --platform $manifest.source.graphdb_platform $sourceRef
+if ($LASTEXITCODE -ne 0) { throw 'Could not obtain the recorded image.' }
+$tag = 'ontotext/graphdb:10.8.14'
+$tagged = docker --context $context image ls --filter "reference=$tag" --format '{{.ID}}'
+if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the local image tag.' }
+if (-not $tagged) {
+    docker --context $context image tag $sourceRef $tag
+    if ($LASTEXITCODE -ne 0) { throw 'Could not tag the verified image.' }
+}
+docker --context $context compose -f compose.recovery.yaml -p $target up -d --pull never --wait --wait-timeout 180
+if ($LASTEXITCODE -ne 0) { throw 'Could not start the isolated target.' }
+```
+
+S1–S7 were imported and manually verified on the Azure deployment on November 5, 2026. Keep `--canonical` and use matching scenario definitions, ontology, HINT vocabulary, SHACL and application revision. On the recovery host, obtain the recorded deployed commit from the trusted Git remote if absent (`git fetch origin '<approved ref>'`). In the reviewed recovery checkout, compare the canonical inputs and create a detached worktree for the application smoke check. Resolve any differences before proceeding.
+
+```powershell
+$deployedSha = $manifest.source.deployed_revision
+$appCheckout = '<new path for the deployed application worktree>'
+if ($deployedSha -notmatch '^[0-9a-f]{40}$') { throw 'Missing full deployed Git SHA.' }
+git cat-file -e "${deployedSha}^{commit}"
+if ($LASTEXITCODE -ne 0) { throw 'The recorded deployed commit is unavailable.' }
+git diff --exit-code $deployedSha -- examples ontology hi_scenario requirements.txt infra/hi-repository.ttl
+if ($LASTEXITCODE -ne 0) { throw 'Resolve differences in the canonical inputs before restoring.' }
+git worktree add --detach $appCheckout $deployedSha
+if ($LASTEXITCODE -ne 0) { throw 'Could not prepare the matching application checkout.' }
+$python = (Resolve-Path -LiteralPath $python).Path
 & $python -m infra.recovery --context $context restore $target $retrieved --canonical
 if ($LASTEXITCODE -ne 0) { throw 'Restore or canonical verification failed.' }
 ```
 
 ### 5. Verify data and application compatibility
 
-Before any backend starts, compare the restored dataset with the captured RDF. This checks the complete explicit dataset, including noncanonical graphs and the default context, while allowing statement order, escaping and blank-node labels to differ. Shared blank nodes must still match across graphs. RDF literal lexical forms, datatypes and graph placement are compared. The verifier is in-memory and supports RDF 1.1 with IRI-named graphs. Stop for review if the dataset exceeds available memory or uses unsupported RDF constructs. [N-Quads dataset format](https://www.w3.org/TR/n-quads/)
+Before any backend starts, compare the restored dataset with the captured RDF. This is the primary production recovery check and covers the complete explicit dataset, including noncanonical graphs and the default context. It allows serialization differences and blank-node renaming while preserving graph placement, literal lexical forms, datatypes, and shared blank-node identity. The verifier loads both exports and intermediate graphs into memory. Large exports require more RAM than their file sizes suggest, and symmetric blank-node structures can make comparison slow. It supports RDF 1.1 with IRI-named graphs. If preflight shows unexpected growth, rehearse resource use before the maintenance window. Stop for review on insufficient memory, excessive comparison time, or unsupported RDF constructs. [N-Quads dataset format](https://www.w3.org/TR/n-quads/)
 
 ```powershell
 & $python -m infra.recovery_rdf verify --context $context $target $retrieved
 if ($LASTEXITCODE -ne 0) { throw 'Restored RDF differs or could not be verified.' }
 ```
 
-Require both checks to pass, including the reference graphs, S1–S7, SHACL, and CQ1. Then use the standalone FastAPI smoke test in the local rehearsal above with the recorded deployed application revision. Check CQ1 through the API for S1–S7 and a known additional app scenario if present, and check preview and SHACL for a canonical example. Record the source SHA, archive hash, copy checks, restored inventory, app results and elapsed times. Keep any failed recovery isolated and investigate before retrying in a fresh target.
+Require both checks to pass, including the reference graphs, S1–S7, SHACL, and CQ1. Then run the standalone FastAPI smoke test from `$appCheckout` with the absolute `$python` path and the isolated `$target` binding. Check CQ1 through the API for S1–S7 and a known additional app scenario if present, and check preview and SHACL for a canonical example. Record the source SHA, archive hash, copy checks, restored inventory, app results and elapsed times. Keep any failed recovery isolated and investigate before retrying in a fresh target.
 
 ### 6. Cleanup and acceptance
 

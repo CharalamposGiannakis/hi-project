@@ -2,16 +2,19 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tarfile
+from types import SimpleNamespace
 
 import httpx
 import pytest
 
 from infra import azure_backup, recovery, recovery_rdf
-from infra.recovery_bundle import ARCHIVE, CHECKSUMS, DATASET, MANIFEST
+from infra.recovery_bundle import ARCHIVE, CHECKSUMS, DATASET, MANIFEST, verify_graphdb_image
 
 
 GRAPH = "urn:research:extra"
+DIGEST = "ontotext/graphdb@sha256:" + "a" * 64
 SOURCE = b'''_:source <urn:research:role> "participant" <urn:research:extra> .
 _:source <urn:research:label> "Caf\\u00e9"@EN .
 <urn:research:case> <urn:research:count> "01"^^<http://www.w3.org/2001/XMLSchema#integer> <urn:x-rdflib:default> .
@@ -163,7 +166,7 @@ def test_wrong_source_host_fails_before_docker(monkeypatch):
         azure_backup.inspect_source("approved-host", Path("."), "a" * 40)
 
 
-@pytest.mark.parametrize("problem", [None, "published GraphDB", "different volume", "extra network member"])
+@pytest.mark.parametrize("problem", [None, "published GraphDB", "different volume", "extra network member", "missing digest"])
 def test_source_identity_checks_the_deployment(monkeypatch, tmp_path, problem):
     ids = {service: digit * 64 for service, digit in zip(("graphdb", "backend", "web"), "123")}
     revision = "a" * 40
@@ -179,7 +182,7 @@ def test_source_identity_checks_the_deployment(monkeypatch, tmp_path, problem):
                 members["4" * 64] = None
             output = "true\n" + json.dumps(members)
         elif args[0] == "image":
-            output = "linux/amd64\n[]"
+            output = "linux/amd64\n" + json.dumps([] if problem == "missing digest" else [DIGEST])
         elif args[3] == "{{json .NetworkSettings.Networks}}":
             assert args[-1] == ids["graphdb"]
             output = json.dumps({azure_backup.NETWORK: {}})
@@ -205,9 +208,78 @@ def test_source_identity_checks_the_deployment(monkeypatch, tmp_path, problem):
         source = azure_backup.inspect_source("approved-host", tmp_path, revision)
         assert source["deployed_revision"] == revision
         assert source["services"]["graphdb"]["container"] == ids["graphdb"]
+        assert source["graphdb_repo_digests"] == [DIGEST]
     else:
         with pytest.raises(ValueError):
             azure_backup.inspect_source("approved-host", tmp_path, revision)
+
+
+@pytest.mark.parametrize("platform, digests, error", [
+    ("linux/amd64", ["docker.io/" + DIGEST], None),
+    ("linux/arm64", [DIGEST], "platform differs"),
+    ("linux/amd64", ["ontotext/graphdb@sha256:" + "b" * 64], "repository digest differs"),
+    ("linux/amd64", [], "portable Ontotext GraphDB repository digest"),
+    ("linux/amd64", ["mirror.invalid/" + DIGEST], "portable Ontotext GraphDB repository digest"),
+])
+def test_graphdb_image_uses_repository_digest_and_matching_platform(platform, digests, error):
+    source = {"graphdb_platform": "linux/amd64", "graphdb_repo_digests": [DIGEST],
+              "services": {"graphdb": {"image_id": "unrelated-local-id"}}}
+    if error is None:
+        verify_graphdb_image(source, platform, digests)
+    else:
+        with pytest.raises(ValueError, match=error):
+            verify_graphdb_image(source, platform, digests)
+
+
+def test_graphdb_image_requires_a_source_digest():
+    with pytest.raises(ValueError, match="portable Ontotext GraphDB repository digest"):
+        verify_graphdb_image({"graphdb_platform": "linux/amd64"}, "linux/amd64", [DIGEST])
+
+
+def test_restore_passes_source_identity_to_local_guard(monkeypatch, tmp_path, capsys):
+    source = {"graphdb_platform": "linux/amd64", "graphdb_repo_digests": [DIGEST]}
+    (tmp_path / MANIFEST).write_text(json.dumps({"source": source}), encoding="utf-8")
+    monkeypatch.setattr(recovery, "ROOT", tmp_path / "checkout")
+    monkeypatch.setattr(sys, "argv", ["recovery", "--context", "default", "restore", "hi-recovery-test-restore", str(tmp_path)])
+
+    def reject(context, project, role, *, source_image):
+        assert (context, project, role, source_image) == ("default", "hi-recovery-test-restore", "restore", source)
+        raise ValueError("GraphDB repository digest differs")
+
+    monkeypatch.setattr(recovery, "local_url", reject)
+    monkeypatch.setattr(recovery.httpx, "Client", lambda **_: pytest.fail("Restore must not contact GraphDB"))
+    with pytest.raises(SystemExit) as error:
+        recovery.main()
+    assert error.value.code == 1
+    assert "GraphDB repository digest differs" in capsys.readouterr().err
+
+
+def test_source_preflight_rejects_unsupported_python_before_inspection(monkeypatch, capsys):
+    monkeypatch.setattr(azure_backup, "sys", SimpleNamespace(version_info=(3, 10, 14), version="3.10.14"))
+    monkeypatch.setattr(sys, "argv", ["azure_backup", "check", "--host", "approved-host",
+                                      "--deployment", "unused", "--revision", "a" * 40])
+    monkeypatch.setattr(azure_backup, "inspect_source", lambda *_: pytest.fail("Source must not be inspected"))
+    with pytest.raises(SystemExit) as error:
+        azure_backup.main()
+    assert error.value.code == 1
+    assert "Python 3.11 or newer is required. Found Python 3.10.14." in capsys.readouterr().err
+
+
+def test_source_preflight_reports_read_only_inventory(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sys, "argv", ["azure_backup", "check", "--host", "fixture",
+                                      "--deployment", str(tmp_path), "--revision", "a" * 40])
+    monkeypatch.setattr(azure_backup, "inspect_source", lambda *_: IDENTITY)
+
+    def snapshot(container):
+        assert container == "graphdb-id"
+        return SNAPSHOT
+
+    monkeypatch.setattr(azure_backup, "snapshot", snapshot)
+    monkeypatch.setattr(azure_backup, "capture", lambda *_: pytest.fail("Preflight must not capture"))
+    azure_backup.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["python_version"]
+    assert report["inventory"] == {"named_graphs": SNAPSHOT["named_graphs"], "default_triples": 1}
 
 
 def test_source_inventory_checks_complete_explicit_count(monkeypatch):

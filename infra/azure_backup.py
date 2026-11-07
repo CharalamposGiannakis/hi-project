@@ -8,10 +8,14 @@ from pathlib import Path
 import re
 import socket
 import subprocess
+import sys
 import tarfile
 import time
 
-from infra.recovery_bundle import ARCHIVE, CHECKSUMS, DATASET, MANIFEST, archive_digest, checksum_text, file_digest
+from infra.recovery_bundle import (
+    ARCHIVE, CHECKSUMS, DATASET, IMAGE_PLATFORM_FORMAT, MANIFEST, archive_digest, checksum_text, file_digest,
+    graphdb_repo_digests,
+)
 
 
 PROJECT = "hi-project-deploy"
@@ -41,6 +45,15 @@ def request(container, path, *args, stream=None, media_type=None):
     if status != "200" or (media_type and content_type.split(";", 1)[0] != media_type):
         raise ValueError(f"Unexpected GraphDB response for {path.split('?')[0]}.")
     return result.stdout
+
+
+def check_graphdb(container):
+    version = json.loads(request(container, "/rest/info/version"))
+    if (version.get("productVersion"), version.get("productType")) != (VERSION, "free"):
+        raise ValueError(f"Expected GraphDB {VERSION} Free.")
+    repositories = json.loads(request(container, "/rest/repositories"))
+    if not any(repo.get("id") == "hi" and repo.get("local") is True for repo in repositories):
+        raise ValueError("Expected the local repository hi in the verified GraphDB container.")
 
 
 def inspect_source(host, deployment, revision):
@@ -85,19 +98,17 @@ def inspect_source(host, deployment, revision):
     if (internal != "true" or set(json.loads(networks)) != {NETWORK}
             or set(json.loads(members)) != {service["container"] for service in services.values()}):
         raise ValueError("Unexpected access paths on the deployment data network.")
-    version = json.loads(request(graphdb, "/rest/info/version"))
-    if (version.get("productVersion"), version.get("productType")) != (VERSION, "free"):
-        raise ValueError(f"Expected GraphDB {VERSION} Free.")
-    repositories = json.loads(request(graphdb, "/rest/repositories"))
-    if not any(repo.get("id") == "hi" and repo.get("local") is True for repo in repositories):
-        raise ValueError("Expected the local repository hi in the verified GraphDB container.")
+    check_graphdb(graphdb)
     platform, repo_digests = docker(
-        "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}\n{{json .RepoDigests}}",
+        "image", "inspect", "--format", IMAGE_PLATFORM_FORMAT + "\n{{json .RepoDigests}}",
         services["graphdb"]["image_id"],
     ).stdout.decode().splitlines()
+    digests = sorted(graphdb_repo_digests(json.loads(repo_digests)))
+    if not digests:
+        raise ValueError("The source GraphDB image has no portable Ontotext repository digest. Resolve its provenance before backup.")
     return {
         "host": host, "deployed_revision": revision, "graphdb_version": VERSION, "graphdb_edition": "free",
-        "graphdb_platform": platform, "graphdb_repo_digests": json.loads(repo_digests) or [], "services": services,
+        "graphdb_platform": platform, "graphdb_repo_digests": digests, "services": services,
     }
 
 
@@ -179,9 +190,16 @@ def main():
     parser.add_argument("--bundle", type=Path, help="new directory in protected staging outside Git")
     args = parser.parse_args()
     try:
+        if sys.version_info < (3, 11):
+            raise ValueError(f"Python 3.11 or newer is required. Found Python {sys.version.split()[0]}.")
         deployment = args.deployment.resolve(strict=True)
         if args.action == "check":
-            print(json.dumps(inspect_source(args.host, deployment, args.revision), indent=2))
+            source = inspect_source(args.host, deployment, args.revision)
+            inventory = snapshot(source["services"]["graphdb"]["container"])
+            print(json.dumps({
+                **source, "python_version": sys.version.split()[0],
+                "inventory": {key: inventory[key] for key in ("named_graphs", "default_triples")},
+            }, indent=2))
         else:
             if args.bundle is None or not args.paused_web or not args.paused_backend:
                 raise ValueError("Capture requires --bundle, --paused-web, and --paused-backend from the preflight.")

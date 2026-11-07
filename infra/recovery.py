@@ -13,7 +13,7 @@ import httpx
 from hi_scenario.graphdb import GraphDBError, GraphDBSettings, GraphDBStore
 from infra import canonical
 from infra.graphdb import ENDPOINT, REPOSITORY, ROOT, setup_repository
-from infra.recovery_bundle import ARCHIVE, MANIFEST, archive_digest
+from infra.recovery_bundle import ARCHIVE, IMAGE_PLATFORM_FORMAT, MANIFEST, archive_digest, verify_graphdb_image
 
 
 VERSION = "10.8.14"
@@ -26,7 +26,7 @@ def docker(context: str, *args: str) -> str:
     return subprocess.check_output(["docker", "--context", context, *args], text=True).strip()
 
 
-def local_url(context: str, project: str, role: str) -> str:
+def local_url(context: str, project: str, role: str, *, source_image: dict | None = None) -> str:
     if not PROJECT.fullmatch(project) or not project.endswith(f"-{role}"):
         raise ValueError(f"Use a disposable project named hi-recovery-<id>-{role}.")
     endpoint = docker(context, "context", "inspect", "--format", "{{.Endpoints.docker.Host}}", "--", context)
@@ -64,6 +64,13 @@ def local_url(context: str, project: str, role: str) -> str:
     port = int(bindings[0]["HostPort"])
     if not 1 <= port <= 65535 or port == 7200:
         raise ValueError("Recovery GraphDB must use a separate loopback port from development.")
+    if source_image is not None:
+        image_id = docker(context, "container", "inspect", "--format", "{{.Image}}", containers[0])
+        platform, digests = docker(
+            context, "image", "inspect", "--format", IMAGE_PLATFORM_FORMAT + "\n{{json .RepoDigests}}", image_id,
+        ).splitlines()
+        verify_graphdb_image(source_image, platform, json.loads(digests))
+        print(f"Verified GraphDB repository digest and platform {platform}.", flush=True)
     url = f"http://127.0.0.1:{port}"
     print(f"Verified Docker target {project} ({containers[0]}), volume {volume}, URL {url}", flush=True)
     return url
@@ -208,11 +215,18 @@ def main() -> None:
     args = parser.parse_args()
     try:
         role = "source" if args.command in ("seed", "backup") else "restore"
+        source_image = None
         if args.command != "seed":
             args.bundle = args.bundle.resolve()
             if args.bundle.is_relative_to(ROOT.resolve()):
                 raise ValueError("Keep backup bundles outside the Git checkout.")
-        url = local_url(args.context, args.project, role)
+        if role == "restore":
+            manifest = json.loads((args.bundle / MANIFEST).read_text(encoding="utf-8"))
+            if "source" in manifest or "rdf_sha256" in manifest:
+                source_image = manifest.get("source")
+                if not isinstance(source_image, dict):
+                    raise ValueError("Production backup manifest is missing source image identity.")
+        url = local_url(args.context, args.project, role, source_image=source_image)
         with httpx.Client(base_url=url, timeout=120, trust_env=False, follow_redirects=False) as client:
             check_version(client)
             if args.command == "seed":
