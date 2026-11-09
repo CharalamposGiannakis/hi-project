@@ -1,14 +1,14 @@
-# Canonical scenario semantic reconciliation
+# Canonical Scenario Semantic Reconciliation
 
-This reference describes how the canonical S1–S7 JSON examples relate to the asserted research RDF. It records the current representation and its known differences, not research approval or a change to the source. See [README](../README.md) for application setup and canonical import operations, and the [deployment runbook](deployment.md) for operations and access controls. Unresolved work is tracked in [GitHub Issues](https://github.com/CharalamposGiannakis/hi-project/issues); broader CQ investigation belongs to [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15).
+This document compares the seven reconstructed HI scenarios (S1–S7) against their original research RDF representations. It identifies preserved information, modeling differences, and unresolved questions requiring scientific clarification.
 
-## Sources and comparison method
+## Sources and Comparison Method
 
-The authoritative asserted graphs are in [scenarios_kgs.ttl](../ontology/scenarios_kgs.ttl). Concepts and predicates are checked against the original [HI Ontology](../ontology/hi-ontology.ttl) and [HINT thesaurus](../ontology/hi-thesaurus.ttl); those files and the [SHACL shapes](../ontology/hi-shacl.ttl) are unchanged by reconstruction.
+The original scenarios are defined in `ontology/scenarios_kgs.ttl`, with the HI ontology and HINT thesaurus providing the reference vocabulary.
 
-The full-graph regression tests extract every triple whose subject or object is in a scenario's research namespace, without filtering predicates. Explicit, unique mappings connect source individuals to application-assigned individuals and verify entity/type coverage. Comparisons preserve complete RDF terms, including literal text, datatype, and language. The tests assert the exact missing and additional sets, not just counts or a supported-predicate projection.
+Automated regression tests compare the complete original and generated RDF graphs, accounting for application-assigned entity identifiers. They verify all relationships, entity types, and literal values, including language tags.
 
-Throughout this document, `hi:` is `https://w3id.org/hi-ontology#`, `hint:` is `https://w3id.org/hi-thesaurus/`, and `hi-sN:` is `https://w3id.org/hi-ontology/scenarios/N/`. HINT's actual concept IRIs use `/`, despite `#` in its namespace metadata.
+The comparison establishes representational fidelity, not scientific correctness. Any discrepancies and provisional modeling decisions are documented below.
 
 ## Scenario coverage
 
@@ -52,19 +52,27 @@ All 23 source individuals and 120 assertions are preserved, including the Goal a
 
 ### S2 — Collaborative Manipulation
 
-All 40 individuals are represented. The sole omitted assertion is:
+The following assertion is omitted:
 
 ```turtle
 hi-s2:InteractionExplainRisk hi:towardsGoal hi-s2:GoalSafeToolRetrieval .
 ```
 
-The ontology declares `hi:towardsGoal` with domain `hi:TaskExecution`, while the source subject is an Interaction. Its intended meaning remains unresolved; the model has no Interaction–Goal field and does not invent an execution link.
+The problem is that `hi:towardsGoal` has `hi:TaskExecution` as its domain, while the original assertion uses an `Interaction`. This would imply that the Interaction is also a TaskExecution.
 
-All ten Task individuals remain, but only `TaskUnlockCabinet`, `TaskOpenCabinet`, and `TaskRetrieveTool` are directly required by the goal. `TaskHeavyLift` has two executions; `TaskRetrieveTool` has none. Executions can target the goal while realizing tasks outside its direct requirements. Five evaluations and five experiments retain separate identities, and all ten hypotheses remain plain literals without language tags or explicit datatypes. **181 unchanged + 14 labels = 195**; there are no additional semantic relationships. See [S2 regression tests](../tests/test_s2.py).
+**Possible solution:** Extend or revise the ontology to support a direct Interaction–Goal relationship.
+
+S2 contains 10 tasks, but only 3 are directly required by the goal: unlocking the cabinet, opening it, and retrieving the tool.
+
+The heavy-lifting task has two recorded executions, while the tool-retrieval task has none. Executions can contribute to the goal even when their tasks are not directly required.
+
+The scenario also contains 5 separate experiments and 5 evaluations. Each experiment has two hypotheses, stored as plain text without language tags. **181 unchanged + 14 labels = 195**; there are no additional semantic relationships. See [S2 regression tests](../tests/test_s2.py).
 
 ### S3 — Group Deliberation
 
-All 24 individuals are represented. For `hi-s3:TaskAssessCommunicationAccuracy hi:hasTaskConcept`, the source IRI `https://w3id.org/hi-thesaurus/AssessCommunicationAccuracyTask` is undefined. The example provisionally uses `https://w3id.org/hi-thesaurus/AssessCommunicationAccuracy`. That defined Task-category concept has label “Assess Communication Accuracy Task” and a corresponding definition. This is a project alignment pending Ilaria's confirmation, not an equivalence assertion.
+The original S3 references `hint:AssessCommunicationAccuracyTask`, which is not defined in HINT. We replaced it with the existing Task concept `hint:AssessCommunicationAccuracy`, whose label is "Assess Communication Accuracy Task".
+
+This appears to be a naming inconsistency in the original research. **Proposed decision:** Keep the replacement, subject to Ilaria's confirmation.
 
 The source asserts `CapabilityMetaAnalysis hi:allowsTask TaskAssessCommunicationAccuracy` but omits its inverse. The generator adds `TaskAssessCommunicationAccuracy hi:requiresCapability CapabilityMetaAnalysis`, logically entailed by the ontology's inverse-property axiom.
 
