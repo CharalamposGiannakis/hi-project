@@ -140,62 +140,59 @@ The source's `CapabilityKGQuery hi:allowsTask TaskSemanticRetrieval` lacks the i
 
 ## Representation decisions
 
-The [canonical model](../hi_scenario/model.py) and [RDF generator](../hi_scenario/rdf.py) represent one use case, one implicit team, one goal, and a task inventory. Use case, goal, and tasks select HINT concepts; the use case also has an optional HINT domain. Agents have names and one or more HINT roles, and each team includes human and artificial agents. Optional components extend this deliberately bounded representation.
+The application uses a structured JSON model to describe HI scenarios. Each scenario contains one use case, one HI team, one goal, and a collection of tasks and agents. Researchers can also add contexts, capabilities, executions, interactions, experiments, and evaluations.
 
-- **Identity and labels:** entity IRIs use `urn:hi-app:scenario:{scenario-id}:…`, scoped by scenario, entity kind, and stable ID. The implicit Team and Context use `…:team` and `…:context`. Renaming or sharing concepts, names, kinds, or roles does not merge individuals. Different scenarios' agents are not asserted identical. Names generate plain `rdfs:label`; optional nonblank descriptions on Goal, Task, Context, Experiment, Evaluation, and Interaction generate English `rdfs:comment` separately.
-- **Goal requirements:** `goal.required_tasks` is a nonempty, unique list of existing Task IDs when present. Omission means all scenario tasks for legacy compatibility; explicit empty/null selections are invalid. Legacy UI imports initialize all tasks as selected and export explicit requirements. New tasks start unselected, and removal drops the requirement reference; at least one must remain. All Task individuals are generated regardless of goal selection. Executions need not realize a directly required task.
-- **Context and constraints:** optional Context selects one HINT concept, phenomena, and constraints. Independent `team_constraints` defaults to empty and can exist without Context. Changing or removing Context does not change Team selections, and constraints do not propagate between subjects. Whenever Context exists, the generator asserts Team `hi:operatesInContext` Context and Context `hi:hasInfluenceOn` Team. The latter is an S1-based application assumption and is not asserted in S5's source; it is not presented as an entailed fact.
-- **Capabilities and executions:** capabilities are independent reusable entities with HINT Capability concepts and ID references to agents and tasks. Both `hi:allowsTask`/`hi:requiresCapability` and `hi:performedBy`/`hi:performsExecution` directions are explicitly generated. Each execution has a HINT TaskExecution concept, realizes one task, has one performer and an optional HINT method, and targets the scenario's goal. Capability possession does not assign an agent, establish eligibility, or infer execution data.
-- **Experiments and evaluations:** each evaluation references one experiment and any number of executions; multiple executions can share one evaluation through `hi:evaluatedBy` links from executions. Metrics are selected separately for each entity. Both nonblank hypotheses are either plain literals (default) or English-tagged via `hypothesis_language: "en"`. S1, S2, and S6 preserve plain hypotheses; S3, S4, S5, and S7 preserve English-tagged ones. No datatype/language normalization is used to conceal a source difference.
-- **Interactions:** participants are at least two distinct existing agents selected independently of performers. Intent and modality must belong to the correct HINT categories. Execution links are optional and many-to-many; no link is invented for interactions without episodes.
-- **Validation and editing:** unknown fields, duplicate entity IDs within each kind, and unknown references are rejected. Old JSON may omit optional components. Removing an agent/task removes its capability links but retains the capability entity. Executions with deleted agent/task references, evaluations with deleted experiment/execution references, and interactions with deleted agent/execution references retain entered data and expose missing references for repair or explicit removal before preview/save.
+The model does not attempt to expose every possible ontology relationship. It focuses on the structures needed to reconstruct the seven reference scenarios.
 
-## Ontology, SHACL, and storage assumptions
+Some choices are worth noting:
 
-The semantic pipeline checks the Python model and HINT categories, generates sorted N-Triples, and invokes [SHACL validation](../hi_scenario/validation.py) with `inference="none"`, no OWL imports, and no mutation of the generated graph. Undefined or wrong-category vocabulary selections are rejected; provisional example choices do not weaken that policy.
+- **Entity identity:** Each entity has its own identifier within a scenario. Two agents with the same name or HINT concept remain separate individuals. The application does not assume that agents appearing in different scenarios are identical.
+- **Goals and tasks:** A goal can require specific tasks rather than every task in the scenario. Older JSON examples without this selection are interpreted as requiring all tasks.
+- **Contexts and constraints:** Constraints can belong independently to the team or its context. When a context exists, the application also creates a relationship expressing its influence on the team. This is an application convention, not necessarily a relationship asserted in the original scenario.
+- **Capabilities and executions:** Capabilities connect agents with tasks they can perform. Executions describe actual task performance. The application preserves this distinction and explicitly generates relevant inverse relationships.
+- **Experiments and evaluations:** Experiments, evaluations, metrics, and hypotheses remain separate. Hypothesis text and language information are preserved.
+- **Interactions:** Interactions identify participating agents and may be linked to executions. The application does not invent these links when they are absent.
 
-SHACL conformance means only that the current shapes passed, not full ontology completeness or confirmed research semantics:
+The generator also adds display labels and, in some scenarios, HINT agent classifications. These additions are documented in the comparison tables above.
 
-- There are no Context-specific shapes; Python performs its vocabulary checks. The shapes also do not require task capabilities.
-- The execution shape targets `hi:Execution`, whereas the ontology and generated RDF use `hi:TaskExecution`. Python checks execution structure, references, and vocabulary; passing SHACL alone does not establish execution validation.
-- `hi:operatesInContext` has declared domain `hi:Agent`, although the source uses it on teams. Enabling inference would also classify those teams as agents.
-- Hypothesis predicates declare range `xsd:string`, but several source scenarios use language-tagged literals. The application preserves those literals rather than silently converting them.
-- Inference would not repair the shape-target mismatch or turn OWL minimum-cardinality restrictions into closed-world validation. These inherited issues remain unresolved and unchanged.
+The current representation is a practical starting point. It should not be interpreted as a complete implementation of the HI ontology.
 
-GraphDB repository `hi` deliberately uses the `empty` ruleset with `owl:sameAs` optimization disabled. Application queries use explicit named graphs and `infer=false`. The generator's explicit inverse statements must be distinguished from database reasoning and from the non-entailed application conventions above.
+## Validation and knowledge storage
 
-The original ontology and HINT occupy `urn:hi-app:reference:ontology` and `urn:hi-app:reference:hint`; each scenario occupies `urn:hi-app:graph:scenario:{scenario-id}`. Canonical import compares stored and generated RDF by isomorphism, including full RDF terms; its [unit tests](../tests/test_canonical.py) and [isolated live tests](../tests/test_canonical_live.py) cover read-only inspection, idempotency, conflicts, partial recovery, CQ1, and graph protection. Import success checks the checked-in canonical representation, not resolution of its research exceptions or approval of a researcher submission. See [README importer safety](../README.md#canonical-scenario-import) for write/authorization boundaries and the [runbook](deployment.md#storage-access-and-updates) for administrator access, concurrency, and persistent storage limitations.
+The application validates scenarios in several steps. Python checks the JSON structure and references, verifies HINT concepts, generates RDF, and runs SHACL validation.
+
+These checks establish technical consistency, but they do not guarantee that a scenario is scientifically correct or that every ontology requirement has been examined.
+
+We identified some limitations in the existing resources:
+
+- The SHACL shapes do not fully cover contexts or task capability requirements.
+- The execution shape targets `hi:Execution`, while the ontology and application use `hi:TaskExecution`.
+- The ontology assigns `hi:operatesInContext` to agents, while the application also uses it for teams.
+
+These issues remain unchanged and require further consideration.
+
+GraphDB stores the ontology, HINT vocabulary, and individual scenarios in separate named graphs. The current configuration does not enable OWL inference, so the application explicitly generates some relationships that could otherwise be inferred.
+
+Automated tests compare generated scenarios against the original research RDF and identify known differences. Successful validation or import does not mean that Ilaria has approved the scientific interpretation.
 
 ## Competency-query coverage
 
-**Only the application's adapted CQ1 is implemented and verified in GraphDB**, including by the canonical importer. The [GraphDB adapter](../hi_scenario/graphdb.py) adapts the research team-composition query to explicit scenario/reference graphs and retains each member IRI. Agents sharing a name, type, or role therefore remain distinct. Names come from scenario RDF, type labels from the ontology, and role labels/definitions from HINT; missing labels return `null`, not invented text. The [persistence/API tests](../tests/test_persistence_api.py) and importer tests check this behavior.
+The research material defines twelve Competency Questions (CQs). They describe what researchers should be able to investigate using the knowledge graph.
 
-The upstream research notebook `TEST/HI-Ontology-Test/cqs.ipynb` (not bundled in this application repository) defines the following further questions. They are **not implemented or verified by the application**, even where the corpus contains relevant facts:
+**Currently, only CQ1 is implemented and verified in the application.** It retrieves the composition of a stored HI team, including its members and their roles.
 
-| Research CQ | Subject and current applicability |
-| --- | --- |
-| CQ2–3 | Capability/task matching and candidate team compositions. Relevant capability and goal/task facts exist; application queries and research interpretations remain unverified. |
-| CQ4 | Inferred eligibility, assignment, or contextual influence. The notebook points to rules; those are not provided by the application's `empty` ruleset. |
-| CQ5 | Interactions during task execution. The notebook requires an execution episode, task comment, and direct goal requirement; interactions without those links/comments are excluded. |
-| CQ6 | Methods associated with goals and tasks. Execution method/task/goal links are represented, but there is no application query or GraphDB verification. |
-| CQ7–8 | Metrics, experiments, and hypotheses. These relationships are represented, but there are no application queries or GraphDB verification. |
-| CQ9–10 | Constraints and associated teams/use cases. Context influence is an application convention in S5, and Team constraints remain distinct from Context constraints. CQ10's notebook query does not itself establish that constraints are shared across distinct use cases or agents. |
-| CQ11 | Contextual phenomena associated with a use case. Relevant facts exist; the notebook hard-codes a source scenario IRI and requires adaptation to application identities. |
-| CQ12 | Compliance with or violation of contextual constraints. The required compliance representation is absent from the current model. |
+The remaining questions have different requirements:
 
-The availability of these facts and query definitions does not establish additional CQ coverage, automated eligibility, or normative compliance reasoning.
+| Questions | Current situation |
+|---|---|
+| CQ2–3 | Concern capabilities, tasks, and possible team compositions. Relevant information exists, but application queries remain unverified. |
+| CQ4 | Depends on inferred relationships that the current GraphDB configuration does not provide. |
+| CQ5–8 | Concern interactions, methods, evaluations, experiments, and metrics. Relevant relationships exist, but the queries are not implemented in the application. |
+| CQ9–11 | Concern constraints and contextual phenomena. Some queries require adaptation to the application's scenario identifiers and relationships. |
+| CQ12 | Concerns compliance with contextual constraints, which the current model does not explicitly represent. |
 
-### Independent offline comparison
+An independent offline comparison also found different results for CQ3, CQ7, CQ9, and CQ10 between the original research data and the reconstructed scenarios. These differences relate to representation choices already documented above.
 
-Claude independently executed original research notebook queries against the original scenarios and the reconstructed corpus offline. The reported result counts differed as follows:
+This comparison does not establish which results are scientifically correct.
 
-| Research CQ | Original results | Reconstructed results | Associated reconstruction difference |
-| --- | ---: | ---: | --- |
-| CQ3 | 10 | 5 | S3's additional entailed capability inverse. |
-| CQ7 | 9 | 10 | S3's provisional HINT concept alignment. |
-| CQ9 | 6 | 8 | S5's additional Context influence assertion. |
-| CQ10 | 13 | 15 | The same S5 Context influence assertion. |
-
-CQ2, CQ5, CQ6, and CQ8 returned matching results in that offline comparison. The original notebook's CQ1 and CQ11 hard-code source scenario IRIs and require adaptation to application identities; the application already uses an adapted CQ1.
-
-These are independent offline observations, not additional application or GraphDB verification. They do not establish that either result reflects the correct research interpretation. Broader investigation is tracked in [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15); Ilaria has indicated that researcher-facing outputs can wait.
+Further investigation of the competency questions belongs to [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15).
