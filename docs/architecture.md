@@ -10,7 +10,7 @@ This document briefly describes the HI system's architecture, current implementa
 
 #### Current System
 
-The existing Svelte editor supports structured scenario entry using HINT concepts. FastAPI validates scenario JSON, generates RDF, checks SHACL constraints, and stores scenarios in GraphDB. The application currently supports team-composition exploration (CQ1).
+The Svelte Builder supports guided description and structured scenario entry using HINT concepts. FastAPI validates scenario JSON, generates RDF, and checks SHACL constraints. The backend also provides GraphDB storage and team-composition exploration (CQ1).
 
 ## Three Architectural Pillars
 
@@ -21,6 +21,8 @@ The pillars can be developed independently but share one scenario representation
 Researchers create, inspect, edit, validate, and eventually submit HI scenarios for scientific review.
 
 **Phase 1A — Generate or regenerate**
+
+Phase 1A.1 implements the wizard, interpretation document, structured editing, and explicit technical validation. The document carries `source_description`, the editable `scenario` candidate, and `interpretation` diagnostics. The candidate uses the canonical model's fields and may be incomplete in a draft. Only the candidate goes to the existing validation endpoint. The simulator recognizes two bundled descriptions. Provider-backed interpretation is planned for the next slice.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐

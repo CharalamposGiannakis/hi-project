@@ -1,19 +1,19 @@
 # HI Scenario Builder
 
-The HI Scenario Builder is a research prototype for describing Hybrid Intelligence (HI) scenarios, validating their RDF against the checked-in HI resources, and exploring saved teams in GraphDB. A Svelte form calls a FastAPI backend that validates JSON and HINT concepts, generates deterministic RDF, runs SHACL, and handles storage and SPARQL queries.
+The HI Scenario Builder is a research prototype for describing Hybrid Intelligence (HI) scenarios and validating their RDF against the checked-in HI resources. A Svelte wizard and structured editor share a JSON draft. FastAPI validates canonical scenario JSON and HINT concepts, generates deterministic RDF, and runs SHACL. The API also supports GraphDB storage and team-composition queries.
 
 The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated research demonstration, not a production service. Credentials are distributed separately.
 
 ## Researcher workflow
 
-1. Load the bundled S1 example, open a canonical example or another local JSON file with **Open JSON file…**, or enter a scenario in the form.
-2. Edit the scenario in collapsible sections and download its JSON draft. Use **Expand all** / **Collapse all** to navigate; validation opens sections with errors and links to affected fields. Sections can be collapsed while errors remain. HINT details and definitions are available below vocabulary fields. The backend is the authoritative validator; the form provides immediate feedback.
-3. Preview the validated N-Triples and SHACL result without saving.
-4. Save a new scenario, then use Explore to retrieve its team composition (CQ1) and open its named graph in GraphDB Workbench.
+1. In **Describe with AI**, answer any of the optional questions in your own words. Use **Previous** and **Next** to navigate, **Additional notes** to record anything else, and **View full description** to review your answers. Your text appears in the JSON preview as you type.
+2. Choose **Load complete description** or **Load incomplete description**, then **Simulate interpretation**, to populate the Structured Editor from a sample. The incomplete sample preserves the supplied entities and flags the missing artificial team member. Custom descriptions stay in the draft for download and manual entry through the Structured Editor.
+3. Switch to **Structured Editor** at any point to add or edit HINT-backed fields. Use **Expand all** or **Collapse all** to navigate the eleven sections. Your answers and structured edits stay available as you switch between input methods. **Load S1 example** opens the bundled canonical scenario.
+4. Choose **Validate Scenario** when you're ready for a technical check. Follow diagnostics to fields that need correction. A valid result includes N-Triples and the SHACL report. Editing the structured scenario clears that result. Scientific approval is a separate process.
 
-**Open JSON in new tab** opens a read-only snapshot viewer. **Refresh JSON** or reloading the viewer retrieves the latest form state, including unsaved edits, without a backend request. Keep the original Builder tab open; reloading that tab requires opening a new viewer. Snapshots do not update automatically and are not stored in the browser. The viewer requires browser support for BroadcastChannel and reports when it cannot retrieve an update.
+**Download JSON** saves the editable draft, including incomplete descriptions and partial candidates. The draft keeps the original answers in `source_description`, the editable candidate in `scenario`, and simulation findings in `interpretation`. After the structured scenario passes local form checks, **Download canonical JSON** exports the scenario by itself for use with the API. **Open JSON file…** accepts either format.
 
-Editing the form hides stale preview, save, and query results. The interface does not list or reopen stored scenarios for editing, so keep downloaded drafts. The API enforces **create-only** saving: an existing scenario ID returns `409`, even for identical JSON. Use *Save as new scenario* for a fresh ID. Direct GraphDB administration can bypass this policy. After an uncertain save outcome, check `GET /scenarios/{scenario_id}/team` or the named graph in Workbench before retrying.
+**Open JSON in new tab** opens a read-only snapshot viewer. **Refresh JSON** or reloading the viewer retrieves the latest draft directly from the open Builder tab. Reloading the Builder requires opening a new viewer. The viewer uses BroadcastChannel and keeps its snapshot in memory until you refresh or close it.
 
 ## Capabilities and limitations
 
@@ -105,9 +105,9 @@ Imports are **idempotent**: repeating `apply` on an identical corpus creates not
 
 The importer accepts only `GRAPHDB_URL=http://127.0.0.1:7200` or `http://localhost:7200` and `GRAPHDB_REPOSITORY=hi`. It follows no redirects and uses no proxy settings. Use the local Compose service, **never a tunnel to another environment**; this utility does not authorize remote or deployment imports. Development and deployment have separate volumes, as described in the [runbook](docs/deployment.md#storage-access-and-updates).
 
-Run `apply` as the **sole writer**, with API/UI saves, other importers, and direct Workbench edits paused. The process-local save lock does not provide a transaction spanning the corpus or coordinate other processes.
+Run `apply` as the **sole writer**, with API writes, other importers, and direct Workbench edits paused. The process-local save lock does not provide a transaction spanning the corpus or coordinate other processes.
 
-Importing these curated reference scenarios does **not** approve researcher submissions or implement administrator-only publication. The save API and UI authorization behavior are unchanged. Broader CQ investigation is tracked in [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15); other unresolved work belongs in [GitHub Issues](https://github.com/CharalamposGiannakis/hi-project/issues). The [reference document](docs/semantic-reconciliation.md#competency-query-coverage) records current CQ coverage and independent offline observations.
+Broader CQ investigation is tracked in [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15). Track other unresolved work in [GitHub Issues](https://github.com/CharalamposGiannakis/hi-project/issues). Current CQ coverage and independent offline observations are recorded in the [reference document](docs/semantic-reconciliation.md#competency-query-coverage).
 
 ## API overview
 
@@ -118,6 +118,8 @@ All scenario POST requests accept the canonical JSON model, as illustrated by [S
 | `POST /scenarios/preview` | Validates and returns RDF, triple count, and SHACL report; stores nothing. |
 | `POST /scenarios` | Validates and saves a new named graph; returns `201` with repository, graph, and Workbench location. Existing IDs return `409`. |
 | `GET /scenarios/{scenario_id}/team` | Runs CQ1 over the saved graph and reference graphs; returns member IRIs, names, types, and roles. Missing IDs return `404`. |
+
+The Builder workflow ends at technical validation and export. GraphDB saves and CQ1 queries are available through the API. To save a separate graph, submit canonical JSON with a fresh scenario ID. After an uncertain save outcome, check `GET /scenarios/{scenario_id}/team` or the named graph in Workbench before retrying.
 
 Invalid submissions return structured `422` errors. Save and team requests report GraphDB unavailability as `503` and unexpected database results as `502`. See the running FastAPI `/docs` for field-level schemas.
 

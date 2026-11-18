@@ -25,6 +25,8 @@ const sections = () => [...document.querySelectorAll('details.editor-section')].
 const section = (id) => /** @type {HTMLDetailsElement} */ (document.getElementById(`section-${id}`));
 const jsonNode = () => /** @type {HTMLPreElement} */ (document.querySelector('pre.json'));
 const draft = () => JSON.parse(jsonNode().textContent ?? '{}');
+const candidate = () => draft().scenario;
+const validationStatus = () => document.querySelector('[data-validation-status]')?.textContent;
 /** @param {string} label */
 function click(label) {
   const control = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === label);
@@ -59,6 +61,9 @@ async function settleDisclosure() {
 describe('Scenario Builder navigation', () => {
   it('starts compact, exposes native disclosure state, and expands/collapses every section', async () => {
     render();
+    expect(document.getElementById('description-panel')?.hasAttribute('hidden')).toBe(false);
+    expect(document.getElementById('structured-panel')?.hasAttribute('hidden')).toBe(true);
+    click('Structured Editor');
     expect(sections()).toHaveLength(11);
     expect(sections().filter((element) => element.open).map((element) => element.id)).toEqual(['section-use_case']);
     const summary = section('tasks').querySelector('summary');
@@ -76,7 +81,7 @@ describe('Scenario Builder navigation', () => {
   it.each([{ label: 'S5', canonical: s5 }, { label: 'S7', canonical: s7 }])('imports and edits $label while preserving DOM, IDs, selections, and references across collapses', async ({ canonical }) => {
     render();
     await importJson(canonical);
-    expect(draft()).toEqual(canonical);
+    expect(candidate()).toEqual(canonical);
     expect(section('tasks').querySelector('.count')?.textContent).toBe(String(canonical.tasks.length));
     expect(section('agents').querySelector('.count')?.textContent).toBe(String(canonical.agents.length));
     click('Expand all');
@@ -97,29 +102,32 @@ describe('Scenario Builder navigation', () => {
     }
     expect(document.getElementById(`task-${task.id}`)).toBe(input);
     expect(input.value).toBe('Renamed research task');
-    expect(draft()).toEqual(expected);
+    expect(candidate()).toEqual(expected);
     expect(document.querySelectorAll('input:checked').length).toBeGreaterThan(10);
   });
 
-  it.each(['Show in form', 'Validate & preview RDF', 'Save to GraphDB', 'Download JSON'])('%s reveals all sections containing local validation errors on every request', (action) => {
+  it('reveals all sections containing local validation errors on every validation request', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
     render();
+    click('Structured Editor');
     click('Collapse all');
-    click(action);
+    click('Validate Scenario');
+    expect(validationStatus()).toBe('Needs corrections');
     expect(sections().filter((element) => element.open).map((element) => element.id)).toEqual([
       'section-use_case', 'section-goal', 'section-tasks', 'section-agents',
     ]);
     expect(section('agents').querySelector('.error-count')?.textContent).toContain('issues');
     click('Collapse all');
-    click(action);
+    click('Validate Scenario');
     expect(section('agents').open).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
   });
 
   it('keeps erroneous sections manually collapsed across native toggle events, unrelated edits, and error resolution', async () => {
     render();
-    click('Show in form');
+    click('Structured Editor');
+    click('Validate Scenario');
     const before = jsonNode().textContent;
     section('tasks').querySelector('summary')?.click();
     await settleDisclosure();
@@ -136,7 +144,7 @@ describe('Scenario Builder navigation', () => {
     enter(/** @type {HTMLInputElement} */ (document.getElementById('goal-name')), 'Team goal');
     await settleDisclosure();
     expect(sections().every((element) => !element.open)).toBe(true);
-    click('Show in form');
+    click('Validate Scenario');
     await settleDisclosure();
     expect(section('tasks').open).toBe(true);
     expect(section('goal').open).toBe(true);
@@ -179,7 +187,7 @@ describe('Scenario Builder navigation', () => {
     click('Add evaluation');
     click('Add interaction');
     click('Collapse all');
-    click('Validate & preview RDF');
+    click('Validate Scenario');
     for (const id of ['capabilities', 'executions', 'experiments', 'evaluations', 'interactions']) {
       expect(section(id).open).toBe(true);
       expect(section(id).querySelector('.error-count')).not.toBeNull();
@@ -188,7 +196,7 @@ describe('Scenario Builder navigation', () => {
     const link = [...document.querySelectorAll('.issues button')].find((button) => button.textContent?.includes('experiments.1.null_hypothesis'));
     if (!(link instanceof HTMLButtonElement)) throw new Error('Missing nested issue link');
     link.click();
-    const experimentId = draft().experiments[1].id;
+    const experimentId = candidate().experiments[1].id;
     await until(() => expect(document.activeElement).toBe(document.getElementById(`null-hypothesis-${experimentId}`)));
     expect(section('experiments').open).toBe(true);
 
@@ -209,11 +217,11 @@ describe('Scenario Builder navigation', () => {
     remove.click();
     flushSync();
     await settleDisclosure();
-    expect(draft().agents).toHaveLength(2);
-    expect(draft().agents.some((/** @type {{id: string}} */ agent) => agent.id === removedId)).toBe(false);
+    expect(candidate().agents).toHaveLength(2);
+    expect(candidate().agents.some((/** @type {{id: string}} */ agent) => agent.id === removedId)).toBe(false);
     expect(document.getElementById(`agent-${removedId}`)).toBeNull();
-    expect(draft().executions[0].agent).toBe(removedId);
-    expect(draft().interactions[0].agents).toContain(removedId);
+    expect(candidate().executions[0].agent).toBe(removedId);
+    expect(candidate().interactions[0].agents).toContain(removedId);
     expect(section('executions').open).toBe(true);
     expect(section('interactions').open).toBe(true);
     expect(section('executions').textContent).toContain(`Agent "${removedId}" no longer exists`);
@@ -222,7 +230,7 @@ describe('Scenario Builder navigation', () => {
     expect(document.querySelector('.issues')?.textContent).toContain('interactions.0.agents');
   });
 
-  it.each(['Validate & preview RDF', 'Save to GraphDB'])('%s opens sections for backend validation locations and clears stale feedback after editing', async (action) => {
+  it('opens sections for backend validation locations and clears stale feedback after editing', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       code: 'invalid_request', message: 'Invalid input.', shacl_report: null,
       issues: [
@@ -234,8 +242,9 @@ describe('Scenario Builder navigation', () => {
     render();
     await importJson(s7);
     click('Collapse all');
-    click(action);
+    click('Validate Scenario');
     await until(() => expect(section('experiments').open).toBe(true));
+    expect(validationStatus()).toBe('Needs corrections');
     expect(section('context').open).toBe(true);
     expect(section('team_constraints').open).toBe(true);
     expect(section('tasks').open).toBe(false);
@@ -260,7 +269,7 @@ describe('Scenario Builder navigation', () => {
     }), { status: 422 })));
     render();
     await importJson(s7);
-    click('Validate & preview RDF');
+    click('Validate Scenario');
     await until(() => expect(document.querySelector('.issues')?.textContent).toContain('tasks.2.name'));
     const destinations = [
       ['tasks.2.name', `#task-${s7.tasks[2].id}`],
@@ -300,7 +309,7 @@ describe('Scenario Builder navigation', () => {
     expect(description?.textContent).toContain('Review this value.');
     const name = document.getElementById(`task-${s7.tasks[2].id}`);
     expect(document.getElementById(name?.getAttribute('aria-describedby') ?? '')?.textContent).toContain('Review this value.');
-    expect(draft()).toEqual(s7);
+    expect(candidate()).toEqual(s7);
   });
 
   it('keeps navigation indexes correct after an earlier repeated entity is removed', async () => {
@@ -324,19 +333,20 @@ describe('Scenario Builder navigation', () => {
     render();
     await importJson(s7);
     click('Collapse all');
-    click('Validate & preview RDF');
+    click('Validate Scenario');
     enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Updated museum guide');
     respond(new Response(JSON.stringify({
       code: 'invalid_request', message: 'Old validation result.', shacl_report: null,
       issues: [{ location: ['body', 'experiments', 0, 'null_hypothesis'], message: 'Old hypothesis error.', type: 'value_error' }],
     }), { status: 422 }));
-    await until(() => expect(document.body.textContent).toContain('changed since the last preview'));
+    await until(() => expect(document.body.textContent).toContain('The scenario has changed.'));
+    expect(validationStatus()).toBe('Not validated');
     expect(section('experiments').open).toBe(false);
     expect(document.querySelector('.issues')).toBeNull();
   });
 });
 
-describe('Scenario JSON and submission workflows', () => {
+describe('Scenario JSON and validation workflows', () => {
   it('opens an isolated, reloadable viewer URL and serves current unsaved form data without changing the editor', async () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
@@ -355,11 +365,11 @@ describe('Scenario JSON and submission workflows', () => {
     expect(url.search).toBe('');
     expect(url.hash).not.toContain(s7.id);
     const snapshot = await requestScenarioJson(url.hash.slice(1));
-    expect(JSON.parse(snapshot)).toEqual(s7);
+    expect(JSON.parse(snapshot).scenario).toEqual(s7);
     enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Unsaved museum edits');
-    expect(JSON.parse(snapshot)).toEqual(s7);
+    expect(JSON.parse(snapshot).scenario).toEqual(s7);
     const latest = JSON.parse(await requestScenarioJson(url.hash.slice(1)));
-    expect(latest).toEqual({ ...s7, use_case: { ...s7.use_case, name: 'Unsaved museum edits' } });
+    expect(latest.scenario).toEqual({ ...s7, use_case: { ...s7.use_case, name: 'Unsaved museum edits' } });
     expect(document.querySelector('.sidebar')).toBe(sidebar);
     expect(jsonNode()).toBe(pre);
     expect(sections().every((element) => !element.open)).toBe(true);
@@ -380,7 +390,9 @@ describe('Scenario JSON and submission workflows', () => {
     expect(document.body.textContent).toContain('Use Copy or Download JSON instead');
     expect(document.getElementById('use-case-name')).not.toBeNull();
     expect(jsonNode()).not.toBeNull();
-    expect([...document.querySelectorAll('button')].map((button) => button.textContent?.trim())).toEqual(expect.arrayContaining(['Copy', 'Download JSON', 'Validate & preview RDF', 'Save to GraphDB']));
+    const labels = [...document.querySelectorAll('button')].map((button) => button.textContent?.trim());
+    expect(labels).toEqual(expect.arrayContaining(['Copy', 'Download JSON', 'Validate Scenario']));
+    expect(labels).not.toContain('Save to GraphDB');
   });
 
   it('preserves the inline read-only JSON and Copy/Download workflows', async () => {
@@ -400,44 +412,65 @@ describe('Scenario JSON and submission workflows', () => {
     expect(document.querySelector('textarea[aria-label*="JSON"]')).toBeNull();
     click('Copy');
     await until(() => expect(document.body.textContent).toContain('JSON copied to the clipboard.'));
-    expect(JSON.parse(clipboard.mock.calls[0][0])).toEqual(s7);
+    expect(JSON.parse(clipboard.mock.calls[0][0])).toEqual(draft());
     click('Download JSON');
     expect(createObjectURL).toHaveBeenCalledOnce();
     expect(download).toHaveBeenCalledOnce();
-    expect(/** @type {HTMLAnchorElement} */ (download.mock.contexts[0]).download).toBe('scenario-s7.json');
+    expect(/** @type {HTMLAnchorElement} */ (download.mock.contexts[0]).download).toBe('scenario-s7-draft.json');
     expect(revokeObjectURL).toHaveBeenCalledWith('blob:test-json');
     expect(document.body.textContent).toContain('JSON downloaded to your computer.');
     expect(jsonNode()).toBe(pre);
-    expect(draft()).toEqual(s7);
+    expect(candidate()).toEqual(s7);
+    click('Download canonical JSON');
+    expect(/** @type {HTMLAnchorElement} */ (download.mock.contexts[1]).download).toBe('scenario-s7.json');
     Reflect.deleteProperty(navigator, 'clipboard');
   });
 
-  it('preserves preview and save outcomes while inspecting JSON, invalidating them only on data edits', async () => {
+  it('preserves validation while inspecting or editing source text and invalidates it on a scenario edit', async () => {
     const validation = { conforms: true, report: 'Conforms: True' };
-    const fetch = vi.fn(async (/** @type {string} */ url) => new Response(JSON.stringify(url.endsWith('/preview') ? {
+    const fetch = vi.fn(async (/** @type {string} */ _url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify({
       scenario_id: 's7', rdf_format: 'nt', rdf: '<urn:s7> <urn:p> "test" .', triple_count: 173, validation,
-    } : {
-      scenario_id: 's7', repository_id: 'hi', graph_iri: 'urn:hi-app:graph:scenario:s7',
-      workbench_url: 'http://localhost:7200', workbench_graph_url: 'http://localhost:7200/graph',
-      use_case_iri: 'urn:use-case', team_iri: 'urn:team', triple_count: 173, validation,
-    }), { status: url.endsWith('/preview') ? 200 : 201 }));
+    })));
     vi.stubGlobal('fetch', fetch);
     render();
     await importJson(s7);
-    click('Validate & preview RDF');
-    await until(() => expect(document.querySelector('pre.rdf')).not.toBeNull());
-    click('Save to GraphDB');
-    await until(() => expect(document.body.textContent).toContain('Saved in GraphDB'));
+    expect(validationStatus()).toBe('Not validated');
+    click('Validate Scenario');
+    await until(() => expect(validationStatus()).toBe('Valid'));
     click('Expand all');
     click('Collapse all');
+    click('Describe with AI');
+    enter(/** @type {HTMLTextAreaElement} */ (document.getElementById('scenario-wizard-answer')), 'Research notes about the museum guide');
+    click('Structured Editor');
     expect(document.querySelector('.json-panel a')?.getAttribute('target')).toBe('_blank');
-    expect(document.body.textContent).toContain('173 triples · not saved');
-    expect(document.body.textContent).toContain('Saved in GraphDB');
-    expect(fetch).toHaveBeenCalledTimes(2);
-    for (const call of fetch.mock.calls) expect(JSON.parse(/** @type {any} */ (call)[1].body)).toEqual(s7);
-    enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Edited museum scenario');
+    expect(validationStatus()).toBe('Valid');
+    expect(document.body.textContent).toContain('173 triples');
+    expect(document.querySelector('pre.rdf')).not.toBeNull();
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(fetch.mock.calls[0][1].body))).toEqual(s7);
+    const name = /** @type {HTMLInputElement} */ (document.getElementById('use-case-name'));
+    enter(name, `${s7.use_case.name} `);
+    expect(candidate()).toEqual(s7);
+    expect(validationStatus()).toBe('Not validated');
+    enter(name, s7.use_case.name);
     expect(document.querySelector('pre.rdf')).toBeNull();
-    expect(document.body.textContent).not.toContain('Saved in GraphDB');
-    expect(document.body.textContent).toContain('The form has changed since scenario');
+    expect(validationStatus()).toBe('Not validated');
+  });
+
+  it('preserves a structured correction when regeneration is cancelled', () => {
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    render();
+    click('Load complete description');
+    click('Simulate interpretation');
+    enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Researcher correction');
+    const corrected = draft();
+    click('Describe with AI');
+    click('Simulate interpretation');
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(draft()).toEqual(corrected);
+    confirm.mockReturnValue(true);
+    click('Simulate interpretation');
+    expect(candidate().use_case.name).not.toBe('Researcher correction');
   });
 });

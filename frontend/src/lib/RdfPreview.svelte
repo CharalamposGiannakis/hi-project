@@ -1,42 +1,46 @@
 <script>
   import { requestPreview } from './api.js';
-  import Rejection from './Rejection.svelte';
 
   /**
    * @type {{
-   *   json: string,
+   *   target: { contract: object },
    *   issueCount: number,
    *   onIncomplete: () => void,
-   *   onValidationIssues?: (issues: import('./api.js').InputIssue[], sentJson: string) => void,
+   *   onValidationIssues?: (issues: import('./api.js').InputIssue[], target: object) => void,
    *   fetch?: typeof globalThis.fetch,
    * }}
    */
-  let { json, issueCount, onIncomplete, onValidationIssues, fetch = undefined } = $props();
+  let { target, issueCount, onIncomplete, onValidationIssues, fetch = undefined } = $props();
 
-  /** @typedef {{ sentJson: string, outcome: import('./api.js').PreviewResult }} Result */
-  let result = $state(/** @type {Result | null} */ (null));
+  /** @typedef {{ target: object, outcome: import('./api.js').PreviewResult | { kind: 'incomplete' } }} Result */
+  let result = $state.raw(/** @type {Result | null} */ (null));
   let loading = $state(false);
-  let blocked = $state(false);
   let copied = $state('');
 
-  // A result belongs to the exact JSON that was sent; any later edit makes it stale.
-  let current = $derived(result && result.sentJson === json ? result.outcome : null);
+  let current = $derived(result?.target === target ? result.outcome : null);
   let stale = $derived(result !== null && current === null);
+  let rejectedInput = $derived(current?.kind === 'rejected' && current.status === 422
+    && ['invalid_request', 'invalid_vocabulary', 'shacl_failed'].includes(current.error.code));
+  let needsCorrections = $derived(current?.kind === 'incomplete' || rejectedInput);
+  let status = $derived(loading ? 'Validating…' : needsCorrections ? 'Needs corrections'
+    : current?.kind === 'ok' ? 'Valid' : current ? 'Technical validation error' : 'Not validated');
 
   async function preview() {
     copied = '';
+    const submitted = target;
+    onValidationIssues?.([], submitted);
     if (issueCount > 0) {
-      blocked = true;
+      result = { target: submitted, outcome: { kind: 'incomplete' } };
       onIncomplete();
       return;
     }
-    blocked = false;
+    result = null;
     loading = true;
-    const sentJson = json;
-    const outcome = await requestPreview(JSON.parse(sentJson), fetch ? { fetch } : {});
-    result = { sentJson, outcome };
-    if (outcome.kind === 'rejected' && outcome.status === 422) onValidationIssues?.(outcome.error.issues, sentJson);
-    else if (outcome.kind === 'ok') onValidationIssues?.([], sentJson);
+    const outcome = await requestPreview(submitted.contract, fetch ? { fetch } : {});
+    result = { target: submitted, outcome };
+    if (submitted === target && outcome.kind === 'rejected' && outcome.status === 422) {
+      onValidationIssues?.(outcome.error.issues, submitted);
+    }
     loading = false;
   }
 
@@ -62,45 +66,45 @@
 </script>
 
 <section class="preview" aria-labelledby="preview-heading">
-  <h2 id="preview-heading">1 · Validate &amp; preview RDF</h2>
+  <h2 id="preview-heading">Technical validation</h2>
   <p class="hint">
-    Sends the scenario to the local Python backend, which generates RDF and validates it against the HI SHACL shapes.
-    <strong>Previewing does not save the scenario.</strong>
+    Checks the HI model, HINT vocabulary, and SHACL shapes. Scientific approval requires a separate review.
   </p>
   <div class="toolbar">
-    <button type="button" class="primary" onclick={preview} disabled={loading}>
-      {loading ? 'Validating…' : 'Validate & preview RDF'}
-    </button>
+    <button type="button" class="primary" onclick={preview} disabled={loading}>Validate Scenario</button>
   </div>
 
+  <p data-validation-status class:ok={status === 'Valid'} class:warn={needsCorrections} class:error-title={status === 'Technical validation error'} role="status">{status}</p>
   <div aria-live="polite">
-    {#if blocked && issueCount > 0}
-      <p class="warn">Complete the highlighted fields first ({issueCount} remaining); the backend checks complete scenarios only.</p>
+    {#if current?.kind === 'incomplete'}
+      <p class="hint">Review the highlighted fields before validating again.</p>
     {:else if stale && !loading}
-      <p class="warn">The scenario has changed since the last preview. Validate again to see current results.</p>
+      <p class="hint">The scenario has changed. Validate again to see current results.</p>
     {:else if current?.kind === 'ok'}
-      <p class="ok">
-        Valid: conforms to the HI SHACL shapes · {current.preview.triple_count} triples · not saved
-      </p>
-      <div class="toolbar">
-        <button type="button" onclick={() => current?.kind === 'ok' && copyRdf(current.preview.rdf)}>Copy RDF</button>
-        <button type="button" onclick={() => current?.kind === 'ok' && downloadRdf(current.preview)}>Download .nt</button>
-      </div>
-      {#if copied}<p class="status" role="status">{copied}</p>{/if}
-      <pre class="rdf" aria-label="Generated RDF (N-Triples)">{current.preview.rdf}</pre>
+      {@const preview = current.preview}
+      <p class="hint">Conforms to the HI SHACL shapes. Generated {preview.triple_count} {preview.triple_count === 1 ? 'triple' : 'triples'}.</p>
+      <details>
+        <summary>RDF preview</summary>
+        <div class="toolbar">
+          <button type="button" onclick={() => copyRdf(preview.rdf)}>Copy RDF</button>
+          <button type="button" onclick={() => downloadRdf(preview)}>Download .nt</button>
+        </div>
+        {#if copied}<p class="status" role="status">{copied}</p>{/if}
+        <pre class="rdf" aria-label="Generated RDF (N-Triples)">{preview.rdf}</pre>
+      </details>
       <details>
         <summary>SHACL report</summary>
-        <pre class="report">{current.preview.validation.report}</pre>
+        <pre class="report">{preview.validation.report}</pre>
       </details>
     {:else if current?.kind === 'rejected'}
-      <Rejection
-        error={current.error}
-        title={current.error.code === 'internal_error'
-          ? 'The backend failed while processing the scenario.'
-          : 'Not valid: the backend rejected the scenario.'}
-      />
+      <p class="error">{current.error.message}</p>
+      {#if current.error.shacl_report}
+        <details open>
+          <summary>SHACL report</summary>
+          <pre class="report">{current.error.shacl_report}</pre>
+        </details>
+      {/if}
     {:else if current}
-      <p class="error-title">Preview unavailable.</p>
       <p class="error">{current.message}</p>
     {/if}
   </div>

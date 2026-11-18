@@ -318,12 +318,13 @@ export function toContract(scenario) {
 }
 
 /**
- * Parse contract JSON (text or object) into form state, rejecting anything the
- * Python model would reject. Throws an Error listing the problems.
+ * Parse contract JSON (text or object) into form state. Interpretation drafts
+ * can reopen with unfinished fields, but must have safe, unique editor IDs.
  * @param {unknown} input
+ * @param {{ allowDraft?: boolean }} [options]
  * @returns {Scenario}
  */
-export function fromContract(input) {
+export function fromContract(input, { allowDraft = false } = {}) {
   /** @type {string[]} */
   const problems = [];
   let data = input;
@@ -483,12 +484,27 @@ export function fromContract(input) {
     }),
   };
 
-  // Legacy JSON starts with all tasks selected; form state and exports are always explicit.
+  // Legacy canonical imports default to all tasks. A draft leaves missing links unresolved.
   scenario.goal.required_tasks = isObject(root.goal) && 'required_tasks' in root.goal
     ? array(root.goal.required_tasks, 'goal.required_tasks').map((id, i) => string(id, `goal.required_tasks.${i}`))
-    : scenario.tasks.map((task) => task.id);
+    : allowDraft ? [] : scenario.tasks.map((task) => task.id);
 
-  if (problems.length === 0) problems.push(...validate(scenario).map((i) => `${i.path}: ${i.message}`));
+  if (problems.length === 0) {
+    if (allowDraft) {
+      for (const [path, entities] of Object.entries({
+        use_case: [scenario.use_case], goal: [scenario.goal], tasks: scenario.tasks,
+        agents: scenario.agents, capabilities: scenario.capabilities, executions: scenario.executions,
+        experiments: scenario.experiments, evaluations: scenario.evaluations, interactions: scenario.interactions,
+      })) {
+        const ids = entities.map(({ id }) => id);
+        if (ids.some((id) => !ID_PATTERN.test(id))) problems.push(`${path}: invalid entity ID.`);
+        if (new Set(ids).size !== ids.length) problems.push(`${path}: duplicate entity IDs.`);
+      }
+      if (!ID_PATTERN.test(scenario.id)) problems.push('id: invalid identifier.');
+    } else {
+      problems.push(...validate(scenario).map((i) => `${i.path}: ${i.message}`));
+    }
+  }
   if (problems.length) throw new Error(problems.join('\n'));
   return scenario;
 }

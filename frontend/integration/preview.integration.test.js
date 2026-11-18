@@ -15,6 +15,7 @@ import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
 import s7 from '../../examples/s7.json';
 import { requestPreview } from '../src/lib/api.js';
+import { requestScenarioJson } from '../src/lib/json-viewer-channel.js';
 import { PYTHON, ROOT, closedPort, startBackend } from './backend.js';
 
 const example = { ...legacyExample, goal: { ...legacyExample.goal, required_tasks: legacyExample.tasks.map((task) => task.id) } };
@@ -47,18 +48,26 @@ afterEach(() => {
   app = undefined;
   document.body.innerHTML = '';
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Mount the real App against `apiUrl`. */
-async function mountApp(apiUrl = baseUrl) {
+async function mountApp(apiUrl = baseUrl, structured = true) {
   vi.stubEnv('VITE_API_URL', apiUrl);
   const { default: App } = await import('../src/App.svelte');
   app = mount(App, { target: document.body });
   flushSync();
-  clickButton('Expand all');
+  if (structured) {
+    clickButton('Structured Editor');
+    clickButton('Expand all');
+  }
 }
 
 const text = () => document.body.textContent ?? '';
+const interpretationDocument = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
+const draft = () => interpretationDocument().scenario;
+const validationStatus = () => document.querySelector('[data-validation-status]')?.textContent?.trim();
 /** @param {string} label */
 function clickButton(label) {
   const button = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
@@ -70,8 +79,13 @@ function clickButton(label) {
 async function until(condition) {
   await vi.waitFor(() => {
     flushSync();
-    if (!condition()) throw new Error('condition not met');
+    if (!condition()) throw new Error(`Condition not met (validation status: ${validationStatus()})`);
   }, { timeout: 15_000, interval: 50 });
+}
+
+async function validateScenario() {
+  clickButton('Validate Scenario');
+  await until(() => validationStatus() === 'Valid');
 }
 
 /** @param {ParentNode} root @param {string} label @param {string} value */
@@ -92,24 +106,141 @@ function enterText(root, label, value) {
   flushSync();
 }
 
+/** @param {string} json @param {string} name */
+async function importJson(json, name) {
+  const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
+  Object.defineProperty(input, 'files', { value: [{ name, text: async () => json }], configurable: true });
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  await until(() => text().includes(`Loaded ${name}`));
+}
+
 describe('Svelte → FastAPI → RDF → SHACL', () => {
+  it('streams unprocessed descriptions to the JSON viewer and retains them across input methods', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await mountApp(baseUrl, false);
+    expect(validationStatus()).toBe('Not validated');
+    expect(draft()).toBeNull();
+
+    const description = '  A researcher and an assistant review data.\nTheir roles are undecided.  ';
+    const answer = /** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer'));
+    answer.value = description;
+    answer.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const raw = interpretationDocument();
+    expect(raw.source_description.use_case).toBe(description);
+    expect(raw.scenario).toBeNull();
+    const viewerLink = /** @type {HTMLAnchorElement} */ (document.querySelector('.json-panel a'));
+    expect(JSON.parse(await requestScenarioJson(new URL(viewerLink.href).hash.slice(1)))).toEqual(raw);
+
+    clickButton('Next');
+    clickButton('Previous');
+    clickButton('Structured Editor');
+    clickButton('Describe with AI');
+    expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer')).value).toBe(description);
+    expect(interpretationDocument().source_description).toEqual(raw.source_description);
+    clickButton('Simulate interpretation');
+    expect(interpretationDocument()).toMatchObject({
+      source_description: raw.source_description, scenario: null, interpretation: { status: 'unsupported' },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('loads a complete interpretation, edits an agent and validates only on request', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await mountApp(baseUrl, false);
+    clickButton('Load complete description');
+    const before = interpretationDocument();
+    expect(before.source_description.use_case).toMatch(/personal assistant/i);
+    expect(before.scenario).toBeNull();
+
+    clickButton('Simulate interpretation');
+    const interpreted = interpretationDocument();
+    expect(interpreted.source_description).toEqual(before.source_description);
+    expect(interpreted.interpretation).toMatchObject({ status: 'simulated_complete' });
+    expect(interpreted.scenario.agents.map((/** @type {{ kind: string }} */ agent) => agent.kind).sort()).toEqual(['artificial', 'human']);
+    const agent = interpreted.scenario.agents.find((/** @type {{ kind: string }} */ choice) => choice.kind === 'human');
+    const editor = /** @type {Element} */ (document.getElementById(`agent-${agent.id}`)?.closest('section'));
+    enterText(editor, 'Name', 'Research participant');
+    const edited = draft();
+    expect(edited.agents).toContainEqual({ ...agent, name: 'Research participant' });
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    await validateScenario();
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${baseUrl}/scenarios/preview`);
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual(edited);
+    const rdfToggle = [...document.querySelectorAll('summary')].find((node) => node.textContent?.trim() === 'RDF preview');
+    expect(rdfToggle).toBeDefined();
+    rdfToggle?.click();
+    flushSync();
+    expect(document.querySelector('pre.rdf')?.textContent).toContain('"Research participant"');
+    expect(document.querySelector('pre.report')?.textContent).toMatch(/Conforms:\s*True/);
+
+    clickButton('Describe with AI');
+    clickButton('Structured Editor');
+    expect(draft()).toEqual(edited);
+    expect(validationStatus()).toBe('Valid');
+    enterText(/** @type {Element} */ (document.getElementById(`agent-${agent.id}`)?.closest('section')), 'Name', agent.name);
+    expect(validationStatus()).toBe('Not validated');
+    expect(document.querySelector('pre.rdf')).toBeNull();
+    expect(interpretationDocument().source_description).toEqual(before.source_description);
+  });
+
+  it('downloads a partial candidate, reports missing facts and validates after structured repair', async () => {
+    await mountApp(baseUrl, false);
+    clickButton('Load incomplete description');
+    clickButton('Simulate interpretation');
+    const partial = interpretationDocument();
+    expect(partial.scenario.agents).toMatchObject([{ kind: 'human', name: 'Human user' }]);
+    expect(partial.interpretation).toMatchObject({
+      status: 'simulated_incomplete', diagnostics: [expect.objectContaining({ path: 'agents', message: expect.stringMatching(/artificial/) })],
+    });
+    const createObjectURL = vi.fn((/** @type {Blob} */ _blob) => 'blob:partial-interpretation');
+    vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
+    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    clickButton('Download JSON');
+    expect(download).toHaveBeenCalledOnce();
+    const blob = createObjectURL.mock.calls[0][0];
+    const exported = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(JSON.parse(String(reader.result)));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    expect(exported).toEqual(partial);
+    await importJson(JSON.stringify(exported), 'partial.json');
+    expect(interpretationDocument()).toEqual(partial);
+
+    expect(await requestPreview(partial.scenario, { baseUrl })).toMatchObject({ kind: 'rejected', status: 422 });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    clickButton('Validate Scenario');
+    expect(validationStatus()).toBe('Needs corrections');
+    expect(text()).toContain('The team needs at least one human and one artificial agent.');
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    clickButton('Add artificial agent');
+    const added = draft().agents.at(-1);
+    const editor = /** @type {Element} */ (document.getElementById(`agent-${added.id}`)?.closest('section'));
+    enterText(editor, 'Name', 'AI assistant provided by the researcher');
+    const role = /** @type {HTMLInputElement} */ (editor.querySelector('input[value="AIAssistantRole"]'));
+    role.click();
+    flushSync();
+    expect(interpretationDocument().source_description).toEqual(partial.source_description);
+    expect(draft().agents[0]).toEqual(partial.scenario.agents[0]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    await validateScenario();
+    expect(document.querySelector('pre.rdf')?.textContent).toContain('"AI assistant provided by the researcher"');
+  });
+
   it.each(reconstructions)('imports $label, exports it through Copy, reimports it, and previews identical RDF', async ({ canonical, triples }) => {
     await mountApp();
-    /** @param {string} json */
-    async function importJson(json) {
-      const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
-      Object.defineProperty(input, 'files', { value: [{ name: 'example.json', text: async () => json }], configurable: true });
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-      await until(() => text().includes('Loaded example.json'));
-    }
-    await importJson(JSON.stringify(canonical));
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(canonical);
+    await importJson(JSON.stringify(canonical), 'example.json');
+    expect(draft()).toEqual(canonical);
     const expected = await requestPreview(canonical, { baseUrl });
     expect(expected.kind).toBe('ok');
     if (expected.kind !== 'ok') throw new Error(JSON.stringify(expected));
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain(`${triples} triples · not saved`);
+    await validateScenario();
+    expect(text()).toContain(`${triples} triples`);
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected.preview.rdf);
 
     let exported = '';
@@ -122,20 +253,18 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
       else Reflect.deleteProperty(navigator, 'clipboard');
     }
-    expect(JSON.parse(exported)).toEqual(canonical);
+    expect(JSON.parse(exported).scenario).toEqual(canonical);
     unmount(/** @type {Record<string, any>} */ (app));
     app = undefined;
     await mountApp();
-    await importJson(exported);
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(canonical);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await importJson(exported, 'example.json');
+    expect(draft()).toEqual(canonical);
+    await validateScenario();
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected.preview.rdf);
   });
 
   it.each(reconstructions)('enters the complete $label through the form with independent entities and source relationships', async ({ canonical, triples }) => {
     await mountApp(); // Start with a blank form; do not load or inject scenario JSON.
-    const draft = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
     /** @type {Record<string, Record<string, string>>} */
     const ids = { tasks: {}, agents: {}, capabilities: {}, executions: {}, experiments: {}, evaluations: {}, interactions: {} };
     /** @param {ParentNode} root @param {string} label @param {string[]} values */
@@ -261,9 +390,8 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     // Extra human rows are appended after the initial human/artificial pair; row order is not identity.
     expected.agents.sort((a, b) => entered.agents.findIndex((/** @type {any} */ agent) => agent.id === a.id) - entered.agents.findIndex((/** @type {any} */ agent) => agent.id === b.id));
     expect(entered).toEqual(expected);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain(`${triples} triples · not saved`);
+    await validateScenario();
+    expect(text()).toContain(`${triples} triples`);
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(canonical.goal.required_tasks.length);
     expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#hasInteractionEpisode>/g) ?? []).toHaveLength(canonical.interactions.reduce((sum, interaction) => sum + interaction.executions.length, 0));
@@ -301,7 +429,6 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       control.click();
       flushSync();
     };
-    const draft = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
     expect(checklist('Team constraints (optional)').querySelectorAll('input:checked')).toHaveLength(0);
     toggle('Team constraints (optional)', 'AccessibilityConstraint');
     expect(draft().context.constraints).toEqual(example.context.constraints);
@@ -313,9 +440,8 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Remove context');
     expect(draft()).not.toHaveProperty('context');
     expect(draft().team_constraints).toEqual(['PrivacyConstraint']);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('117 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('117 triples');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain('<urn:hi-app:scenario:s1:team> <https://w3id.org/hi-ontology#hasConstraintConcept> <https://w3id.org/hi-thesaurus/PrivacyConstraint> .');
     expect(rdf).not.toContain('<urn:hi-app:scenario:s1:context>');
@@ -332,10 +458,9 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       /** @type {HTMLInputElement} */ (checklist.querySelector(`input[value="${id}"]`)).click();
       flushSync();
     }
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').goal.required_tasks).toEqual(['data-collection']);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('125 triples · not saved');
+    expect(draft().goal.required_tasks).toEqual(['data-collection']);
+    await validateScenario();
+    expect(text()).toContain('125 triples');
     let rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf.match(/<https:\/\/w3id.org\/hi-ontology#requiresTask>/g)).toHaveLength(1);
     for (const task of example.tasks) {
@@ -344,22 +469,21 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(rdf).toContain('<urn:hi-app:scenario:s1:execution:explanation> <https://w3id.org/hi-ontology#realizesTask> <urn:hi-app:scenario:s1:task:explanation> .');
 
     clickButton('Add task');
-    const draft = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
-    const id = draft.tasks.at(-1).id;
+    const beforeTaskEdit = draft();
+    const id = beforeTaskEdit.tasks.at(-1).id;
     const taskSection = /** @type {Element} */ (document.querySelector(`#task-${id}`)?.closest('section'));
     enterText(taskSection, 'Name', 'Supporting task');
     selectValue(taskSection, 'Task type', 'DataCollectionTask');
-    expect(draft.goal.required_tasks).toEqual(['data-collection']);
+    expect(beforeTaskEdit.goal.required_tasks).toEqual(['data-collection']);
     expect(/** @type {HTMLInputElement} */ (checklist.querySelector(`input[value="${id}"]`)).checked).toBe(false);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('128 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('128 triples');
     rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain(`<urn:hi-app:scenario:s1:task:${id}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://w3id.org/hi-ontology#Task> .`);
     expect(rdf).not.toContain(`<urn:hi-app:scenario:s1:goal:user-wellbeing> <https://w3id.org/hi-ontology#requiresTask> <urn:hi-app:scenario:s1:task:${id}> .`);
   });
 
-  it('removes task references and blocks preview and save until an empty requirement selection is repaired', async () => {
+  it('removes task references and blocks validation until an empty requirement selection is repaired', async () => {
     await mountApp();
     const data = { ...structuredClone(example), capabilities: [], executions: [], evaluations: [], experiments: [], interactions: [] };
     data.goal.required_tasks = ['data-collection'];
@@ -371,21 +495,19 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       const section = /** @type {Element} */ (document.querySelector(`#task-${id}`)?.closest('section'));
       /** @type {HTMLButtonElement} */ (section.querySelector('button')).click();
       flushSync();
-      expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').goal.required_tasks).toEqual(id === 'conflict-resolution' ? ['data-collection'] : []);
+      expect(draft().goal.required_tasks).toEqual(id === 'conflict-resolution' ? ['data-collection'] : []);
     }
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
-      clickButton('Validate & preview RDF');
-      clickButton('Save to GraphDB');
+      clickButton('Validate Scenario');
       expect(text()).toContain('Choose at least one required task.');
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally { fetchSpy.mockRestore(); }
     const goal = /** @type {Element} */ (document.querySelector('#goal-name')?.closest('fieldset'));
     /** @type {HTMLInputElement} */ (goal.querySelector('input[value="explanation"]')).click();
     flushSync();
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').goal.required_tasks).toEqual(['explanation']);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    expect(draft().goal.required_tasks).toEqual(['explanation']);
+    await validateScenario();
     expect(document.querySelector('pre.rdf')?.textContent).toContain('<urn:hi-app:scenario:s1:goal:user-wellbeing> <https://w3id.org/hi-ontology#requiresTask> <urn:hi-app:scenario:s1:task:explanation> .');
   });
 
@@ -398,17 +520,15 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       expect([...section.querySelectorAll('label')].some((label) => label.textContent === 'Name')).toBe(true);
       enterText(section, 'Description in English (optional)', '');
     }
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('123 triples · not saved'); // Legacy S1 without these comments.
+    await validateScenario();
+    expect(text()).toContain('123 triples'); // Legacy S1 without these comments.
 
     enterText(goal, 'Description in English (optional)', example.goal.description);
     expect(document.querySelector('pre.rdf')).toBeNull();
     example.tasks.forEach((task, i) => enterText(tasks[i], 'Description in English (optional)', task.description));
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(example);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('127 triples · not saved');
+    expect(draft()).toEqual(example);
+    await validateScenario();
+    expect(text()).toContain('127 triples');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     for (const { kind, entity } of [{ kind: 'goal', entity: example.goal }, ...example.tasks.map((task) => ({ kind: 'task', entity: task }))]) {
       expect(rdf).toContain(`<urn:hi-app:scenario:s1:${kind}:${entity.id}> <http://www.w3.org/2000/01/rdf-schema#comment> "${entity.description}"@en .`);
@@ -420,17 +540,17 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     await mountApp();
     clickButton('Load S1 example');
     clickButton('Remove interaction');
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('interactions');
+    expect(draft()).not.toHaveProperty('interactions');
     clickButton('Add interaction');
     const section = /** @type {Element} */ (document.querySelector('[data-interaction-id]'));
     selectValue(section, 'Interaction intent', example.interactions[0].intent);
     selectValue(section, 'Interaction modality', example.interactions[0].modality);
     /** @type {HTMLInputElement} */ (section.querySelector('input[value="explanation"]')).click();
     flushSync();
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').interactions[0].agents).toEqual([]);
+    expect(draft().interactions[0].agents).toEqual([]);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
-      clickButton('Validate & preview RDF');
+      clickButton('Validate Scenario');
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(text()).toContain('Choose at least two distinct agents.');
     } finally { fetchSpy.mockRestore(); }
@@ -438,23 +558,20 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       /** @type {HTMLInputElement} */ (section.querySelector(`input[value="${id}"]`)).click();
       flushSync();
     }
-    const entered = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').interactions[0];
+    const entered = draft().interactions[0];
     expect(entered).toMatchObject({ intent: 'ExplanationIntent', modality: 'VerbalDialogueModality', agents: example.interactions[0].agents, executions: ['explanation'] });
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('127 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('127 triples');
     /** @type {HTMLInputElement} */ (section.querySelector('input[value="explanation"]')).click();
     flushSync();
     expect(document.querySelector('pre.rdf')).toBeNull();
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('126 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('126 triples');
     enterText(section, 'Description in English (optional)', 'User-entered interaction description.');
-    const changed = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').interactions[0];
+    const changed = draft().interactions[0];
     expect(changed.id).toBe(entered.id);
     expect(changed.executions).toEqual([]);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await validateScenario();
     expect(document.querySelector('pre.rdf')?.textContent).toContain('"User-entered interaction description."@en');
   });
 
@@ -475,11 +592,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     section?.querySelector('button')?.click();
     flushSync();
     expect(text()).toContain(`Referenced records no longer exist: ${id}`);
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').interactions).toEqual(data.interactions);
+    expect(draft().interactions).toEqual(data.interactions);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
-      clickButton('Validate & preview RDF');
-      clickButton('Save to GraphDB');
+      clickButton('Validate Scenario');
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally { fetchSpy.mockRestore(); }
     const interaction = /** @type {Element} */ (document.querySelector('[data-interaction-id]'));
@@ -488,11 +604,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     flushSync();
     /** @type {HTMLInputElement} */ (interaction.querySelector(`input[value="${id}"]`)).click();
     flushSync();
-    const repaired = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').interactions[0];
+    const repaired = draft().interactions[0];
     expect(repaired.id).toBe(data.interactions[0].id);
     expect(repaired.description).toBe(data.interactions[0].description);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await validateScenario();
   });
 
   it('enters all S1 experiments and evaluations through the form', async () => {
@@ -511,7 +626,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       enterText(section, 'Null hypothesis', experiment.null_hypothesis);
       enterText(section, 'Alternative hypothesis', experiment.alternative_hypothesis);
     }
-    const created = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    const created = /** @type {import('../src/lib/scenario.js').Scenario} */ (draft());
     for (const evaluation of example.evaluations) {
       clickButton('Add evaluation');
       const section = /** @type {Element} */ ([...document.querySelectorAll('[data-evaluation-id]')].at(-1));
@@ -524,17 +639,15 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       }
       enterText(section, 'Description in English (optional)', evaluation.description);
     }
-    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (draft());
     expect(entered.experiments.map(({ id, ...facts }) => facts)).toEqual(example.experiments.map(({ id, ...facts }) => facts));
     expect(entered.evaluations.map(({ id, experiment, ...facts }) => facts)).toEqual(example.evaluations.map(({ id, experiment, ...facts }) => facts));
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('127 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('127 triples');
     const firstExperiment = /** @type {Element} */ (document.querySelector('[data-experiment-id]'));
     selectValue(firstExperiment, 'Hypothesis literal format', 'en');
     expect(document.querySelector('pre.rdf')).toBeNull();
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await validateScenario();
     expect(document.querySelector('pre.rdf')?.textContent).toContain(`"${example.experiments[0].null_hypothesis}"@en`);
     const firstEvaluation = /** @type {Element} */ (document.querySelector('[data-evaluation-id]'));
     for (const section of [firstExperiment, firstEvaluation]) {
@@ -543,9 +656,8 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     }
     /** @type {HTMLInputElement} */ (firstEvaluation.querySelector('input[value="conflict-resolution"]')).click();
     flushSync();
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('130 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('130 triples');
   });
 
   it.each(['experiment', 'execution'])('keeps evaluation data when a referenced %s is deleted and supports repair', async (kind) => {
@@ -554,12 +666,11 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const id = kind === 'experiment' ? 'data-collection-quality' : 'data-collection';
     document.querySelector(`[data-${kind}-id="${id}"] button`)?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     flushSync();
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').evaluations).toEqual(example.evaluations);
+    expect(draft().evaluations).toEqual(example.evaluations);
     expect(text()).toContain(kind === 'experiment' ? `"${id}" no longer exists` : `Referenced records no longer exist: ${id}`);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
-      clickButton('Validate & preview RDF');
-      clickButton('Save to GraphDB');
+      clickButton('Validate Scenario');
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally { fetchSpy.mockRestore(); }
     const evaluation = /** @type {Element} */ (document.querySelector('[data-evaluation-id="data-collection-quality"]'));
@@ -570,11 +681,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       /** @type {HTMLInputElement} */ (evaluation.querySelector('input[value="data-collection"]')).click();
       flushSync();
     }
-    const repaired = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').evaluations[0];
+    const repaired = draft().evaluations[0];
     expect(repaired.id).toBe(example.evaluations[0].id);
     expect(repaired.description).toBe(example.evaluations[0].description);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await validateScenario();
   });
 
   it('enters all S1 executions through the form and supports optional methods', async () => {
@@ -584,7 +694,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     for (const _ of example.evaluations) clickButton('Remove evaluation');
     for (const _ of example.experiments) clickButton('Remove experiment');
     for (const _ of example.executions) clickButton('Remove execution');
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('executions');
+    expect(draft()).not.toHaveProperty('executions');
     for (const execution of example.executions) {
       clickButton('Add execution');
       const section = document.querySelectorAll('[data-execution-id]').item(document.querySelectorAll('[data-execution-id]').length - 1);
@@ -593,18 +703,16 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       selectValue(section, 'Agent', execution.agent);
       selectValue(section, 'Method (optional)', execution.method);
     }
-    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (draft());
     expect(entered.executions.map(({ id, ...facts }) => facts)).toEqual(example.executions.map(({ id, ...facts }) => facts));
     expect(new Set(entered.executions.map((e) => e.id)).size).toBe(3);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('88 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('88 triples');
     selectValue(/** @type {Element} */ (document.querySelector('[data-execution-id]')), 'Method (optional)', '');
     expect(document.querySelector('pre.rdf')).toBeNull();
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions[0]).not.toHaveProperty('method');
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('87 triples · not saved');
+    expect(draft().executions[0]).not.toHaveProperty('method');
+    await validateScenario();
+    expect(text()).toContain('87 triples');
   });
 
   it.each(['agent', 'task'])('preserves executions after deleting a referenced %s and requires repair', async (kind) => {
@@ -620,11 +728,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     entity?.querySelector('button')?.click();
     flushSync();
     expect(text()).toContain(`"${id}" no longer exists`);
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions).toEqual(data.executions);
+    expect(draft().executions).toEqual(data.executions);
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     try {
-      clickButton('Validate & preview RDF');
-      clickButton('Save to GraphDB');
+      clickButton('Validate Scenario');
       expect(fetchSpy).not.toHaveBeenCalled();
     } finally {
       fetchSpy.mockRestore();
@@ -632,18 +739,17 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const execution = /** @type {Element} */ (document.querySelector('[data-execution-id="data-collection"]'));
     selectValue(execution, kind === 'agent' ? 'Agent' : 'Task', kind === 'agent' ? 'replacement-human' : 'explanation');
     expect(text()).not.toContain(`"${id}" no longer exists`);
-    const repaired = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').executions[0];
+    const repaired = draft().executions[0];
     expect(repaired.id).toBe(data.executions[0].id);
     expect(repaired.method).toBe(data.executions[0].method);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await validateScenario();
   });
 
   it('enters all four S1 capabilities through the form and shares their references', async () => {
     await mountApp();
     clickButton('Load S1 example');
     for (const _ of example.capabilities) clickButton('Remove capability');
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('capabilities');
+    expect(draft()).not.toHaveProperty('capabilities');
     for (const capability of example.capabilities) {
       clickButton('Add capability');
       const section = [...document.querySelectorAll('[data-capability-id]')].at(-1);
@@ -656,35 +762,33 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
         flushSync();
       }
     }
-    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}'));
+    const entered = /** @type {import('../src/lib/scenario.js').Scenario} */ (draft());
     expect(entered.capabilities.map(({ id, ...facts }) => facts)).toEqual(example.capabilities.map(({ id, ...facts }) => facts));
     expect(new Set(entered.capabilities.map((c) => c.id)).size).toBe(4);
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('127 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('127 triples');
 
     const first = document.querySelector('[data-capability-id]');
     for (const id of ['human-user', 'conflict-resolution']) {
       /** @type {HTMLInputElement} */ (first?.querySelector(`input[value="${id}"]`)).click();
       flushSync();
     }
-    const changed = JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').capabilities[0];
+    const changed = draft().capabilities[0];
     expect(changed.id).toBe(entered.capabilities[0].id);
     expect(changed.agents).toEqual(['ai-assistant', 'human-user']);
     expect(changed.tasks).toEqual(['data-collection', 'conflict-resolution']);
     expect(document.querySelector('pre.rdf')).toBeNull();
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('130 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('130 triples');
   });
 
   it('enters the complete original S1 Context through the form', async () => {
     await mountApp();
     clickButton('Load S1 example');
     clickButton('Remove context');
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).not.toHaveProperty('context');
+    expect(draft()).not.toHaveProperty('context');
     clickButton('Add context');
-    clickButton('Validate & preview RDF');
+    clickButton('Validate Scenario');
     expect(text()).toContain('Choose a concept.');
 
     const label = [...document.querySelectorAll('label')].find((l) => l.textContent?.trim() === 'Context type');
@@ -702,11 +806,10 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     description.value = example.context.description;
     description.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').context).toEqual(example.context);
+    expect(draft().context).toEqual(example.context);
 
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('127 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('127 triples');
     const rdf = document.querySelector('pre.rdf')?.textContent ?? '';
     expect(rdf).toContain('<urn:hi-app:scenario:s1:context>');
     expect(rdf).toContain(`"${example.context.description}"@en`);
@@ -722,7 +825,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     Object.defineProperty(input, 'files', { value: [{ name: 'context.json', text: async () => JSON.stringify(example) }] });
     input.dispatchEvent(new Event('change', { bubbles: true }));
     await until(() => text().includes('Loaded context.json'));
-    expect(JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}')).toEqual(example);
+    expect(draft()).toEqual(example);
     expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#context-description')).value).toBe(example.context.description);
     expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#goal-description')).value).toBe(example.goal.description);
     for (const task of example.tasks) {
@@ -741,20 +844,18 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
     await mountApp();
     clickButton('Load S1 example');
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('127 triples · not saved');
+    await validateScenario();
+    expect(text()).toContain('127 triples');
     expect(document.querySelector('pre.rdf')?.textContent).toBe(expected);
 
     const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));
     name.value = 'Renamed participant';
     name.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    expect(text()).toContain('changed since the last preview');
+    expect(validationStatus()).toBe('Not validated');
     expect(document.querySelector('pre.rdf')).toBeNull();
 
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
+    await validateScenario();
     expect(document.querySelector('pre.rdf')?.textContent).toContain(
       '<urn:hi-app:scenario:s1:agent:human-user> <http://www.w3.org/2000/01/rdf-schema#label> "Renamed participant" .',
     );
@@ -763,8 +864,8 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
   it('blocks incomplete forms locally without calling the backend', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     await mountApp();
-    clickButton('Validate & preview RDF');
-    expect(text()).toContain('Complete the highlighted fields first');
+    clickButton('Validate Scenario');
+    expect(validationStatus()).toBe('Needs corrections');
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
@@ -772,8 +873,8 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
   it('shows an unavailable backend in the UI', async () => {
     await mountApp(`http://127.0.0.1:${await closedPort()}`);
     clickButton('Load S1 example');
-    clickButton('Validate & preview RDF');
-    await until(() => text().includes('Preview unavailable'));
+    clickButton('Validate Scenario');
+    await until(() => validationStatus() === 'Technical validation error');
     expect(text()).toContain('could not be reached');
     expect(document.querySelector('pre.rdf')).toBeNull();
   });
