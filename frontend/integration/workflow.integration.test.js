@@ -1,9 +1,6 @@
-// @vitest-environment jsdom
-// Complete workflow: Svelte App → FastAPI → GraphDB → SPARQL (CQ1) → Svelte, with the real
-// backend and the local Compose GraphDB (`docker compose up -d`, `python -m infra.graphdb setup`).
+// Persistence and CQ1 through the API client against the local Compose GraphDB.
 // Skipped when GraphDB is not reachable. Removes only the scenario graphs it created.
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { flushSync, mount, unmount } from 'svelte';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import example from '../../examples/s1.json';
 import s2 from '../../examples/s2.json';
 import s3 from '../../examples/s3.json';
@@ -11,6 +8,7 @@ import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
 import s7 from '../../examples/s7.json';
+import { fetchTeam, requestPreview, saveScenario } from '../src/lib/api.js';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -76,56 +74,36 @@ afterAll(async () => {
   }
 });
 
-/** @type {Record<string, any> | undefined} */
-let app;
-afterEach(() => {
-  if (app) unmount(app);
-  app = undefined;
-  document.body.innerHTML = '';
-  vi.unstubAllEnvs();
-});
-
-/** @param {string} apiUrl */
-async function mountApp(apiUrl) {
-  vi.stubEnv('VITE_API_URL', apiUrl);
-  const { default: App } = await import('../src/App.svelte');
-  app = mount(App, { target: document.body });
+/**
+ * @param {{ id: string }} data
+ * @param {number} [triples]
+ */
+async function saveAndTrack(data, triples) {
+  const result = await saveScenario(data, { baseUrl: api });
+  if (result.kind !== 'ok') throw new Error(JSON.stringify(result));
+  created.add(data.id);
+  expect(result.saved).toMatchObject({
+    scenario_id: data.id, repository_id: REPOSITORY, graph_iri: graphIri(data.id),
+  });
+  if (triples !== undefined) expect(result.saved.triple_count).toBe(triples);
+  return result.saved;
 }
 
-const text = () => (document.body.textContent ?? '').replace(/\s+/g, ' ');
-/** @param {() => boolean} condition */
-async function until(condition) {
-  await vi.waitFor(() => {
-    flushSync();
-    if (!condition()) throw new Error(`condition not met: ${text().slice(-600)}`);
-  }, { timeout: 20_000, interval: 50 });
-}
-/** @param {string} label */
-function click(label) {
-  const button = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
-  if (!button) throw new Error(`No button "${label}"`);
-  button.click();
-  flushSync();
-}
-/** Load contract JSON through the form's "Open JSON file…" input. @param {object} data */
-async function openJson(data) {
-  const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
-  Object.defineProperty(input, 'files', { value: [new File([JSON.stringify(data)], 'scenario.json')], configurable: true });
-  input.dispatchEvent(new Event('change', { bubbles: true }));
-  await until(() => text().includes('Loaded scenario.json'));
-}
-/** The scenario ID currently in the form, from the JSON panel. */
-const formId = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}').id;
 /** @param {string} id */
-async function saveAndTrack(id) {
-  created.add(id);
-  click('Save to GraphDB');
-  await until(() => text().includes('Saved in GraphDB') || text().includes('Not saved:') || text().includes('did not complete'));
+async function readTeam(id) {
+  const result = await fetchTeam(id, { baseUrl: api });
+  if (result.kind !== 'ok') throw new Error(JSON.stringify(result));
+  expect(result.team.scenario_id).toBe(id);
+  return result.team;
 }
-const teamRows = () =>
-  [...document.querySelectorAll('table.team tbody tr')].map((row) =>
-    [...row.querySelectorAll('td')].map((cell) => cell.textContent?.replace(/\s+/g, ' ').trim()),
-  );
+
+/** @param {import('../src/lib/api.js').TeamComposition} team */
+function teamRows(team) {
+  return team.members.map((member) => [
+    member.name, member.types.map((type) => type.label).join(', '),
+    member.roles.map((role) => role.label).join(', '),
+  ]);
+}
 
 /** @param {string} id @param {(data: any) => void} [change] */
 function scenario(id, change) {
@@ -135,17 +113,15 @@ function scenario(id, change) {
   return data;
 }
 
-describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Svelte', () => {
+describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', () => {
   it('S7: saves 29 identities, separate Team/Context constraints, seven evaluation links, and both episodes', async () => {
     const id = `${RUN}-s7`;
-    await mountApp(api);
-    await openJson({ ...structuredClone(s7), id });
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('173 triples · not saved');
+    const data = { ...structuredClone(s7), id };
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 173 },
+    });
     expect(await storedTriples(id)).toBe(0);
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 173 triples');
+    await saveAndTrack(data, 173);
     expect(await storedTriples(id)).toBe(173);
     const base = `urn:hi-app:scenario:${id}:`;
     const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
@@ -183,22 +159,19 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       [`${base}execution:recommend-artifacts`, `${base}interaction:vr-guided-tour`],
       [`${base}execution:answer-questions`, `${base}interaction:qa`],
     ]));
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(teamRows()).toHaveLength(2);
-    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s7.agents.map((agent) => agent.name)));
+    const team = await readTeam(id);
+    expect(teamRows(team)).toHaveLength(2);
+    expect(new Set(teamRows(team).map((row) => row[0]))).toEqual(new Set(s7.agents.map((agent) => agent.name)));
   }, 60_000);
 
   it('S6: saves shared Explanation, six evaluation links, and distinct episodes without linking the human explanation', async () => {
     const id = `${RUN}-s6`;
-    await mountApp(api);
-    await openJson({ ...structuredClone(s6), id });
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('150 triples · not saved');
+    const data = { ...structuredClone(s6), id };
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 150 },
+    });
     expect(await storedTriples(id)).toBe(0);
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 150 triples');
+    await saveAndTrack(data, 150);
     expect(await storedTriples(id)).toBe(150);
     const base = `urn:hi-app:scenario:${id}:`;
     const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
@@ -238,22 +211,19 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       [`${base}execution:explain-decision`, `${base}interaction:explain-allocation`],
     ]));
     expect(episodes.some((row) => row.execution.value === `${base}execution:explain-operator`)).toBe(false);
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(teamRows()).toHaveLength(2);
-    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s6.agents.map((agent) => agent.name)));
+    const team = await readTeam(id);
+    expect(teamRows(team)).toHaveLength(2);
+    expect(new Set(teamRows(team).map((row) => row[0]))).toEqual(new Set(s6.agents.map((agent) => agent.name)));
   }, 60_000);
 
   it('S5: saves all identities, shared Explanation capability, separate evaluation groups, and two dialogue episodes', async () => {
     const id = `${RUN}-s5`;
-    await mountApp(api);
-    await openJson({ ...structuredClone(s5), id });
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('139 triples · not saved');
+    const data = { ...structuredClone(s5), id };
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 139 },
+    });
     expect(await storedTriples(id)).toBe(0);
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 139 triples');
+    await saveAndTrack(data, 139);
     expect(await storedTriples(id)).toBe(139);
     const base = `urn:hi-app:scenario:${id}:`;
     const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
@@ -290,22 +260,19 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(episodes).toHaveLength(2);
     expect(new Set(episodes.map((row) => row.execution.value))).toEqual(new Set([`${base}execution:explain-ai`, `${base}execution:explain-human`]));
     expect(new Set(episodes.map((row) => row.interaction.value))).toEqual(new Set([`${base}interaction:clinical-dialogue`]));
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(teamRows()).toHaveLength(2);
-    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s5.agents.map((agent) => agent.name)));
+    const team = await readTeam(id);
+    expect(teamRows(team)).toHaveLength(2);
+    expect(new Set(teamRows(team).map((row) => row[0]))).toEqual(new Set(s5.agents.map((agent) => agent.name)));
   }, 60_000);
 
   it('S4: saves all 26 identities, six evaluation links, and the specific explanation interaction', async () => {
     const id = `${RUN}-s4`;
-    await mountApp(api);
-    await openJson({ ...structuredClone(s4), id });
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('154 triples · not saved');
+    const data = { ...structuredClone(s4), id };
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 154 },
+    });
     expect(await storedTriples(id)).toBe(0);
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 154 triples');
+    await saveAndTrack(data, 154);
     expect(await storedTriples(id)).toBe(154);
     const base = `urn:hi-app:scenario:${id}:`;
     const typed = await select(`SELECT ?entity WHERE { GRAPH <${graphIri(id)}> { ?entity a ?type } }`);
@@ -332,22 +299,19 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(episodes.map((row) => [row.execution.value, row.interaction.value])).toEqual([
       [`${base}execution:explain-recommendations`, `${base}interaction:explain-recommendations`],
     ]);
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(teamRows()).toHaveLength(2);
-    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s4.agents.map((agent) => agent.name)));
+    const team = await readTeam(id);
+    expect(teamRows(team)).toHaveLength(2);
+    expect(new Set(teamRows(team).map((row) => row[0]))).toEqual(new Set(s4.agents.map((agent) => agent.name)));
   }, 60_000);
 
   it('S3: saves distinct jurors with shared capability and evaluation, English hypotheses, and two unlinked interactions', async () => {
     const id = `${RUN}-s3`;
-    await mountApp(api);
-    await openJson({ ...structuredClone(s3), id });
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('135 triples · not saved');
+    const data = { ...structuredClone(s3), id };
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 135 },
+    });
     expect(await storedTriples(id)).toBe(0);
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 135 triples');
+    await saveAndTrack(data, 135);
     expect(await storedTriples(id)).toBe(135);
     const base = `urn:hi-app:scenario:${id}:`;
     const shared = await select(`
@@ -398,22 +362,19 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     expect(hypotheses[0].alternativeHypothesis.value).toBe(s3.experiments[0].alternative_hypothesis);
     expect(hypotheses[0].nullLanguage.value).toBe('en');
     expect(hypotheses[0].alternativeLanguage.value).toBe('en');
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(new Set(teamRows().map((row) => row[0]))).toEqual(new Set(s3.agents.map((agent) => agent.name)));
-    expect(teamRows()).toHaveLength(3);
+    const team = await readTeam(id);
+    expect(new Set(teamRows(team).map((row) => row[0]))).toEqual(new Set(s3.agents.map((agent) => agent.name)));
+    expect(teamRows(team)).toHaveLength(3);
   }, 60_000);
 
   it('S2: previews, saves, and queries the complete reconstruction without merging entities', async () => {
     const id = `${RUN}-s2`;
-    await mountApp(api);
-    await openJson({ ...structuredClone(s2), id });
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('195 triples · not saved');
+    const data = { ...structuredClone(s2), id };
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 195 },
+    });
     expect(await storedTriples(id)).toBe(0);
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 195 triples');
+    await saveAndTrack(data, 195);
     expect(await storedTriples(id)).toBe(195);
     const base = `urn:hi-app:scenario:${id}:`;
     const requirements = await select(`
@@ -446,24 +407,18 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
     `);
     expect(participants).toHaveLength(2);
     expect(participants.every((row) => !row.execution)).toBe(true);
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(teamRows().map((row) => row[0])).toEqual(['Human technician', 'Robot manipulator']);
+    const team = await readTeam(id);
+    expect(teamRows(team).map((row) => row[0])).toEqual(['Human technician', 'Robot manipulator']);
   }, 60_000);
 
   it('S1: preview, save, CQ1, and the Workbench link for the saved graph', async () => {
     const id = `${RUN}-s1`;
-    await mountApp(api);
-    await openJson(scenario(id));
-
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    expect(text()).toContain('Not saved.');
-    expect(await storedTriples(id)).toBe(0); // Previewing stores nothing.
-
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 127 triples');
-    expect(text()).toContain(graphIri(id));
+    const data = scenario(id);
+    expect(await requestPreview(data, { baseUrl: api })).toMatchObject({
+      kind: 'ok', preview: { triple_count: 127 },
+    });
+    expect(await storedTriples(id)).toBe(0);
+    const saved = await saveAndTrack(data, 127);
     expect(await storedTriples(id)).toBe(127);
 
     const comments = await select(`
@@ -479,28 +434,25 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       ...example.tasks.map((task) => [`urn:hi-app:scenario:${id}:task:${task.id}`, task.description]),
     ].sort());
 
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(text()).toContain('2 members · Personal assistant HI system');
-    expect(teamRows()).toEqual([
+    const team = await readTeam(id);
+    expect(team.use_case_name).toBe('Personal assistant HI system');
+    expect(teamRows(team)).toEqual([
       ['AI assistant', 'Artificial Agent', 'System Assistant Role'],
       ['Human user', 'Human Agent', 'User Role'],
     ]);
 
-    const link = /** @type {HTMLAnchorElement} */ (document.querySelector('.save a.button'));
-    expect(link.href).toBe(`${GRAPHDB}/resource?uri=${encodeURIComponent(graphIri(id))}&role=context`);
+    const link = saved.workbench_graph_url;
+    expect(link).toBe(`${GRAPHDB}/resource?uri=${encodeURIComponent(graphIri(id))}&role=context`);
     // Browsers request HTML and get the Workbench page (other Accept headers get RDF4J's 400).
-    const page = await fetch(link.href, { headers: { Accept: 'text/html' } });
+    const page = await fetch(link, { headers: { Accept: 'text/html' } });
     expect(page.status).toBe(200);
     expect(page.headers.get('content-type')).toContain('text/html');
   }, 60_000);
 
   it('persists only selected goal requirements while retaining every task and execution', async () => {
     const id = `${RUN}-goal-subset`;
-    await mountApp(api);
-    await openJson(scenario(id, (data) => { data.goal.required_tasks = ['data-collection']; }));
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 125 triples');
+    const data = scenario(id, (draft) => { draft.goal.required_tasks = ['data-collection']; });
+    await saveAndTrack(data, 125);
     expect(await storedTriples(id)).toBe(125);
     const required = await select(`
       SELECT ?task WHERE { GRAPH <${graphIri(id)}> {
@@ -520,15 +472,13 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
       } }
     `);
     expect(executions.map((row) => row.execution.value)).toEqual([`urn:hi-app:scenario:${id}:execution:explanation`]);
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('CQ1 over the saved graph'));
-    expect(teamRows()).toHaveLength(2);
+    const team = await readTeam(id);
+    expect(teamRows(team)).toHaveLength(2);
   }, 60_000);
 
   it('stores one shared capability with explicit links to multiple agents and tasks', async () => {
     const id = `${RUN}-shared-capability`;
-    await mountApp(api);
-    await openJson(scenario(id, (data) => {
+    const data = scenario(id, (data) => {
       delete data.executions; // Exercise the capability workflow without execution assignments.
       delete data.interactions;
       delete data.experiments;
@@ -538,8 +488,8 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
         id: 'shared', concept: 'ReasoningCapability',
         agents: ['human-user', 'ai-assistant'], tasks: ['data-collection', 'conflict-resolution'],
       }];
-    }));
-    await saveAndTrack(id);
+    });
+    await saveAndTrack(data);
     expect(await storedTriples(id)).toBe(55);
     const rows = await select(`
       PREFIX hi: <https://w3id.org/hi-ontology#>
@@ -561,8 +511,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
 
   it('stores distinct executions for one task with explicit performers, goals, and optional methods', async () => {
     const id = `${RUN}-executions`;
-    await mountApp(api);
-    await openJson(scenario(id, (data) => {
+    const data = scenario(id, (data) => {
       delete data.interactions;
       delete data.experiments;
       delete data.evaluations;
@@ -571,8 +520,8 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
         { id: 'second', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'ai-assistant' },
         { id: 'repeat', concept: 'DataCollectionTaskExecution', task: 'data-collection', agent: 'human-user' },
       ];
-    }));
-    await saveAndTrack(id);
+    });
+    await saveAndTrack(data);
     expect(await storedTriples(id)).toBe(86);
     const rows = await select(`
       PREFIX hi: <https://w3id.org/hi-ontology#>
@@ -597,8 +546,7 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
 
   it('persists shared evaluations, multiple metrics, descriptions, and tagged hypotheses', async () => {
     const id = `${RUN}-assessment`;
-    await mountApp(api);
-    await openJson(scenario(id, (data) => {
+    const data = scenario(id, (data) => {
       const metrics = ['FairOutcomeMetric', 'UndueInfluenceMetric', 'ExplanationClarityMetric'];
       data.experiments = [{
         ...data.experiments[0], id: 'shared', concept: 'DeliberationSupportExperiment', metrics,
@@ -608,8 +556,8 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
         id: 'shared', concept: 'AIInterventionImpactEvaluation', metrics, experiment: 'shared',
         executions: data.executions.map((/** @type {{ id: string }} */ e) => e.id), description: 'Shared evaluation description.',
       }];
-    }));
-    await saveAndTrack(id);
+    });
+    await saveAndTrack(data);
     expect(await storedTriples(id)).toBe(112);
     const base = `urn:hi-app:scenario:${id}:`;
     const rows = await select(`
@@ -641,16 +589,15 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
 
   it('persists multiple interactions, three participants, and many-to-many execution links', async () => {
     const id = `${RUN}-interactions`;
-    await mountApp(api);
-    await openJson(scenario(id, (data) => {
+    const data = scenario(id, (data) => {
       data.agents.push({ ...data.agents[0], id: 'second-human' });
       data.interactions = [
         { id: 'shared', intent: 'ExplanationIntent', modality: 'VerbalDialogueModality', agents: ['ai-assistant', 'human-user', 'second-human'], executions: ['explanation', 'conflict-resolution'], description: 'Shared English description.' },
         { id: 'unlinked', intent: 'DeliberationIntent', modality: 'TextChatModality', agents: ['ai-assistant', 'human-user'], executions: [] },
         { id: 'also-shared', intent: 'ExplanationIntent', modality: 'VerbalDialogueModality', agents: ['ai-assistant', 'human-user'], executions: ['explanation'] },
       ];
-    }));
-    await saveAndTrack(id);
+    });
+    await saveAndTrack(data);
     expect(await storedTriples(id)).toBe(146);
     const base = `urn:hi-app:scenario:${id}:`;
     const rows = await select(`
@@ -676,95 +623,60 @@ describe.skipIf(!graphdbReady)('Svelte → FastAPI → GraphDB → SPARQL → Sv
 
   it('three agents: CQ1 lists every member with its own roles', async () => {
     const id = `${RUN}-three`;
-    await mountApp(api);
-    await openJson(scenario(id, (data) => {
+    const data = scenario(id, (data) => {
       data.agents.push({ id: 'second-human', name: 'Clinician', kind: 'human', roles: ['HumanUserRole', 'ClinicianRole'] });
-    }));
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB · repository hi · 133 triples');
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('3 members'));
-    expect(teamRows()).toEqual([
+    });
+    await saveAndTrack(data, 133);
+    const team = await readTeam(id);
+    expect(teamRows(team)).toEqual([
       ['AI assistant', 'Artificial Agent', 'System Assistant Role'],
       ['Human user', 'Human Agent', 'User Role'],
       ['Clinician', 'Human Agent', 'Clinician Role, User Role'],
     ]);
   }, 60_000);
 
-  it('edits after saving: no stale results, and saving creates a new scenario without touching the old one', async () => {
+  it('saves revised data under a fresh scenario ID without touching the old graph', async () => {
     const id = `${RUN}-edit`;
-    await mountApp(api);
-    await openJson(scenario(id));
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB');
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('2 members'));
-
-    const name = /** @type {HTMLInputElement} */ (document.querySelector('#agent-human-user'));
-    name.value = 'Renamed participant';
-    name.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
-    expect(text()).not.toContain('Saved in GraphDB');
-    expect(document.querySelector('table.team')).toBeNull();
-    expect(document.querySelector('.save a.button')).toBeNull();
-    expect(document.querySelector('.json-panel a')?.textContent).toBe('Open JSON in new tab');
-    expect(text()).toContain(`The form has changed since scenario ${id} was saved`);
-
-    click('Save as new scenario');
-    await until(() => text().includes('Saved in GraphDB'));
-    const newId = formId();
-    created.add(newId);
-    expect(newId).not.toBe(id);
-    expect(text()).toContain(graphIri(newId));
+    await saveAndTrack(scenario(id), 127);
+    const newId = `${id}-revised`;
+    const revised = scenario(newId, (data) => { data.agents[0].name = 'Renamed participant'; });
+    await saveAndTrack(revised, 127);
     expect(await storedLabel(newId, 'human-user')).toEqual(['Renamed participant']);
-    expect(await storedLabel(id, 'human-user')).toEqual(['Human user']); // Original untouched.
+    expect(await storedLabel(id, 'human-user')).toEqual(['Human user']);
     expect(await storedTriples(id)).toBe(127);
   }, 60_000);
 
   it('409: an existing ID is reported and never overwritten', async () => {
     const id = `${RUN}-conflict`;
-    await mountApp(api);
-    await openJson(scenario(id));
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB');
-    unmount(/** @type {any} */ (app));
-    app = undefined;
-
-    // A new page session with different content under the same ID.
-    await mountApp(api);
-    await openJson(scenario(id, (data) => { data.agents[0].name = 'Different person'; }));
-    click('Save to GraphDB');
-    await until(() => text().includes('Not saved: this scenario ID already exists in GraphDB.'));
-    expect(text()).not.toContain('Saved in GraphDB');
+    await saveAndTrack(scenario(id), 127);
+    const conflicting = scenario(id, (data) => { data.agents[0].name = 'Different person'; });
+    expect(await saveScenario(conflicting, { baseUrl: api })).toMatchObject({
+      kind: 'rejected', status: 409, error: { code: 'scenario_exists' },
+    });
     expect(await storedLabel(id, 'human-user')).toEqual(['Human user']);
     expect(await storedTriples(id)).toBe(127);
-    expect(document.querySelector('.save button.primary')?.textContent?.trim()).toBe('Save as new scenario');
   }, 60_000);
 
   it('503: GraphDB unavailable is reported as not saved, while preview still works', async () => {
     const id = `${RUN}-down`;
-    await mountApp(apiWithoutGraphDB);
-    await openJson(scenario(id));
-    click('Validate & preview RDF');
-    await until(() => text().includes('Valid:'));
-    click('Save to GraphDB');
-    await until(() => text().includes('Not saved: GraphDB is unavailable.'));
-    expect(text()).toContain('never overwritten');
-    expect(text()).not.toContain('Saved in GraphDB');
+    const data = scenario(id);
+    const options = { baseUrl: apiWithoutGraphDB };
+    expect(await requestPreview(data, options)).toMatchObject({
+      kind: 'ok', preview: { triple_count: 127 },
+    });
+    expect(await saveScenario(data, options)).toMatchObject({
+      kind: 'rejected', status: 503, error: { code: 'graphdb_unavailable' },
+    });
     expect(await storedTriples(id)).toBe(0);
   }, 60_000);
 
   it('a failed CQ1 query does not undo a successful save', async () => {
     const id = `${RUN}-cq1-down`;
-    await mountApp(api);
-    await openJson(scenario(id));
-    await saveAndTrack(id);
-    expect(text()).toContain('Saved in GraphDB');
-    vi.stubEnv('VITE_API_URL', apiWithoutGraphDB); // GraphDB becomes unreachable for the query.
-    click('Show team composition (CQ1)');
-    await until(() => text().includes('The team query failed. The scenario is still saved.'));
-    expect(text()).toContain('GraphDB is unavailable');
-    expect(text()).toContain('Saved in GraphDB');
+    await saveAndTrack(scenario(id), 127);
+    expect(await fetchTeam(id, { baseUrl: apiWithoutGraphDB })).toMatchObject({
+      kind: 'rejected', status: 503, error: { code: 'graphdb_unavailable' },
+    });
     expect(await storedTriples(id)).toBe(127);
+    expect((await readTeam(id)).members).toHaveLength(2);
   }, 60_000);
 });

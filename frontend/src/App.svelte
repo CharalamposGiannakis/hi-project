@@ -1,6 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import { issuePath } from './lib/api.js';
+  import { createInterpretationDocument, readInterpretationDocument, sampleDescriptions, simulateInterpretation } from './lib/interpretation.js';
   import { createJsonSource } from './lib/json-viewer-channel.js';
   import example from '../../examples/s1.json';
   import EditorSection from './lib/EditorSection.svelte';
@@ -10,7 +11,7 @@
   import ReferenceChecklist from './lib/ReferenceChecklist.svelte';
   import ReferenceSelect from './lib/ReferenceSelect.svelte';
   import RdfPreview from './lib/RdfPreview.svelte';
-  import ScenarioSave from './lib/ScenarioSave.svelte';
+  import ScenarioWizard from './lib/ScenarioWizard.svelte';
   import {
     emptyScenario,
     findConcept,
@@ -28,9 +29,17 @@
     validate,
   } from './lib/scenario.js';
 
-  const initial = emptyScenario();
-  let scenario = $state(initial);
-  // Inline errors appear once the researcher asks for a check, not while typing a new form.
+  const initialScenario = emptyScenario();
+  let scenario = $state(initialScenario);
+  let emptyEditor = $state(JSON.stringify(initialScenario));
+  let loadedCandidate = $state(false);
+  let mode = $state(/** @type {'describe' | 'structured'} */ ('describe'));
+  let wizardKey = $state(0);
+  let answers = $state(/** @type {import('./lib/interpretation.js').Answers} */ ({}));
+  /** @type {import('./lib/interpretation.js').Interpretation} */
+  const noInterpretation = { status: 'not_interpreted', diagnostics: [] };
+  let interpretation = $state(noInterpretation);
+  let simulatedEditor = '';
   let showErrors = $state(false);
   let status = $state('');
   let loadError = $state('');
@@ -40,21 +49,23 @@
   let revealRequest = $state(0);
   let viewerUrl = $state('');
   let viewerError = $state('');
-  // Backend feedback only applies to the exact submitted JSON.
-  let backendFeedback = $state(/** @type {{ json: string, issues: import('./lib/scenario.js').Issue[] } | null} */ (null));
+  // Object identity ties a result to one editor revision, even if edits are later undone.
+  let backendFeedback = $state.raw(/** @type {{ target: object, issues: import('./lib/scenario.js').Issue[] } | null} */ (null));
 
   let issues = $derived(validate(scenario));
-  let json = $derived(serialize(scenario));
-  let visibleIssues = $derived(showErrors ? [...issues, ...(backendFeedback?.json === json ? backendFeedback.issues : [])] : []);
-  let attentionIssues = $derived(showErrors ? visibleIssues : issues);
+  let editorJson = $derived(JSON.stringify(scenario));
+  let contract = $derived(toContract(scenario));
+  let validationTarget = $derived({ contract, editorJson });
+  let candidate = $derived(loadedCandidate || editorJson !== emptyEditor ? contract : null);
+  let json = $derived(JSON.stringify(createInterpretationDocument(answers, candidate, interpretation), null, 2));
+  let visibleIssues = $derived(showErrors ? [...issues, ...(backendFeedback?.target === validationTarget ? backendFeedback.issues : [])] : []);
   let sectionIssues = $derived(Object.fromEntries(sectionIds.map((id) => [id, visibleIssues.filter((issue) => sectionFor(issue.path) === id)])));
   let experimentOptions = $derived(scenario.experiments.map((e) => ({ id: e.id, name: vocabularyLabel('Experiment', findConcept('Experiment', e.concept)?.label ?? 'Experiment') })));
   let executionOptions = $derived(scenario.executions.map((e) => ({
     id: e.id,
     name: `${vocabularyLabel('TaskExecution', findConcept('TaskExecution', e.concept)?.label ?? 'Execution')} · ${scenario.agents.find((a) => a.id === e.agent)?.name || e.agent} · ${scenario.tasks.find((t) => t.id === e.task)?.name || e.task}`,
   })));
-  // JSON at the last new/load, to ask before discarding edits.
-  let pristine = $state(serialize(initial));
+  let pristine = JSON.stringify(createInterpretationDocument({}, null, noInterpretation), null, 2);
 
   onMount(() => {
     try {
@@ -67,11 +78,6 @@
       viewerError = 'The separate JSON viewer is unavailable in this browser. Use Copy or Download JSON instead.';
     }
   });
-
-  /** @param {import('./lib/scenario.js').Scenario} value */
-  function serialize(value) {
-    return JSON.stringify(toContract(value), null, 2);
-  }
 
   /** @param {string} path */
   function errorFor(path) {
@@ -93,14 +99,14 @@
     revealRequest += 1;
   }
 
-  /** @param {import('./lib/api.js').InputIssue[]} errors @param {string} sentJson */
-  function revealBackendErrors(errors, sentJson) {
-    if (sentJson !== json) return;
+  /** @param {import('./lib/api.js').InputIssue[]} errors @param {object} target */
+  function revealBackendErrors(errors, target) {
+    if (target !== validationTarget) return;
     if (errors.length === 0) {
       backendFeedback = null;
       return;
     }
-    backendFeedback = { json: sentJson, issues: errors.map((issue) => ({
+    backendFeedback = { target, issues: errors.map((issue) => ({
       path: issuePath(issue.location), message: issue.message,
     })) };
     revealErrors();
@@ -115,6 +121,7 @@
   async function goToIssue(path) {
     const section = sectionFor(path);
     if (!sectionIds.includes(section)) return;
+    mode = 'structured';
     expanded[section] = true;
     await tick();
     const root = document.getElementById(`section-${section}`);
@@ -132,7 +139,7 @@
       const controls = [...field.querySelectorAll('input, select, textarea')];
       // For an indexed checklist error, focus the referenced option, not the
       // first checkbox. Unavailable options fall back to the first control or group.
-      const value = path.split('.').reduce((value, part) => value?.[part], JSON.parse(json));
+      const value = path.split('.').reduce((value, part) => value?.[part], /** @type {any} */ (contract));
       target = controls.find((control) => control instanceof HTMLInputElement && control.value === value) ?? controls[0] ?? field;
     }
     if (target instanceof HTMLElement) {
@@ -148,24 +155,41 @@
 
   function startNew() {
     if (!confirmReplace('Discard the current scenario and start a new one?')) return;
-    scenario = emptyScenario();
-    pristine = serialize(scenario);
-    showErrors = false;
+    loadDraft(null, {}, noInterpretation);
+    status = '';
+  }
+
+  /**
+   * @param {import('./lib/scenario.js').Scenario | null} editor
+   * @param {import('./lib/interpretation.js').Answers} sourceAnswers
+   * @param {import('./lib/interpretation.js').Interpretation} findings
+   */
+  function loadDraft(editor, sourceAnswers, findings) {
+    scenario = editor ?? emptyScenario();
+    emptyEditor = JSON.stringify(scenario);
+    loadedCandidate = editor !== null;
+    answers = sourceAnswers;
+    interpretation = findings;
+    simulatedEditor = '';
+    mode = editor ? 'structured' : 'describe';
+    wizardKey += 1;
+    showErrors = editor !== null;
     expanded = compactSections();
     backendFeedback = null;
     loadError = '';
-    status = '';
+    pristine = json;
   }
 
   /** @param {unknown} data @param {string} source */
   function load(data, source) {
     try {
-      scenario = fromContract(data);
-      pristine = serialize(scenario);
-      showErrors = true;
-      expanded = compactSections();
-      backendFeedback = null;
-      loadError = '';
+      const draft = readInterpretationDocument(data);
+      if (draft) {
+        const editor = draft.scenario === null ? null : fromContract(draft.scenario, { allowDraft: true });
+        loadDraft(editor, draft.source_description, draft.interpretation);
+      } else {
+        loadDraft(fromContract(data), {}, noInterpretation);
+      }
       status = `Loaded ${source}.`;
     } catch (error) {
       loadError = `Could not load ${source}:\n${error instanceof Error ? error.message : error}`;
@@ -181,7 +205,57 @@
     const input = /** @type {HTMLInputElement} */ (event.currentTarget);
     const file = input.files?.[0];
     input.value = '';
-    if (file && confirmReplace(`Replace the current scenario with ${file.name}?`)) load(await file.text(), file.name);
+    if (!file) return;
+    try {
+      const content = await file.text();
+      if (confirmReplace(`Replace the current draft with ${file.name}?`)) load(JSON.parse(content), file.name);
+    } catch {
+      loadError = `Could not read ${file.name} as JSON.`;
+    }
+  }
+
+  function markSourceChanged() {
+    if (interpretation.status !== 'not_interpreted') interpretation.source_changed = true;
+  }
+
+  /** @param {import('./lib/interpretation.js').QuestionId} id @param {string} value */
+  function answer(id, value) {
+    if ((answers[id] ?? '') === value) return;
+    if (value) answers[id] = value;
+    else delete answers[id];
+    markSourceChanged();
+  }
+
+  /** @param {'complete' | 'incomplete'} kind */
+  function loadDescription(kind) {
+    const sample = sampleDescriptions[kind];
+    if (JSON.stringify(answers) === JSON.stringify(sample)) return;
+    if (Object.values(answers).some((value) => value.length > 0)
+        && !confirm('Replace your current description with the sample text?')) return;
+    answers = { ...sample };
+    markSourceChanged();
+  }
+
+  async function interpret() {
+    const result = simulateInterpretation(answers);
+    if (!result.scenario) {
+      interpretation = result.interpretation;
+      return;
+    }
+    if (candidate && editorJson !== simulatedEditor
+        && !confirm('Replace the current structured scenario, including any edits, with the simulated candidate?')) return;
+
+    scenario = fromContract(result.scenario, { allowDraft: true });
+    simulatedEditor = JSON.stringify(scenario);
+    loadedCandidate = true;
+    interpretation = result.interpretation;
+    showErrors = false;
+    expanded = compactSections();
+    backendFeedback = null;
+    status = '';
+    mode = 'structured';
+    await tick();
+    document.getElementById('structured-mode')?.focus();
   }
 
   function addTask() {
@@ -203,41 +277,52 @@
   }
 
   function downloadJson() {
-    revealErrors();
-    if (issues.length) {
-      status = 'Resolve the listed items before downloading.';
-      return;
-    }
-    const url = URL.createObjectURL(new Blob([json + '\n'], { type: 'application/json' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `scenario-${scenario.id}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    download(json, `scenario-${candidate?.id ?? 'description'}-draft.json`);
     pristine = json;
     status = 'JSON downloaded to your computer.';
+  }
+
+  function downloadCanonical() {
+    download(JSON.stringify(contract, null, 2), `scenario-${scenario.id}.json`);
+    status = 'Canonical JSON downloaded to your computer.';
+  }
+
+  /** @param {string} content @param {string} filename */
+  function download(content, filename) {
+    const url = URL.createObjectURL(new Blob([content + '\n'], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 </script>
 
 <header>
   <h1>HI Scenario Builder</h1>
   <p class="lead">
-    Describe a Hybrid Intelligence scenario using the HINT vocabulary.
+    Describe a Hybrid Intelligence scenario, refine its HINT concepts, and validate the resulting RDF.
   </p>
   <div class="toolbar">
     <button type="button" onclick={startNew}>New scenario</button>
     <button type="button" onclick={loadExample}>Load S1 example</button>
     <label class="button file-button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} /></label>
   </div>
-  <p class="notice">
-    Previewing stores nothing. Only <strong>Save to GraphDB</strong> stores a scenario, as a new graph that cannot
-    be edited or overwritten afterwards. Download the JSON to keep a draft.
-  </p>
   {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
 </header>
 
 <main>
-  <form onsubmit={(e) => e.preventDefault()} novalidate>
+  <div class="scenario-editor">
+    <div class="toolbar input-methods" role="group" aria-label="Scenario input method">
+      <button type="button" aria-controls="description-panel" aria-pressed={mode === 'describe'} onclick={() => (mode = 'describe')}>Describe with AI</button>
+      <button type="button" id="structured-mode" aria-controls="structured-panel" aria-pressed={mode === 'structured'} onclick={() => (mode = 'structured')}>Structured Editor</button>
+    </div>
+    <div id="description-panel" hidden={mode !== 'describe'}>
+      {#key wizardKey}
+        <ScenarioWizard {answers} onAnswer={answer} onInterpret={interpret} onLoadExample={loadDescription} />
+      {/key}
+    </div>
+    <form id="structured-panel" hidden={mode !== 'structured'} onsubmit={(e) => e.preventDefault()} novalidate>
     <div class="toolbar section-controls" aria-label="Editor sections">
       <button type="button" onclick={() => setAllSections(true)}>Expand all</button>
       <button type="button" onclick={() => setAllSections(false)}>Collapse all</button>
@@ -450,36 +535,43 @@
       {/each}
       <button type="button" onclick={() => scenario.interactions.push(newInteraction(scenario.interactions.map((interaction) => interaction.id)))}>Add interaction</button>
     </EditorSection>
-  </form>
+    </form>
+  </div>
 
   <div class="sidebar">
-    <aside aria-label="Preview, save, and validation">
-      <RdfPreview {json} issueCount={issues.length} onIncomplete={revealErrors} onValidationIssues={revealBackendErrors} />
-      <ScenarioSave
-        {json}
-        issueCount={issues.length}
-        onIncomplete={revealErrors}
-        onValidationIssues={revealBackendErrors}
-        onNewScenarioId={(id) => (scenario.id = id)}
-      />
-      {#if attentionIssues.length === 0}
-        <p class="ok">Form complete (local check).</p>
-      {:else}
-        <p class="warn">
-          Draft — {attentionIssues.length} {attentionIssues.length === 1 ? 'item needs' : 'items need'} attention.
-          <button type="button" class="link" onclick={revealErrors}>Show in form</button>
-        </p>
-        {#if showErrors}
-          <ul class="issues">
-            {#each visibleIssues as issue, i (i)}
-              <li>
-                {#if sectionIds.includes(sectionFor(issue.path))}
-                  <button type="button" class="link" onclick={() => goToIssue(issue.path)}><code>{issue.path}</code> {issue.message}</button>
-                {:else}<code>{issue.path}</code> {issue.message}{/if}
-              </li>
-            {/each}
-          </ul>
-        {/if}
+    <aside aria-label="Scenario validation">
+      <RdfPreview target={validationTarget} issueCount={issues.length} onIncomplete={revealErrors} onValidationIssues={revealBackendErrors} />
+      {#if visibleIssues.length}
+        <ul class="issues" aria-label="Fields needing attention">
+          {#each visibleIssues as issue, i (i)}
+            <li>
+              {#if sectionIds.includes(sectionFor(issue.path))}
+                <button type="button" class="link" onclick={() => goToIssue(issue.path)}><code>{issue.path}</code> {issue.message}</button>
+              {:else}<code>{issue.path}</code> {issue.message}{/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if interpretation.status !== 'not_interpreted'}
+        <section class="interpretation-findings" aria-labelledby="interpretation-heading">
+          <h3 id="interpretation-heading">Simulated interpretation</h3>
+          {#if interpretation.source_changed}
+            <p class="warn">The description has changed since the last simulation.</p>
+          {/if}
+          <p class="hint" role="status">
+            {interpretation.status === 'simulated_complete' ? 'The simulation generated a candidate. Review it in the Structured Editor.'
+              : interpretation.status === 'simulated_incomplete' ? 'The simulation generated a partial candidate and flagged the following gap.'
+              : candidate ? 'The simulation kept your existing structured scenario.'
+              : 'The description is available in your JSON draft.'}
+          </p>
+          {#if interpretation.diagnostics.length}
+            <ul class="issues">
+              {#each interpretation.diagnostics as diagnostic}
+                <li>{diagnostic.message}</li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
       {/if}
     </aside>
 
@@ -492,11 +584,13 @@
       <div class="toolbar">
         <button type="button" onclick={copyJson}>Copy</button>
         <button type="button" onclick={downloadJson}>Download JSON</button>
+        {#if candidate && issues.length === 0}
+          <button type="button" onclick={downloadCanonical}>Download canonical JSON</button>
+        {/if}
       </div>
       {#if status}<p class="status" role="status">{status}</p>{/if}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need access to the scrollable JSON.) -->
       <pre class="json" id="scenario-json" role="region" tabindex="0" aria-label="Scenario JSON (read-only)">{json}</pre>
-      <p class="hint">IDs are generated once and kept when you rename entities; they identify the RDF resources.</p>
     </section>
   </div>
 </main>

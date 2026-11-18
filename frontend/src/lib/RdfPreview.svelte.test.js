@@ -8,32 +8,37 @@ const ok = {
   scenario_id: 's1', rdf_format: 'nt', rdf: '<urn:x> <urn:y> "z" .\n', triple_count: 1,
   validation: { conforms: true, report: 'Validation Report\nConforms: True\n' },
 };
+const shaclError = {
+  code: 'shacl_failed', message: 'Generated RDF failed SHACL validation.',
+  issues: [{ location: ['body', 'agents', 0, 'name'], message: 'String should match pattern', type: 'x' }],
+  shacl_report: 'Conforms: False\nA HITeam must have at least one hi:hasGoal.',
+};
 
-/** @type {Record<string, any> | undefined} */
+/** @type {ReturnType<typeof mount> | undefined} */
 let component;
-afterEach(() => {
-  if (component) unmount(component);
+afterEach(async () => {
+  if (component) await unmount(component);
   component = undefined;
   document.body.innerHTML = '';
 });
 
-/** @param {Record<string, any>} [overrides] */
+/** @param {Partial<import('svelte').ComponentProps<typeof RdfPreview>>} [overrides] */
 function render(overrides = {}) {
-  const props = $state({ json: '{"id":"s1"}', issueCount: 0, onIncomplete: () => {}, ...overrides });
-  /** @type {any} */
-  const anyProps = props;
-  component = mount(RdfPreview, { target: document.body, props: anyProps });
+  const props = $state({ target: { contract: { id: 's1' } }, issueCount: 0, onIncomplete: () => {}, ...overrides });
+  component = mount(RdfPreview, { target: document.body, props });
+  flushSync();
   return props;
 }
 
 const button = () => /** @type {HTMLButtonElement} */ (document.querySelector('button.primary'));
+const status = () => document.querySelector('[data-validation-status]')?.textContent;
 const text = () => document.body.textContent ?? '';
 
-/** @param {() => boolean} condition */
-async function until(condition) {
+/** @param {string} expected */
+async function waitForStatus(expected) {
   await vi.waitFor(() => {
     flushSync();
-    if (!condition()) throw new Error('condition not met');
+    expect(status()).toBe(expected);
   });
 }
 
@@ -50,61 +55,91 @@ describe('RdfPreview', () => {
     const fetch = vi.fn();
     const onIncomplete = vi.fn();
     render({ issueCount: 3, fetch, onIncomplete });
+    expect(status()).toBe('Not validated');
+    expect(button().textContent).toBe('Validate Scenario');
     button().click();
     flushSync();
     expect(fetch).not.toHaveBeenCalled();
     expect(onIncomplete).toHaveBeenCalledOnce();
-    expect(text()).toContain('3 remaining');
+    expect(status()).toBe('Needs corrections');
+    expect(text()).toContain('Review the highlighted fields');
   });
 
-  it('shows a loading state, then the backend RDF, and states that nothing is saved', async () => {
+  it('validates on request and exposes RDF and the SHACL report after success', async () => {
     const { fetch, respond } = pendingFetch();
     render({ fetch });
+    expect(fetch).not.toHaveBeenCalled();
     button().click();
     flushSync();
     expect(button().disabled).toBe(true);
-    expect(button().textContent).toContain('Validating');
+    expect(status()).toBe('Validating…');
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/scenarios/preview'),
+      expect.objectContaining({ method: 'POST', body: '{"id":"s1"}' }));
+
     respond(new Response(JSON.stringify(ok)));
-    await until(() => text().includes('Valid:'));
+    await waitForStatus('Valid');
     expect(button().disabled).toBe(false);
-    expect(text()).toContain('1 triples · not saved');
+    expect(text()).toContain('Generated 1 triple.');
+    expect(text()).toContain('Scientific approval requires a separate review.');
+    const rdfPreview = [...document.querySelectorAll('summary')].find((element) => element.textContent === 'RDF preview');
+    rdfPreview?.click();
+    expect(rdfPreview?.closest('details')?.open).toBe(true);
     expect(document.querySelector('pre.rdf')?.textContent).toBe(ok.rdf);
-    expect(text()).toContain('Previewing does not save the scenario.');
+    expect(document.querySelector('pre.report')?.textContent).toBe(ok.validation.report);
   });
 
-  it('hides a success once the scenario changes, including edits made during the request', async () => {
-    const { fetch, respond } = pendingFetch();
-    const props = render({ fetch });
+  it('requires fresh validation after an edit and after reverting to the same contract', async () => {
+    const props = render({ fetch: vi.fn(async () => new Response(JSON.stringify(ok))) });
     button().click();
-    props.json = '{"id":"s1","edited":true}';
-    respond(new Response(JSON.stringify(ok)));
-    await until(() => text().includes('changed since the last preview'));
-    expect(document.querySelector('pre.rdf')).toBeNull();
-    expect(text()).not.toContain('Valid:');
+    await waitForStatus('Valid');
 
-    props.json = '{"id":"s1"}'; // The exact JSON that was validated: its result applies again.
+    props.target = { contract: { id: 's1', edited: true } };
     flushSync();
-    expect(text()).toContain('Valid:');
+    expect(status()).toBe('Not validated');
+    expect(text()).toContain('The scenario has changed.');
+    expect(document.querySelector('pre.rdf')).toBeNull();
+
+    props.target = { contract: { id: 's1' } };
+    flushSync();
+    expect(status()).toBe('Not validated');
+    expect(document.querySelector('pre.rdf')).toBeNull();
+
+    button().click();
+    await waitForStatus('Valid');
   });
 
-  it('lists structural issues and SHACL reports from the backend', async () => {
-    const error = {
-      code: 'shacl_failed', message: 'Generated RDF failed SHACL validation.',
-      issues: [{ location: ['body', 'agents', 0, 'name'], message: 'String should match pattern', type: 'x' }],
-      shacl_report: 'Conforms: False\nA HITeam must have at least one hi:hasGoal.',
-    };
-    render({ fetch: vi.fn(async () => new Response(JSON.stringify(error), { status: 422 })) });
+  it('discards in-flight results and field diagnostics once the scenario changes', async () => {
+    const { fetch, respond } = pendingFetch();
+    const onValidationIssues = vi.fn();
+    const props = render({ fetch, onValidationIssues });
     button().click();
-    await until(() => text().includes('Not valid'));
-    expect(text()).toContain('agents.0.name');
-    expect(text()).toContain('A HITeam must have at least one hi:hasGoal.');
+    flushSync();
+    expect(status()).toBe('Validating…');
+    props.target = { contract: { id: 's1', edited: true } };
+    respond(new Response(JSON.stringify(shaclError), { status: 422 }));
+    await waitForStatus('Not validated');
+    expect(button().disabled).toBe(false);
+    expect(onValidationIssues).toHaveBeenCalledOnce();
+    expect(onValidationIssues).toHaveBeenCalledWith([], { contract: { id: 's1' } });
+    expect(document.querySelector('pre.report')).toBeNull();
+  });
+
+  it('forwards current field issues to the editor and displays the backend SHACL report', async () => {
+    const onValidationIssues = vi.fn();
+    const fetch = vi.fn(async () => new Response(JSON.stringify(shaclError), { status: 422 }));
+    const props = render({ fetch, onValidationIssues });
+    button().click();
+    await waitForStatus('Needs corrections');
+    expect(onValidationIssues).toHaveBeenLastCalledWith(shaclError.issues, props.target);
+    expect(text()).toContain(shaclError.message);
+    expect(document.querySelector('pre.report')?.textContent).toBe(shaclError.shacl_report);
     expect(document.querySelector('pre.rdf')).toBeNull();
   });
 
   it('explains when the backend is unavailable', async () => {
     render({ fetch: vi.fn(async () => { throw new TypeError('fetch failed'); }) });
     button().click();
-    await until(() => text().includes('Preview unavailable'));
+    await waitForStatus('Technical validation error');
     expect(text()).toContain('Is it running?');
   });
 });
