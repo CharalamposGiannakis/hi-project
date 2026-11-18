@@ -18,11 +18,9 @@ The pillars can be developed independently but share one scenario representation
 
 ### Pillar 1 — Scenario Builder with LLM Assistance
 
-Researchers create, inspect, and edit HI scenarios.
+Researchers create, inspect, edit, validate, and eventually submit HI scenarios for scientific review.
 
 **Phase 1A — Generate or regenerate**
-
-A HIDe-inspired, `step-by-step guided form collects optional natural-language answers, including free-form notes`. Researchers can navigate between questions and review the full description. Answers appear immediately as source text in the JSON preview. A **Convert to JSON using AI** action generates a candidate structured scenario and records interpretation issues and suggestions in one JSON document. The existing editor is populated from the candidate, allowing researchers to add, remove, or correct elements. The JSON preview and **Open JSON in new tab** remain available. The existing validation pipeline verifies the structured scenario; no automatic publication occurs.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -55,25 +53,52 @@ A HIDe-inspired, `step-by-step guided form collects optional natural-language an
 └────────────────────────────────┴────────────────────────┘
 ```
 
-**Phase 1B — Modify existing JSON**
+- **Input:** HIDe-inspired wizard with optional natural-language questions, progress indicators, Previous/Next navigation, and an Additional Notes section.
+- **Live JSON:** Answers immediately update the source-description portion of the JSON preview without requiring LLM interpretation.
+- **AI interpretation:** **Convert to JSON using AI** processes the complete description and produces structured scenario JSON, unresolved issues, and semantic suggestions.
+- **Structured editing:** The generated JSON populates the existing dropdown editor. Researchers can add, remove, and correct elements; the JSON updates automatically.
+- **JSON viewer:** Preserve the right-side preview, **Open JSON in new tab**, and JSON download.
+- **Regeneration:** Researchers can modify their descriptions and regenerate the scenario. Existing manual corrections must not be overwritten without confirmation.
+- **Validation:** Keep technical validation and RDF preview in the Scenario Builder. Incomplete or unsupported information must be reported rather than invented.
+- **Submission:** A future **Submit for Scientific Review** action will transfer the scenario to Pillar 2. Phase 1A does not automatically publish to GraphDB.
 
-The researcher writes exactly the same sentence:
+**Phase 1B — Deferred**
 
-"The AI assistant also analyzes medical images."
-
-But this time, the LLM receives the current JSON and the new instruction.
-
-It proposes adding the relevant capability to the existing AI agent, without modifying unrelated information.
-
-The researcher accepts the change, and the JSON updates.
+Natural-language modifications to selected parts of an existing JSON scenario. Consider only if researchers need this functionality.
 
 ### Pillar 2 — Scientific Authority Workspace
 
-**Planned.** A dedicated interface for scientific review, correction, and approval. SQLite will preserve submissions, drafts, suggestions, and review decisions. Approved scenarios will be published to GraphDB; named graphs can also support provisional exploration without mixing it with approved knowledge.
+**Planned.**
+
+- Receive submissions from the Scenario Builder.
+- Review scenarios, original descriptions, unresolved issues, and semantic suggestions.
+- Correct, approve, reject, and publish scenarios.
+- Preserve scenario revisions and scientific decisions.
+- Publish approved scenarios to GraphDB.
+
+**Open architectural decision — Persistence**
+
+Two alternatives are under consideration:
+
+1. **SQLite + GraphDB:** SQLite manages drafts, submissions, and reviews; GraphDB stores scenario knowledge.
+2. **GraphDB only:** Named graphs store scenarios and workflow metadata. A separate workflow vocabulary represents submissions, descriptions, issues, revisions, and scientific decisions. Original JSON can be preserved as an RDF literal.
+
+The decision remains open pending a small implementation experiment.
 
 ### Pillar 3 — Query & Exploration
 
-**Partially implemented.** GraphDB executes SPARQL queries; CQ1 is currently available. Planned extensions include additional supported competency questions, readable query results, and optional LLM explanations grounded in retrieved knowledge.
+**Partially implemented.**
+
+- SPARQL queries and competency questions (CQ1 currently implemented).
+- Explore approved scenarios or selected combinations of approved and provisional scenarios.
+- Use named graphs to distinguish experimental knowledge from scientifically approved knowledge.
+- Provide readable query results and potentially LLM-generated explanations grounded in retrieved data.
 
 ## Notes
+
+- Technical validation does not constitute scientific approval.
+- Experimental scenarios must remain distinguishable from approved knowledge.
+- The three pillars share one scenario representation and validation pipeline.
+- GraphDB is the existing knowledge-graph database; the workflow persistence approach remains undecided.
+
 
