@@ -9,7 +9,7 @@ import vocabulary from './hint-vocabulary.json';
  * @typedef {Entity & { description: string }} DescribedEntity
  * @typedef {DescribedEntity & { required_tasks: string[] }} Goal
  * @typedef {Entity & { domain: string }} UseCase  domain is '' when not given
- * @typedef {{ id: string, name: string, kind: 'human' | 'artificial', roles: string[] }} Agent
+ * @typedef {{ id: string, name: string, kind: 'human' | 'artificial' | '', roles: string[] }} Agent
  * @typedef {{ concept: string, phenomena: string[], constraints: string[], description: string }} Context
  * @typedef {{ id: string, concept: string, agents: string[], tasks: string[] }} Capability
  * @typedef {{ id: string, concept: string, task: string, agent: string, method: string }} Execution
@@ -204,6 +204,7 @@ export function validate(scenario) {
   agents.forEach((agent, i) => {
     checkId(`agents.${i}.id`, agent.id);
     checkName(`agents.${i}.name`, agent.name);
+    if (!agent.kind) add(`agents.${i}.kind`, 'Choose whether this agent is human or artificial.');
     if (agent.roles.length < 1) add(`agents.${i}.roles`, 'Choose at least one role.');
     agent.roles.forEach((role) => checkConcept(`agents.${i}.roles`, 'Role', role));
   });
@@ -477,8 +478,8 @@ export function fromContract(input, { allowDraft = false } = {}) {
     agents: array(root.agents, 'agents').map((value, i) => {
       const path = `agents.${i}`;
       const a = object(value, path, ['id', 'name', 'kind', 'roles']);
-      const kind = a.kind === 'human' || a.kind === 'artificial' ? a.kind : 'human';
-      if (kind !== a.kind) problems.push(`${path}.kind: must be "human" or "artificial".`);
+      const kind = a.kind === 'human' || a.kind === 'artificial' ? a.kind : '';
+      if (kind === '' && (!allowDraft || a.kind !== '')) problems.push(`${path}.kind: must be "human" or "artificial".`);
       const roles = array(a.roles, `${path}.roles`).map((r, j) => string(r, `${path}.roles.${j}`));
       return { id: string(a.id, `${path}.id`), name: string(a.name, `${path}.name`), kind, roles };
     }),

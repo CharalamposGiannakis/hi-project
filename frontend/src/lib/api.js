@@ -1,12 +1,13 @@
 // Client for the scenario endpoints in hi_scenario/api.py. The backend is the
 // authoritative validator; this module only classifies its responses.
+import { isInterpretationResponse } from './interpretation.js';
 
 /**
  * @typedef {{ location: (string | number)[], message: string, type: string }} InputIssue
  * @typedef {{
  *   code: 'invalid_request' | 'invalid_vocabulary' | 'shacl_failed' | 'internal_error'
  *     | 'scenario_exists' | 'scenario_not_found' | 'graphdb_unavailable'
- *     | 'graphdb_invalid_response' | 'graphdb_configuration',
+ *     | 'graphdb_invalid_response' | 'graphdb_configuration' | 'interpretation_unavailable' | 'interpretation_failed',
  *   message: string, issues: InputIssue[], shacl_report: string | null,
  * }} SubmissionError
  * @typedef {{
@@ -28,7 +29,7 @@
  * @typedef {{ kind: 'ok', preview: ScenarioPreview } | Failure} PreviewResult
  * @typedef {{ kind: 'ok', saved: SavedScenario } | Failure} SaveResult
  * @typedef {{ kind: 'ok', team: TeamComposition } | Failure} TeamResult
- * @typedef {{ fetch?: typeof globalThis.fetch, baseUrl?: string, timeoutMs?: number }} Options
+ * @typedef {{ fetch?: typeof globalThis.fetch, baseUrl?: string, timeoutMs?: number, signal?: AbortSignal }} Options
  */
 
 export const DEFAULT_API_URL = 'http://127.0.0.1:8000';
@@ -121,8 +122,9 @@ export function issuePath(location) {
  * @returns {Promise<{ kind: 'ok', data: T } | Failure>}
  */
 async function call(method, path, payload, isExpected, options) {
-  const { fetch: send = fetch, baseUrl = apiUrl(), timeoutMs = TIMEOUT_MS } = options;
-  const signal = AbortSignal.timeout(timeoutMs);
+  const { fetch: send = fetch, baseUrl = apiUrl(), timeoutMs = TIMEOUT_MS, signal: callerSignal } = options;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
 
   let response;
   try {
@@ -134,7 +136,7 @@ async function call(method, path, payload, isExpected, options) {
       signal,
     });
   } catch {
-    const reason = signal.aborted ? 'did not respond in time' : 'could not be reached';
+    const reason = timeout.aborted ? 'did not respond in time' : 'could not be reached';
     return { kind: 'unavailable', message: `The backend at ${baseUrl} ${reason}. Is it running?` };
   }
 
@@ -148,6 +150,15 @@ async function call(method, path, payload, isExpected, options) {
   if (response.ok && isExpected(body)) return { kind: 'ok', data: body };
   if (!response.ok && isSubmissionError(body)) return { kind: 'rejected', status: response.status, error: body };
   return { kind: 'unexpected', message: `Unexpected backend response (HTTP ${response.status}).` };
+}
+
+/**
+ * Request an interpretation of the supplied wizard text.
+ * @param {import('./interpretation.js').Answers} description
+ * @param {Options} [options]
+ */
+export function requestInterpretation(description, options = {}) {
+  return call('POST', '/scenarios/interpret', { description }, isInterpretationResponse, { timeoutMs: 140_000, ...options });
 }
 
 /**

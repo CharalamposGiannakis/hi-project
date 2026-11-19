@@ -1,6 +1,3 @@
-import s1 from '../../../examples/s1.json';
-import { fromContract, toContract } from './scenario.js';
-
 export const questions = /** @type {const} */ ([
   { id: 'use_case', title: 'Use case', prompt: 'What situation are you investigating, and in which domain?' },
   { id: 'goal', title: 'Goal', prompt: 'What does the team aim to achieve?' },
@@ -19,11 +16,26 @@ export const questions = /** @type {const} */ ([
 /**
  * @typedef {typeof questions[number]['id']} QuestionId
  * @typedef {Partial<Record<QuestionId, string>>} Answers
- * @typedef {'not_interpreted' | 'simulated_complete' | 'simulated_incomplete' | 'unsupported'} InterpretationStatus
- * @typedef {{ message: string, path?: string }} InterpretationDiagnostic
- * @typedef {{ status: InterpretationStatus, diagnostics: InterpretationDiagnostic[], source_changed?: true }} Interpretation
- * @typedef {ReturnType<typeof toContract>} ScenarioContract
+ * @typedef {'complete' | 'incomplete'} ModelStatus
+ * @typedef {'not_interpreted' | 'simulated_complete' | 'simulated_incomplete' | 'unsupported'} LegacyStatus
+ * @typedef {{ kind?: DiagnosticKind, message: string, path?: string }} InterpretationDiagnostic
+ * @typedef {{ status: ModelStatus, model: string, prompt_version: string, prompt_sha256?: string, diagnostics: InterpretationDiagnostic[] }} ModelInterpretation
+ * @typedef {(ModelInterpretation & { source_description: Answers, generated_scenario: Record<string, unknown> | null })
+ *   | { status: LegacyStatus, diagnostics: InterpretationDiagnostic[], source_description?: never, generated_scenario?: never }} InterpretationRecord
+ * @typedef {InterpretationRecord & { source_changed?: true, scenario_changed?: true }} Interpretation
+ * @typedef {{ scenario: Record<string, unknown> | null, interpretation: ModelInterpretation & { prompt_sha256: string } }} InterpretationResponse
  */
+
+export const diagnosticLabels = {
+  missing_information: 'Missing information',
+  ambiguity: 'Ambiguity',
+  unsupported_vocabulary: 'Vocabulary suggestion',
+  unsupported_relationship: 'Unsupported relationship',
+  structural: 'Structural issue',
+  technical_validation: 'Technical validation issue',
+};
+
+/** @typedef {keyof typeof diagnosticLabels} DiagnosticKind */
 
 const complete = /** @satisfies {Answers} */ ({
   use_case: 'A personal assistant HI system for health and lifestyle.',
@@ -38,53 +50,7 @@ export const sampleDescriptions = {
   incomplete: { ...complete, agents: 'A human user is on the team in the role of user. Other team members are still to be determined.' },
 };
 
-/** @param {Answers} answers @param {Answers} sample */
-function matchesSample(answers, sample) {
-  return questions.every(({ id }) => (answers[id] ?? '').trim() === (sample[id] ?? ''));
-}
-
-/**
- * This fixture maps only facts present in the supplied samples using the S1 vocabulary choices.
- * @param {Answers} answers
- * @returns {{ scenario: ScenarioContract | null, interpretation: Interpretation }}
- */
-export function simulateInterpretation(answers) {
-  const isComplete = matchesSample(answers, sampleDescriptions.complete);
-  if (!isComplete && !matchesSample(answers, sampleDescriptions.incomplete)) {
-    return {
-      scenario: null,
-      interpretation: {
-        status: 'unsupported',
-        diagnostics: [{ message: 'The simulator supports the two sample descriptions. Use the Structured Editor to enter your own scenario.' }],
-      },
-    };
-  }
-
-  const task = s1.tasks[0];
-  const { id, name, concept } = s1.goal;
-  const scenario = fromContract({
-    id: crypto.randomUUID(),
-    use_case: s1.use_case,
-    goal: { id, name, concept, required_tasks: [task.id] },
-    tasks: [task],
-    agents: isComplete ? s1.agents : s1.agents.filter((agent) => agent.kind === 'human'),
-    context: {
-      concept: s1.context.concept,
-      phenomena: ['SensorNoisePhenomenon'],
-      constraints: ['PrivacyConstraint'],
-    },
-  }, { allowDraft: !isComplete });
-
-  return {
-    scenario: toContract(scenario),
-    interpretation: {
-      status: isComplete ? 'simulated_complete' : 'simulated_incomplete',
-      diagnostics: isComplete ? [] : [{ path: 'agents', message: 'The description did not identify an artificial team member or its role.' }],
-    },
-  };
-}
-
-/** @param {Answers} answers @param {ScenarioContract | null} scenario @param {Interpretation} interpretation */
+/** @param {Answers} answers @param {Record<string, unknown> | null} scenario @param {Interpretation} interpretation */
 export function createInterpretationDocument(answers, scenario, interpretation) {
   return { source_description: { ...answers }, scenario, interpretation };
 }
@@ -94,14 +60,44 @@ function isRecord(value) {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** @param {unknown} value @returns {value is InterpretationStatus} */
-function isStatus(value) {
+/** @param {unknown} value @returns {value is Answers} */
+function isAnswers(value) {
+  return isRecord(value) && Object.entries(value).every(([key, answer]) =>
+    questions.some(({ id }) => id === key) && typeof answer === 'string');
+}
+
+/** @param {unknown} value @returns {value is LegacyStatus} */
+function isLegacyStatus(value) {
   return value === 'not_interpreted' || value === 'simulated_complete' || value === 'simulated_incomplete' || value === 'unsupported';
 }
 
 /** @param {unknown} value @returns {value is InterpretationDiagnostic} */
 function isDiagnostic(value) {
-  return isRecord(value) && typeof value.message === 'string' && (!Object.hasOwn(value, 'path') || typeof value.path === 'string');
+  return isRecord(value) && typeof value.message === 'string'
+    && (!Object.hasOwn(value, 'path') || typeof value.path === 'string')
+    && (!Object.hasOwn(value, 'kind') || (typeof value.kind === 'string' && Object.hasOwn(diagnosticLabels, value.kind)));
+}
+
+/** @param {unknown} value @returns {value is string} */
+function isPromptHash(value) {
+  return typeof value === 'string' && value.length === 64 && !/[^0-9a-f]/.test(value);
+}
+
+/** @param {unknown} value @returns {value is ModelInterpretation} */
+function isModelInterpretation(value) {
+  return isRecord(value) && (value.status === 'complete' || value.status === 'incomplete')
+    && typeof value.model === 'string' && value.model.length > 0
+    && typeof value.prompt_version === 'string' && value.prompt_version.length > 0
+    && (!Object.hasOwn(value, 'prompt_sha256') || isPromptHash(value.prompt_sha256))
+    && Array.isArray(value.diagnostics) && value.diagnostics.every((diagnostic) => isDiagnostic(diagnostic) && diagnostic.kind !== undefined);
+}
+
+/** @param {unknown} value @returns {value is InterpretationResponse} */
+export function isInterpretationResponse(value) {
+  return isRecord(value) && (value.scenario === null || isRecord(value.scenario))
+    && isModelInterpretation(value.interpretation)
+    && Object.hasOwn(value.interpretation, 'prompt_sha256')
+    && (value.scenario !== null || value.interpretation.status === 'incomplete');
 }
 
 /**
@@ -113,21 +109,35 @@ export function readInterpretationDocument(value) {
   if (!isRecord(value) || !(Object.hasOwn(value, 'source_description') || Object.hasOwn(value, 'interpretation'))) return null;
 
   const { source_description: source, scenario, interpretation } = value;
-  if (!isRecord(source) || Object.entries(source).some(([key, answer]) =>
-    !questions.some(({ id }) => id === key) || typeof answer !== 'string')) {
+  if (!isAnswers(source)) {
     throw new Error('The source description must contain text answers for known wizard questions.');
   }
   if (scenario !== null && !isRecord(scenario)) throw new Error('The scenario must be an object or null.');
-  if (!isRecord(interpretation) || !isStatus(interpretation.status)
-      || !Array.isArray(interpretation.diagnostics) || !interpretation.diagnostics.every(isDiagnostic)
-      || (Object.hasOwn(interpretation, 'source_changed') && interpretation.source_changed !== true)) {
+  if (!isRecord(interpretation) || (Object.hasOwn(interpretation, 'source_changed') && interpretation.source_changed !== true)
+      || (Object.hasOwn(interpretation, 'scenario_changed') && interpretation.scenario_changed !== true)) {
     throw new Error('The interpretation must contain a recognized status and a list of diagnostics.');
   }
 
-  const { status, diagnostics, source_changed: sourceChanged } = interpretation;
+  const { source_changed: sourceChanged, scenario_changed: scenarioChanged, source_description: sentDescription,
+    generated_scenario: generated, status, diagnostics } = interpretation;
+  /** @type {InterpretationRecord} */
+  let record;
+  if (isModelInterpretation(interpretation)) {
+    if (!isAnswers(sentDescription) || (generated !== null && !isRecord(generated))
+        || (generated === null && interpretation.status === 'complete')) {
+      throw new Error('The interpretation must include the sent description and generated scenario.');
+    }
+    const { status, model, prompt_version, prompt_sha256, diagnostics } = interpretation;
+    record = { status, model, prompt_version, ...(prompt_sha256 === undefined ? {} : { prompt_sha256 }),
+      diagnostics, source_description: sentDescription, generated_scenario: generated };
+  } else if (isLegacyStatus(status) && Array.isArray(diagnostics) && diagnostics.every(isDiagnostic)) {
+    record = { status, diagnostics };
+  } else {
+    throw new Error('The interpretation must contain a recognized status and a list of diagnostics.');
+  }
   return {
     source_description: source,
     scenario,
-    interpretation: { status, diagnostics, ...(sourceChanged ? { source_changed: true } : {}) },
+    interpretation: { ...record, ...(sourceChanged ? { source_changed: true } : {}), ...(scenarioChanged ? { scenario_changed: true } : {}) },
   };
 }

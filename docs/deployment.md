@@ -29,6 +29,8 @@ WORKBENCH_AUTH_USER=<operator-user>
 WORKBENCH_AUTH_PASSWORD_HASH='<operator-bcrypt-hash>'
 ```
 
+For AI interpretation, add `NEBULA_API_KEY` using the backend's Nebula credential. You can also set `NEBULA_MODEL` to override `FAST.gpt-oss:120b`. Compose passes these settings only to the backend. Update the backend service when rotating the key. Use `config -q` to check Compose configuration without displaying interpolated credentials.
+
 `APP_SITE_ADDRESS` and `WORKBENCH_SITE_ADDRESS` are Caddy site addresses; `WORKBENCH_PUBLIC_URL` is the browser-facing address returned by the API, not GraphDB's internal URL. Use different credentials for the app and Workbench. Generate each hash interactively with the pinned Caddy image:
 
 ```bash
@@ -50,7 +52,7 @@ docker compose --env-file .env.deploy -f compose.deploy.yaml ps
 
 The backend starts after GraphDB is healthy, creates repository `hi` if needed, checks its `empty` ruleset and disabled `owl:sameAs` optimization, and loads the original ontology and HINT files into separate reference graphs. Every backend start refreshes those reference graphs; existing scenario graphs remain. Compose sets `GRAPHDB_URL=http://graphdb:7200`, `GRAPHDB_REPOSITORY=hi`, and `GRAPHDB_WORKBENCH_URL` from `WORKBENCH_PUBLIC_URL`; the backend's `GRAPHDB_TIMEOUT_SECONDS` defaults to 10. These internal connection settings are distinct from the public Workbench address. The built frontend calls same-origin `/api`, which Caddy forwards to the backend. Only Caddy publishes host ports; GraphDB has no host port in this deployment.
 
-Open `https://<app-host>` and authenticate with the app account. In **Describe with AI**, choose **Load complete description** and confirm the answers appear in the JSON preview. Choose **Simulate interpretation**, inspect the candidate in the Structured Editor, and select **Validate Scenario**. Confirm the **Valid** status, N-Triples preview, and SHACL report. If an existing scenario ID is known, check CQ1 at `https://<app-host>/api/scenarios/<scenario-id>/team` using the authenticated browser. These checks are read-only.
+Open `https://<app-host>` and authenticate with the app account. In **Describe with AI**, load a sample or enter a synthetic scenario and confirm the answers appear in the JSON preview. With Nebula configured, choose **Convert to JSON using AI**. Confirm the model and prompt version appear in the draft, and inspect the candidate and findings in the Structured Editor. Correct any issues the proposal introduced, then select **Validate Scenario** and check the N-Triples preview and SHACL report. If an existing scenario ID is known, check CQ1 at `https://<app-host>/api/scenarios/<scenario-id>/team` using the authenticated browser.
 
 For an authorized write check, use `POST /scenarios` in the authenticated API documentation at `https://<app-host>/api/docs`. Use canonical JSON from **Download canonical JSON**, assign a fresh scenario ID, and confirm the response is `201`. Record the ID and graph IRI. Check CQ1 for that ID and use the returned Workbench link with the separate operator account to inspect the graph. Workbench may first ask you to select repository `hi`. After a planned container restart, query the same ID to check persistence.
 

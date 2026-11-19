@@ -14,13 +14,14 @@ export const PYTHON =
 /**
  * Start uvicorn on a free port; resolves with its URL and a stop function.
  * @param {Record<string, string>} [env]  extra environment, e.g. GRAPHDB_URL
+ * @param {string} [appModule] uvicorn entry point (the interpretation suite substitutes the provider transport)
  * @returns {Promise<{ url: string, stop: () => void }>}
  */
-export function startBackend(env = {}) {
+export function startBackend(env = {}, appModule = 'hi_scenario.api:app') {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(
       PYTHON,
-      ['-m', 'uvicorn', 'hi_scenario.api:app', '--host', '127.0.0.1', '--port', '0', '--no-use-colors'],
+      ['-m', 'uvicorn', appModule, '--host', '127.0.0.1', '--port', '0', '--no-use-colors'],
       { cwd: ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'ignore', 'pipe'] },
     );
     let log = '';

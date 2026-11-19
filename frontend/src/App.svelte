@@ -1,7 +1,7 @@
 <script>
-  import { onMount, tick } from 'svelte';
-  import { issuePath } from './lib/api.js';
-  import { createInterpretationDocument, readInterpretationDocument, sampleDescriptions, simulateInterpretation } from './lib/interpretation.js';
+  import { onDestroy, onMount, tick } from 'svelte';
+  import { issuePath, requestInterpretation } from './lib/api.js';
+  import { createInterpretationDocument, diagnosticLabels, questions, readInterpretationDocument, sampleDescriptions } from './lib/interpretation.js';
   import { createJsonSource } from './lib/json-viewer-channel.js';
   import example from '../../examples/s1.json';
   import EditorSection from './lib/EditorSection.svelte';
@@ -38,8 +38,12 @@
   let answers = $state(/** @type {import('./lib/interpretation.js').Answers} */ ({}));
   /** @type {import('./lib/interpretation.js').Interpretation} */
   const noInterpretation = { status: 'not_interpreted', diagnostics: [] };
-  let interpretation = $state(noInterpretation);
-  let simulatedEditor = '';
+  let interpretation = $state.raw(/** @type {import('./lib/interpretation.js').Interpretation} */ (noInterpretation));
+  let generatedBaseline = $state('');
+  let pendingInterpretation = $state.raw(/** @type {{ controller: AbortController, target: object } | null} */ (null));
+  let interpretationMessage = $state('');
+  let interpretationFailed = $state(false);
+  let noCandidateAttempt = $state.raw(/** @type {import('./lib/interpretation.js').ModelInterpretation | null} */ (null));
   let showErrors = $state(false);
   let status = $state('');
   let loadError = $state('');
@@ -57,7 +61,17 @@
   let contract = $derived(toContract(scenario));
   let validationTarget = $derived({ contract, editorJson });
   let candidate = $derived(loadedCandidate || editorJson !== emptyEditor ? contract : null);
-  let json = $derived(JSON.stringify(createInterpretationDocument(answers, candidate, interpretation), null, 2));
+  let sourceChanged = $derived(interpretation.source_description
+    ? questions.some(({ id }) => answers[id] !== interpretation.source_description?.[id])
+    : interpretation.source_changed === true);
+  let scenarioChanged = $derived(Boolean(interpretation.generated_scenario && JSON.stringify(candidate) !== generatedBaseline));
+  let displayedFindings = $derived(noCandidateAttempt ?? interpretation);
+  let draftInterpretation = $derived.by(() => {
+    const { source_changed: _source, scenario_changed: _scenario, ...record } = interpretation;
+    return { ...record, ...(sourceChanged ? { source_changed: /** @type {const} */ (true) } : {}),
+      ...(scenarioChanged ? { scenario_changed: /** @type {const} */ (true) } : {}) };
+  });
+  let json = $derived(JSON.stringify(createInterpretationDocument(answers, candidate, draftInterpretation), null, 2));
   let visibleIssues = $derived(showErrors ? [...issues, ...(backendFeedback?.target === validationTarget ? backendFeedback.issues : [])] : []);
   let sectionIssues = $derived(Object.fromEntries(sectionIds.map((id) => [id, visibleIssues.filter((issue) => sectionFor(issue.path) === id)])));
   let experimentOptions = $derived(scenario.experiments.map((e) => ({ id: e.id, name: vocabularyLabel('Experiment', findConcept('Experiment', e.concept)?.label ?? 'Experiment') })));
@@ -66,6 +80,14 @@
     name: `${vocabularyLabel('TaskExecution', findConcept('TaskExecution', e.concept)?.label ?? 'Execution')} · ${scenario.agents.find((a) => a.id === e.agent)?.name || e.agent} · ${scenario.tasks.find((t) => t.id === e.task)?.name || e.task}`,
   })));
   let pristine = JSON.stringify(createInterpretationDocument({}, null, noInterpretation), null, 2);
+
+  const outdatedRequest = 'The draft changed during interpretation. Convert again to use the current draft.';
+  $effect(() => {
+    if (pendingInterpretation && pendingInterpretation.target !== validationTarget) {
+      cancelInterpretation(outdatedRequest);
+    }
+  });
+  onDestroy(() => pendingInterpretation?.controller.abort());
 
   onMount(() => {
     try {
@@ -165,12 +187,15 @@
    * @param {import('./lib/interpretation.js').Interpretation} findings
    */
   function loadDraft(editor, sourceAnswers, findings) {
+    const generated = findings.generated_scenario;
+    const baseline = generated ? JSON.stringify(toContract(fromContract(generated, { allowDraft: true }))) : '';
+    cancelInterpretation();
     scenario = editor ?? emptyScenario();
     emptyEditor = JSON.stringify(scenario);
     loadedCandidate = editor !== null;
     answers = sourceAnswers;
     interpretation = findings;
-    simulatedEditor = '';
+    generatedBaseline = baseline;
     mode = editor ? 'structured' : 'describe';
     wizardKey += 1;
     showErrors = editor !== null;
@@ -215,7 +240,10 @@
   }
 
   function markSourceChanged() {
-    if (interpretation.status !== 'not_interpreted') interpretation.source_changed = true;
+    cancelInterpretation(pendingInterpretation ? outdatedRequest : '');
+    if (interpretation.status !== 'not_interpreted' && !interpretation.source_description) {
+      interpretation = { ...interpretation, source_changed: true };
+    }
   }
 
   /** @param {import('./lib/interpretation.js').QuestionId} id @param {string} value */
@@ -236,26 +264,71 @@
     markSourceChanged();
   }
 
+  /** @param {string} [message] */
+  function cancelInterpretation(message = '') {
+    pendingInterpretation?.controller.abort();
+    pendingInterpretation = null;
+    interpretationMessage = message;
+    interpretationFailed = false;
+    noCandidateAttempt = null;
+  }
+
   async function interpret() {
-    const result = simulateInterpretation(answers);
-    if (!result.scenario) {
-      interpretation = result.interpretation;
+    if (pendingInterpretation || !Object.values(answers).some((answer) => answer.trim())) return;
+    if (candidate && !confirm('Replace the current structured scenario, including your edits, if AI generates a candidate?')) return;
+    const description = { ...answers };
+    const request = { controller: new AbortController(), target: validationTarget };
+    cancelInterpretation();
+    pendingInterpretation = request;
+    const result = await requestInterpretation(description, { signal: request.controller.signal });
+    if (pendingInterpretation !== request) return;
+    if (request.target !== validationTarget) {
+      cancelInterpretation(outdatedRequest);
       return;
     }
-    if (candidate && editorJson !== simulatedEditor
-        && !confirm('Replace the current structured scenario, including any edits, with the simulated candidate?')) return;
+    pendingInterpretation = null;
 
-    scenario = fromContract(result.scenario, { allowDraft: true });
-    simulatedEditor = JSON.stringify(scenario);
+    if (result.kind !== 'ok') {
+      interpretationFailed = true;
+      if (result.kind === 'rejected') {
+        const { code, message, issues } = result.error;
+        interpretationMessage = code === 'invalid_request'
+          ? [message, ...new Set(issues.map((issue) => issue.message))].join('\n')
+          : message;
+      } else {
+        interpretationMessage = result.message;
+      }
+      return;
+    }
+    const { scenario: generated, interpretation: findings } = result.data;
+    const record = { ...findings, source_description: description, generated_scenario: generated };
+    if (generated === null) {
+      if (interpretation.generated_scenario) noCandidateAttempt = findings;
+      else interpretation = record;
+      return;
+    }
+
+    let editor;
+    try {
+      editor = fromContract(generated, { allowDraft: true });
+    } catch {
+      interpretationFailed = true;
+      interpretationMessage = 'The AI returned a candidate that the Structured Editor could not open.';
+      return;
+    }
+    generatedBaseline = JSON.stringify(toContract(editor));
+    scenario = editor;
     loadedCandidate = true;
-    interpretation = result.interpretation;
+    interpretation = record;
     showErrors = false;
     expanded = compactSections();
     backendFeedback = null;
     status = '';
-    mode = 'structured';
-    await tick();
-    document.getElementById('structured-mode')?.focus();
+    if (mode === 'describe') {
+      mode = 'structured';
+      await tick();
+      document.getElementById('structured-mode')?.focus();
+    }
   }
 
   function addTask() {
@@ -319,7 +392,7 @@
     </div>
     <div id="description-panel" hidden={mode !== 'describe'}>
       {#key wizardKey}
-        <ScenarioWizard {answers} onAnswer={answer} onInterpret={interpret} onLoadExample={loadDescription} />
+        <ScenarioWizard {answers} onAnswer={answer} onInterpret={interpret} onLoadExample={loadDescription} interpreting={pendingInterpretation !== null} />
       {/key}
     </div>
     <form id="structured-panel" hidden={mode !== 'structured'} onsubmit={(e) => e.preventDefault()} novalidate>
@@ -377,7 +450,7 @@
         <section class="item" data-field-path={`tasks.${i}`} tabindex="-1">
           <div class="item-head">
             <h3>Task {i + 1}</h3>
-            <button type="button" class="link" onclick={() => removeEntity(scenario, 'tasks', task.id)} disabled={scenario.tasks.length <= 1}>Remove</button>
+            <button type="button" class="link" onclick={() => removeEntity(scenario, 'tasks', task.id)}>Remove</button>
           </div>
           <div class="field">
             <label for="task-{task.id}">Name</label>
@@ -400,17 +473,20 @@
         <section class="item" data-field-path={`agents.${i}`} tabindex="-1">
           <div class="item-head">
             <h3>Agent {i + 1}</h3>
-            <button type="button" class="link" onclick={() => removeEntity(scenario, 'agents', agent.id)} disabled={scenario.agents.length <= 2}>Remove</button>
+            <button type="button" class="link" onclick={() => removeEntity(scenario, 'agents', agent.id)}>Remove</button>
           </div>
           <div class="field">
             <label for="agent-{agent.id}">Name</label>
             <input id="agent-{agent.id}" data-field-path={`agents.${i}.name`} bind:value={agent.name} aria-invalid={errorFor(`agents.${i}.name`) ? 'true' : undefined} aria-describedby={errorFor(`agents.${i}.name`) ? `error-agents.${i}.name` : undefined} />
             {#if errorFor(`agents.${i}.name`)}<p class="error" id={`error-agents.${i}.name`}>{errorFor(`agents.${i}.name`)}</p>{/if}
           </div>
-          <div class="field" role="radiogroup" aria-label="Agent kind" data-field-path={`agents.${i}.kind`}>
+          <div class="field" role="radiogroup" aria-label="Agent kind" data-field-path={`agents.${i}.kind`}
+            aria-invalid={errorFor(`agents.${i}.kind`) ? 'true' : undefined}
+            aria-describedby={errorFor(`agents.${i}.kind`) ? `error-agents.${i}.kind` : undefined}>
             <span class="label">Kind</span>
             <label class="inline"><input type="radio" bind:group={agent.kind} value="human" /> Human</label>
             <label class="inline"><input type="radio" bind:group={agent.kind} value="artificial" /> Artificial</label>
+            {#if errorFor(`agents.${i}.kind`)}<p class="error" id={`error-agents.${i}.kind`}>{errorFor(`agents.${i}.kind`)}</p>{/if}
           </div>
           <ConceptChecklist label="Roles" category="Role" bind:values={agent.roles} path={`agents.${i}.roles`} error={errorFor(`agents.${i}.roles`)} />
         </section>
@@ -552,22 +628,37 @@
           {/each}
         </ul>
       {/if}
-      {#if interpretation.status !== 'not_interpreted'}
+      {#if interpretation.status !== 'not_interpreted' || pendingInterpretation || interpretationMessage}
         <section class="interpretation-findings" aria-labelledby="interpretation-heading">
-          <h3 id="interpretation-heading">Simulated interpretation</h3>
-          {#if interpretation.source_changed}
-            <p class="warn">The description has changed since the last simulation.</p>
+          <h3 id="interpretation-heading">AI interpretation</h3>
+          {#if pendingInterpretation && mode === 'structured'}
+            <p class="status" role="status">Interpreting description…</p>
           {/if}
-          <p class="hint" role="status">
-            {interpretation.status === 'simulated_complete' ? 'The simulation generated a candidate. Review it in the Structured Editor.'
-              : interpretation.status === 'simulated_incomplete' ? 'The simulation generated a partial candidate and flagged the following gap.'
-              : candidate ? 'The simulation kept your existing structured scenario.'
-              : 'The description is available in your JSON draft.'}
-          </p>
-          {#if interpretation.diagnostics.length}
+          {#if interpretationMessage}
+            <p class:error={interpretationFailed} class:hint={!interpretationFailed} role={interpretationFailed ? 'alert' : 'status'}>{interpretationMessage}</p>
+          {/if}
+          {#if displayedFindings.status !== 'not_interpreted'}
+            <p class="hint" role="status">
+              {noCandidateAttempt || interpretation.generated_scenario === null ? 'The AI did not return an editable candidate.'
+                : displayedFindings.status === 'complete' ? 'The AI generated a candidate. Review it in the Structured Editor.'
+                : displayedFindings.status === 'incomplete' ? 'The AI reported issues to review.'
+                : 'These findings came from the Phase 1A.1 simulator.'}
+            </p>
+          {/if}
+          {#if !noCandidateAttempt && sourceChanged}
+            <p class="warn">The description has changed since interpretation.</p>
+          {/if}
+          {#if !noCandidateAttempt && scenarioChanged}
+            <p class="warn">The structured scenario has changed. These findings describe the generated draft.</p>
+          {/if}
+          {#if displayedFindings.diagnostics.length}
             <ul class="issues">
-              {#each interpretation.diagnostics as diagnostic}
-                <li>{diagnostic.message}</li>
+              {#each displayedFindings.diagnostics as diagnostic}
+                <li>
+                  {#if diagnostic.kind}<strong>{diagnosticLabels[diagnostic.kind]}.</strong>{/if}
+                  {diagnostic.message}
+                  {#if diagnostic.path}<code>{diagnostic.path}</code>{/if}
+                </li>
               {/each}
             </ul>
           {/if}

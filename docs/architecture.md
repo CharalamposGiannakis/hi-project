@@ -22,7 +22,7 @@ Researchers create, inspect, edit, validate, and eventually submit HI scenarios 
 
 **Phase 1A — Generate or regenerate**
 
-Phase 1A.1 implements the wizard, interpretation document, structured editing, and explicit technical validation. The document carries `source_description`, the editable `scenario` candidate, and `interpretation` diagnostics. The candidate uses the canonical model's fields and may be incomplete in a draft. Only the candidate goes to the existing validation endpoint. The simulator recognizes two bundled descriptions. Provider-backed interpretation is planned for the next slice.
+The wizard sends the full description to FastAPI for interpretation by Nebula. Each request includes the Python `Scenario` schema and all approved HINT concepts from the checked-in thesaurus. The prompt asks Nebula to inventory described entities before classifying them so records with unresolved HINT fields can retain their stated details and links. The backend checks the proposal and retains supported fields in a canonical-shaped draft even when required facts are missing. The interpretation document records the source sent, proposed candidate, findings, model, prompt version, and SHA-256 hash of the effective system prompt alongside the current editable fields. Explicit technical validation sends only the edited candidate through the existing RDF and SHACL pipeline.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -32,7 +32,7 @@ Phase 1A.1 implements the wizard, interpretation document, structured editing, a
 │  Describe your HI scenario     │     Scenario JSON      │
 │                                │                        │
 │  ● ● ● ○ ○ ○ ○ ○ ○ ○ ○         │ {                      │
-│  3 of 11 sections              │    "scenario": {       │
+│  3 of 12 sections              │    "scenario": {       │
 │                                │      ...               │
 │  ───────────────────────────   │    }                   │
 │                                │  }                     │
@@ -63,6 +63,8 @@ Phase 1A.1 implements the wizard, interpretation document, structured editing, a
 - **Regeneration:** Researchers can modify their descriptions and regenerate the scenario. Existing manual corrections must not be overwritten without confirmation.
 - **Validation:** Keep technical validation and RDF preview in the Scenario Builder. Incomplete or unsupported information must be reported rather than invented.
 - **Submission:** A future **Submit for Scientific Review** action will transfer the scenario to Pillar 2. Phase 1A does not automatically publish to GraphDB.
+
+**Note:**LLM interpretation may skip described information or fail to map concepts to the approved HINT vocabulary; generated scenarios require researcher verification, and unresolved representation gaps remain subject to scientific review. 
 
 **Phase 1B — Deferred**
 

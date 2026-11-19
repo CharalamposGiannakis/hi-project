@@ -27,6 +27,8 @@ const jsonNode = () => /** @type {HTMLPreElement} */ (document.querySelector('pr
 const draft = () => JSON.parse(jsonNode().textContent ?? '{}');
 const candidate = () => draft().scenario;
 const validationStatus = () => document.querySelector('[data-validation-status]')?.textContent;
+const descriptionInput = () => /** @type {HTMLTextAreaElement} */ (document.getElementById('scenario-wizard-answer'));
+const useCaseName = () => /** @type {HTMLInputElement} */ (document.getElementById('use-case-name'));
 /** @param {string} label */
 function click(label) {
   const control = [...document.querySelectorAll('button')].find((button) => button.textContent?.trim() === label);
@@ -457,20 +459,171 @@ describe('Scenario JSON and validation workflows', () => {
     expect(validationStatus()).toBe('Not validated');
   });
 
-  it('preserves a structured correction when regeneration is cancelled', () => {
+});
+
+const modelFindings = /** @type {import('./lib/interpretation.js').ModelInterpretation} */ ({
+  status: 'complete', model: 'test-model', prompt_version: 'test-v1', prompt_sha256: 'c'.repeat(64), diagnostics: [],
+});
+
+/** @param {Record<string, unknown> | null} scenario @param {typeof modelFindings} findings */
+function interpretationReply(scenario, findings = modelFindings) {
+  return new Response(JSON.stringify({ scenario, interpretation: findings }));
+}
+
+function pendingInterpretation() {
+  /** @type {(response: Response) => void} */
+  let respond = () => {};
+  const fetch = vi.fn(/** @type {typeof globalThis.fetch} */ (() => new Promise((resolve) => { respond = resolve; })));
+  vi.stubGlobal('fetch', fetch);
+  return { fetch, respond: (/** @type {Response} */ response) => respond(response) };
+}
+
+describe('AI interpretation', () => {
+  it('interprets arbitrary text and retains the generated draft when a missing agent kind is corrected', async () => {
+    const { fetch, respond } = pendingInterpretation();
+    const sourceDescription = { use_case: '  A virtual museum guide uses immersive displays.\n' };
+    const generated = { ...s7, agents: [s7.agents[0], { ...s7.agents[1], kind: '' }] };
+    const diagnostics = /** @type {typeof modelFindings.diagnostics} */ ([
+      { kind: 'missing_information', path: 'agents.1.kind', message: 'The description did not specify the guide kind.' },
+    ]);
+    render();
+    enter(descriptionInput(), sourceDescription.use_case);
+    expect(draft().source_description).toEqual(sourceDescription);
+    expect(candidate()).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+
+    click('Convert to JSON using AI');
+    expect(document.body.textContent).toContain('Interpreting description…');
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/scenarios/interpret'), expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ description: sourceDescription }),
+    }));
+    respond(interpretationReply(generated, { ...modelFindings, status: 'incomplete', diagnostics }));
+    await until(() => expect(document.getElementById('structured-panel')?.hasAttribute('hidden')).toBe(false));
+    expect(validationStatus()).toBe('Not validated');
+    expect(draft().interpretation).toEqual({
+      ...modelFindings, status: 'incomplete', diagnostics, source_description: sourceDescription, generated_scenario: generated,
+    });
+    expect(candidate().agents[1].kind).toBe('');
+    expect(document.body.textContent).toContain('Missing information');
+
+    click('Validate Scenario');
+    expect(validationStatus()).toBe('Needs corrections');
+    expect(fetch).toHaveBeenCalledOnce();
+    const kind = document.querySelector('[data-field-path="agents.1.kind"]');
+    expect(kind?.getAttribute('aria-invalid')).toBe('true');
+    expect(kind?.querySelector('input:checked')).toBeNull();
+    const artificial = /** @type {HTMLInputElement} */ (kind?.querySelector('input[value="artificial"]'));
+    artificial.click();
+    flushSync();
+    expect(candidate().agents[1].kind).toBe('artificial');
+    expect(draft().interpretation.generated_scenario.agents[1].kind).toBe('');
+    expect(draft().interpretation.scenario_changed).toBe(true);
+    expect(document.body.textContent).toContain('These findings describe the generated draft.');
+
+    const revised = 'A human curator and an artificial guide use immersive displays.';
+    click('Describe with AI');
+    enter(descriptionInput(), revised);
+    expect(draft().source_description.use_case).toBe(revised);
+    expect(draft().interpretation.source_description).toEqual(sourceDescription);
+    expect(draft().interpretation.source_changed).toBe(true);
+
+    const savedDraft = draft();
+    expect(savedDraft.interpretation.prompt_sha256).toBe(modelFindings.prompt_sha256);
+    vi.stubGlobal('confirm', () => true);
+    await importJson(savedDraft);
+    expect(draft()).toEqual(savedDraft);
+  });
+
+  it('requires confirmation before regeneration replaces a correction', async () => {
     const confirm = vi.fn(() => false);
+    const regenerated = { ...s7, use_case: { ...s7.use_case, name: 'Regenerated candidate' } };
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => interpretationReply(s7))
+      .mockImplementationOnce(async () => interpretationReply(regenerated));
+    vi.stubGlobal('fetch', fetch);
     vi.stubGlobal('confirm', confirm);
     render();
     click('Load complete description');
-    click('Simulate interpretation');
-    enter(/** @type {HTMLInputElement} */ (document.getElementById('use-case-name')), 'Researcher correction');
+    click('Convert to JSON using AI');
+    await until(() => expect(candidate()).toEqual(s7));
+    enter(useCaseName(), 'Researcher correction');
     const corrected = draft();
     click('Describe with AI');
-    click('Simulate interpretation');
+    click('Convert to JSON using AI');
     expect(confirm).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
     expect(draft()).toEqual(corrected);
     confirm.mockReturnValue(true);
-    click('Simulate interpretation');
-    expect(candidate().use_case.name).not.toBe('Researcher correction');
+    click('Convert to JSON using AI');
+    await until(() => expect(candidate()).toEqual(regenerated));
+    expect(draft().interpretation.generated_scenario).toEqual(regenerated);
+  });
+
+  it('lets a researcher remove unsupported generated entities without adding replacements', async () => {
+    const task = s7.tasks[0];
+    const agent = s7.agents[0];
+    const generated = {
+      id: s7.id, use_case: s7.use_case, goal: { ...s7.goal, required_tasks: [task.id] }, tasks: [task], agents: [agent],
+    };
+    const fetch = vi.fn(async () => interpretationReply(generated, { ...modelFindings, status: 'incomplete' }));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    enter(descriptionInput(), 'An unfinished scenario');
+    click('Convert to JSON using AI');
+    await until(() => expect(candidate()).toEqual(generated));
+
+    for (const sectionId of ['tasks', 'agents']) {
+      section(sectionId).querySelector('button')?.click();
+      flushSync();
+    }
+    expect(candidate()).toMatchObject({ tasks: [], agents: [], goal: { required_tasks: [] } });
+    expect(draft().interpretation.generated_scenario).toEqual(generated);
+    click('Validate Scenario');
+    expect(validationStatus()).toBe('Needs corrections');
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it.each(['description', 'structured scenario'])('discards an old response after editing the %s', async (field) => {
+    const { fetch, respond } = pendingInterpretation();
+    render();
+    enter(descriptionInput(), 'Description for the model');
+    click('Convert to JSON using AI');
+    const requestSignal = fetch.mock.calls[0][1]?.signal;
+    expect(requestSignal?.aborted).toBe(false);
+    if (field === 'description') enter(descriptionInput(), 'Edited while the model was thinking');
+    else {
+      click('Structured Editor');
+      expect(requestSignal?.aborted).toBe(false);
+      enter(useCaseName(), 'My structured draft');
+    }
+    expect(requestSignal?.aborted).toBe(true);
+    expect(document.body.textContent).toContain('The draft changed during interpretation.');
+    const edited = draft();
+    const response = interpretationReply(s7);
+    const read = vi.spyOn(response, 'json');
+    respond(response);
+    await until(() => expect(read).toHaveBeenCalledOnce());
+    expect(draft()).toEqual(edited);
+  });
+
+  it('preserves previous provenance when another conversion has no editable candidate', async () => {
+    const findings = /** @type {typeof modelFindings} */ ({
+      ...modelFindings, status: 'incomplete', diagnostics: [{ kind: 'ambiguity', message: 'The team cannot be determined.' }],
+    });
+    const fetch = vi.fn()
+      .mockImplementationOnce(async () => interpretationReply(s7))
+      .mockImplementationOnce(async () => interpretationReply(null, findings));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('confirm', () => true);
+    render();
+    enter(descriptionInput(), 'Museum guide');
+    click('Convert to JSON using AI');
+    await until(() => expect(candidate()).toEqual(s7));
+    click('Describe with AI');
+    enter(descriptionInput(), 'A different idea');
+    const edited = draft();
+    click('Convert to JSON using AI');
+    await until(() => expect(document.body.textContent).toContain('The team cannot be determined.'));
+    expect(draft()).toEqual(edited);
   });
 });

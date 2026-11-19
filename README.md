@@ -7,11 +7,11 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 ## Researcher workflow
 
 1. In **Describe with AI**, answer any of the optional questions in your own words. Use **Previous** and **Next** to navigate, **Additional notes** to record anything else, and **View full description** to review your answers. Your text appears in the JSON preview as you type.
-2. Choose **Load complete description** or **Load incomplete description**, then **Simulate interpretation**, to populate the Structured Editor from a sample. The incomplete sample preserves the supplied entities and flags the missing artificial team member. Custom descriptions stay in the draft for download and manual entry through the Structured Editor.
+2. Choose **Convert to JSON using AI** to send your description to VU Nebula. Review the proposed facts, HINT mappings, and any missing or unsupported information. A partial proposal can open in the Structured Editor and be corrected. Review the source evidence before accepting any proposed scientific fact.
 3. Switch to **Structured Editor** at any point to add or edit HINT-backed fields. Use **Expand all** or **Collapse all** to navigate the eleven sections. Your answers and structured edits stay available as you switch between input methods. **Load S1 example** opens the bundled canonical scenario.
 4. Choose **Validate Scenario** when you're ready for a technical check. Follow diagnostics to fields that need correction. A valid result includes N-Triples and the SHACL report. Editing the structured scenario clears that result. Scientific approval is a separate process.
 
-**Download JSON** saves the editable draft, including incomplete descriptions and partial candidates. The draft keeps the original answers in `source_description`, the editable candidate in `scenario`, and simulation findings in `interpretation`. After the structured scenario passes local form checks, **Download canonical JSON** exports the scenario by itself for use with the API. **Open JSON file…** accepts either format.
+**Download JSON** saves incomplete descriptions and partial candidates. A draft holds the current answers in `source_description` and the editable candidate in `scenario`. The `interpretation` record retains the answers sent to Nebula, the generated candidate, findings, model identifier, and prompt version. When the description or candidate has changed, those findings refer to the original proposal. After the structured scenario passes local form checks, **Download canonical JSON** exports the scenario for use with the API. **Open JSON file…** accepts either format.
 
 **Open JSON in new tab** opens a read-only snapshot viewer. **Refresh JSON** or reloading the viewer retrieves the latest draft directly from the open Builder tab. Reloading the Builder requires opening a new viewer. The viewer uses BroadcastChannel and keeps its snapshot in memory until you refresh or close it.
 
@@ -22,6 +22,7 @@ Each scenario has one use case, an implicit HI team, one goal, at least one task
 Entity identities are application-assigned and scenario-scoped; shared names, types, roles, or HINT concepts do not merge individuals. JSON import/export preserves the representation. See [semantic reconciliation](docs/semantic-reconciliation.md) for model assumptions, literal handling, and source coverage.
 
 - **Validation has limits.** HINT categories and references are checked by Python; passing the existing SHACL shapes does not establish full ontology completeness or research correctness. Some canonical examples retain documented omissions or provisional alignments awaiting Ilaria's confirmation.
+- **Interpretations need review.** Nebula can miss, misclassify, or introduce facts. Use the source description, proposal, and findings to check the result. The full description is sent to Nebula when you request interpretation. Submit only content authorized for that service. [VU Nebula](https://rdm.vu.nl/tools/nebula/index.html)
 - **Only CQ1 is implemented and verified.** It returns actual saved members and their roles, with labels from RDF and HINT. The application does not calculate capability eligibility or infer task performers or interaction participants.
 - **Concurrency is limited.** Use one backend worker and one instance. Its save lock is process-local; independent API, importer, or GraphDB administrator writes are not coordinated.
 - **There is no administrator-only approval/publication workflow.** The API has no administrator role or approval gate for saves. Deployment authentication provides shared access, without per-researcher roles or an audit trail. Researcher drafts, administrator review, and shared publication are not separated by the current application.
@@ -62,6 +63,14 @@ npm run dev
 
 Open the app at `http://localhost:5173`, API documentation at `http://127.0.0.1:8000/docs`, or Workbench at `http://127.0.0.1:7200` (select repository `hi`). Local GraphDB is unauthenticated and bound to loopback. `setup` creates the repository if needed and refreshes the ontology and HINT reference graphs without deleting scenario graphs. Repository `hi` uses the `empty` ruleset with `owl:sameAs` optimization disabled; queries use explicit named graphs and `infer=false`.
 
+To enable AI interpretation, set `NEBULA_API_KEY` in the backend process environment before starting Uvicorn. `NEBULA_MODEL` defaults to `FAST.gpt-oss:120b`. In PowerShell, enter the key without echoing it or putting it in command history:
+
+```powershell
+$env:NEBULA_API_KEY = [System.Net.NetworkCredential]::new('', (Read-Host 'Nebula API key' -AsSecureString)).Password
+```
+
+Start the backend from that terminal. The key is only used by FastAPI. The Structured Editor and technical validation are available without configuring Nebula.
+
 Run the ordinary checks from the repository root:
 
 ```powershell
@@ -73,7 +82,15 @@ npm run build
 npm run test:integration
 ```
 
-The Python suite includes S1–S7 semantic regression tests and does not require a live database. Frontend integration tests start their own backend; the GraphDB workflow skips when the local database is unreachable. For isolated live importer verification, from the repository root:
+The Python suite includes S1–S7 semantic regression tests. Standard tests use simulated provider responses and run without a Nebula key. Frontend integration tests start their own backend. The GraphDB workflow skips when the local database is unreachable. To evaluate the live interpreter with the backend key configured, run the opt-in checks for complete, incomplete, and unsupported scenarios:
+
+```powershell
+$env:HI_NEBULA_LIVE = '1'
+.\.venv\Scripts\python -m pytest tests/test_nebula_live.py -q -s
+Remove-Item Env:HI_NEBULA_LIVE
+```
+
+For isolated live importer verification, from the repository root:
 
 ```powershell
 $env:HI_GRAPHDB_LIVE = '1'
@@ -111,10 +128,11 @@ Broader CQ investigation is tracked in [Issue #15](https://github.com/Charalampo
 
 ## API overview
 
-All scenario POST requests accept the canonical JSON model, as illustrated by [S1](examples/s1.json). The local base URL is `http://127.0.0.1:8000`; deployment serves the API under `/api`.
+Preview and save accept the canonical JSON model illustrated by S1. Interpretation accepts wizard answers in a `description` object. The local base URL is `http://127.0.0.1:8000` and deployment serves the API under `/api`. [S1 canonical example](examples/s1.json)
 
 | Endpoint | Result |
 | --- | --- |
+| `POST /scenarios/interpret` | Requests a proposal from Nebula and returns an editable candidate and findings. |
 | `POST /scenarios/preview` | Validates and returns RDF, triple count, and SHACL report; stores nothing. |
 | `POST /scenarios` | Validates and saves a new named graph; returns `201` with repository, graph, and Workbench location. Existing IDs return `409`. |
 | `GET /scenarios/{scenario_id}/team` | Runs CQ1 over the saved graph and reference graphs; returns member IRIs, names, types, and roles. Missing IDs return `404`. |

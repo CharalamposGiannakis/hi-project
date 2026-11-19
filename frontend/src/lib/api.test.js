@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiUrl, fetchTeam, issuePath, requestPreview, saveScenario } from './api.js';
+import { apiUrl, fetchTeam, issuePath, requestInterpretation, requestPreview, saveScenario } from './api.js';
 
 it('uses a relative API route when the deployed bundle requests it', () => {
   vi.stubEnv('VITE_API_URL', '/api');
@@ -15,6 +15,39 @@ const preview = {
 /** @param {number} status @param {unknown} body */
 const reply = (status, body) =>
   vi.fn(async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status }));
+
+describe('requestInterpretation', () => {
+  const output = {
+    scenario: null,
+    interpretation: {
+      status: 'incomplete', model: 'test-model', prompt_version: 'test-v1',
+      prompt_sha256: 'a'.repeat(64),
+      diagnostics: [{ kind: 'unsupported_relationship', message: 'No approved relation represents this.' }],
+    },
+  };
+
+  it('posts only the exact description and accepts a report without a candidate', async () => {
+    const fetch = reply(200, output);
+    const description = { use_case: '  An original idea.\n' };
+    const result = await requestInterpretation(description, { fetch, baseUrl: '/api' });
+    expect(result).toEqual({ kind: 'ok', data: output });
+    expect(fetch).toHaveBeenCalledWith('/api/scenarios/interpret', expect.objectContaining({
+      method: 'POST', body: JSON.stringify({ description }),
+    }));
+  });
+
+  it('rejects malformed interpretation diagnostics', async () => {
+    const interpretation = { ...output.interpretation, diagnostics: [{ kind: 'made-up', message: 'Issue' }] };
+    const result = await requestInterpretation({ goal: 'Goal' }, { fetch: reply(200, { ...output, interpretation }) });
+    expect(result.kind).toBe('unexpected');
+  });
+
+  it.each([undefined, 'A'.repeat(64), 'a'.repeat(63), `${'a'.repeat(63)}\n`])('rejects a missing or malformed prompt hash (%j)', async (prompt_sha256) => {
+    const interpretation = { ...output.interpretation, prompt_sha256 };
+    const result = await requestInterpretation({ goal: 'Goal' }, { fetch: reply(200, { ...output, interpretation }) });
+    expect(result.kind).toBe('unexpected');
+  });
+});
 
 describe('requestPreview', () => {
   it('posts the contract JSON to /scenarios/preview', async () => {

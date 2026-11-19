@@ -1,41 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import s1 from '../../../examples/s1.json';
 import {
   createInterpretationDocument,
   readInterpretationDocument,
-  sampleDescriptions,
-  simulateInterpretation,
 } from './interpretation.js';
 import { fromContract, validate } from './scenario.js';
-
-describe('simulated interpretation', () => {
-  it('uses canonical entities and explicit goal-task links for the complete sample', () => {
-    const { scenario, interpretation } = simulateInterpretation(sampleDescriptions.complete);
-    expect(interpretation).toEqual({ status: 'simulated_complete', diagnostics: [] });
-    const loaded = fromContract(scenario);
-    expect(loaded.goal.required_tasks).toEqual(loaded.tasks.map(({ id }) => id));
-    expect(loaded.agents.map(({ kind }) => kind)).toEqual(['human', 'artificial']);
-    expect(loaded.context?.constraints).toEqual(['PrivacyConstraint']);
-  });
-
-  it('returns a useful partial candidate without supplying the missing team member', () => {
-    const { scenario, interpretation } = simulateInterpretation(sampleDescriptions.incomplete);
-    expect(interpretation).toMatchObject({ status: 'simulated_incomplete', diagnostics: [{ path: 'agents' }] });
-    expect(scenario).toMatchObject({
-      agents: [{ name: 'Human user', kind: 'human' }],
-      tasks: [{ id: 'data-collection' }],
-    });
-    expect(() => fromContract(scenario)).toThrow('The team needs at least one human and one artificial agent.');
-  });
-
-  it('keeps custom descriptions separate from fixture scenario facts', () => {
-    const answers = { ...sampleDescriptions.complete, additional_notes: 'The assistant would also coach the user.' };
-    const { scenario, interpretation } = simulateInterpretation(answers);
-    expect(scenario).toBeNull();
-    expect(interpretation.status).toBe('unsupported');
-    expect(interpretation.diagnostics).toHaveLength(1);
-    expect(createInterpretationDocument(answers, scenario, interpretation).source_description).toEqual(answers);
-  });
-});
 
 describe('interpretation document', () => {
   it('round-trips the exact source text with no candidate or prior interpretation', () => {
@@ -48,23 +17,54 @@ describe('interpretation document', () => {
     });
   });
 
-  it('preserves incomplete candidates and marks interpretations based on earlier source text', () => {
-    const { scenario, interpretation } = simulateInterpretation(sampleDescriptions.incomplete);
-    const answers = { ...sampleDescriptions.incomplete, additional_notes: 'Still considering the assistant.' };
-    const document = createInterpretationDocument(answers, scenario, { ...interpretation, source_changed: true });
+  it('round-trips generated provenance separately from the editable draft', () => {
+    const generated = { ...s1, agents: [{ ...s1.agents[0], kind: '' }] };
+    const candidate = { ...generated, agents: [{ ...generated.agents[0], kind: 'human' }] };
+    const sentDescription = { use_case: '  Early idea\n' };
+    const answers = { ...sentDescription, additional_notes: 'Assistant role under discussion.' };
+    const document = createInterpretationDocument(answers, candidate, {
+      status: 'incomplete', model: 'test-model', prompt_version: 'test-v1',
+      prompt_sha256: 'b'.repeat(64),
+      source_description: sentDescription, generated_scenario: generated,
+      diagnostics: [{ kind: 'missing_information', message: 'Agent type is missing.', path: 'agents.0.kind' }],
+      source_changed: true, scenario_changed: true,
+    });
     expect(readInterpretationDocument(JSON.parse(JSON.stringify(document)))).toEqual(document);
-    expect(readInterpretationDocument(scenario)).toBeNull();
+    expect(readInterpretationDocument(s1)).toBeNull();
+  });
+
+  it('accepts Phase 1A.1 drafts without model provenance', () => {
+    const legacy = createInterpretationDocument({ use_case: 'Edited description' }, s1, {
+      status: 'simulated_incomplete', source_changed: true, diagnostics: [{ message: 'The agent role is missing.' }],
+    });
+    expect(readInterpretationDocument(legacy)).toEqual(legacy);
+  });
+
+  it('accepts downloaded Nebula drafts from before prompt hashes were recorded', () => {
+    const answers = { use_case: 'An older description' };
+    const olderDraft = createInterpretationDocument(answers, s1, {
+      status: 'complete', model: 'test-model', prompt_version: 'test-v1', diagnostics: [],
+      source_description: answers, generated_scenario: s1,
+    });
+    expect(readInterpretationDocument(olderDraft)).toEqual(olderDraft);
+    const malformed = { ...olderDraft, interpretation: { ...olderDraft.interpretation, prompt_sha256: 'invalid' } };
+    expect(() => readInterpretationDocument(malformed)).toThrow();
   });
 
   it('leaves omitted goal links unresolved in drafts and rejects duplicate editor identities', () => {
-    const { scenario } = simulateInterpretation(sampleDescriptions.complete);
-    if (!scenario) throw new Error('Missing complete sample');
-    const { required_tasks: _omitted, ...goal } = scenario.goal;
-    const draft = fromContract({ ...scenario, goal }, { allowDraft: true });
+    const draft = fromContract(s1, { allowDraft: true });
     expect(draft.goal.required_tasks).toEqual([]);
     expect(validate(draft)).toContainEqual(expect.objectContaining({ path: 'goal.required_tasks' }));
-    const duplicates = { ...scenario, tasks: [scenario.tasks[0], scenario.tasks[0]] };
+    const duplicates = { ...s1, tasks: [s1.tasks[0], s1.tasks[0]] };
     expect(() => fromContract(duplicates, { allowDraft: true })).toThrow('duplicate entity IDs');
+  });
+
+  it('preserves an unspecified agent kind only in an editable draft', () => {
+    const scenario = { ...s1, agents: [{ ...s1.agents[0], kind: '' }, s1.agents[1]] };
+    const editor = fromContract(scenario, { allowDraft: true });
+    expect(editor.agents[0].kind).toBe('');
+    expect(validate(editor)).toContainEqual(expect.objectContaining({ path: 'agents.0.kind' }));
+    expect(() => fromContract(scenario)).toThrow('agents.0.kind');
   });
 
   it.each([
@@ -73,6 +73,7 @@ describe('interpretation document', () => {
     { scenario: [] },
     { interpretation: { status: 'unknown', diagnostics: [] } },
     { interpretation: { status: 'unsupported', diagnostics: [{ message: 'See agents', path: 2 }] } },
+    { interpretation: { status: 'complete', model: 'test-model', prompt_version: 'v1', diagnostics: [] } },
   ])('rejects malformed interpretation documents (%j)', (fields) => {
     const document = createInterpretationDocument({}, null, { status: 'not_interpreted', diagnostics: [] });
     expect(() => readInterpretationDocument({ ...document, ...fields })).toThrow();
