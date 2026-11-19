@@ -128,7 +128,7 @@ async def graphdb_error(_request: Request, exc: GraphDBError) -> JSONResponse:
 def interpret_scenario(request: InterpretationRequest) -> InterpretationResult | JSONResponse:
     try:
         model, output = nebula.request_interpretation(request.description)
-        return assemble_interpretation(output, model, nebula.PROMPT_VERSION)
+        return assemble_interpretation(output, model, nebula.PROMPT_VERSION, prompt_sha256=nebula.system_prompt_sha256())
     except nebula.NebulaError as exc:
         code = "interpretation_unavailable" if exc.status_code == 503 else "interpretation_failed"
         return _error(exc.status_code, SubmissionError(code=code, message=str(exc)))

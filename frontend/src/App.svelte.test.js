@@ -462,7 +462,7 @@ describe('Scenario JSON and validation workflows', () => {
 });
 
 const modelFindings = /** @type {import('./lib/interpretation.js').ModelInterpretation} */ ({
-  status: 'complete', model: 'test-model', prompt_version: 'test-v1', diagnostics: [],
+  status: 'complete', model: 'test-model', prompt_version: 'test-v1', prompt_sha256: 'c'.repeat(64), diagnostics: [],
 });
 
 /** @param {Record<string, unknown> | null} scenario @param {typeof modelFindings} findings */
@@ -526,6 +526,12 @@ describe('AI interpretation', () => {
     expect(draft().source_description.use_case).toBe(revised);
     expect(draft().interpretation.source_description).toEqual(sourceDescription);
     expect(draft().interpretation.source_changed).toBe(true);
+
+    const savedDraft = draft();
+    expect(savedDraft.interpretation.prompt_sha256).toBe(modelFindings.prompt_sha256);
+    vi.stubGlobal('confirm', () => true);
+    await importJson(savedDraft);
+    expect(draft()).toEqual(savedDraft);
   });
 
   it('requires confirmation before regeneration replaces a correction', async () => {

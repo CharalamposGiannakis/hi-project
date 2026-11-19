@@ -4,6 +4,7 @@ import json
 import os
 import re
 from functools import cache
+from hashlib import sha256
 from typing import NoReturn
 
 import httpx
@@ -14,7 +15,7 @@ from .vocabulary import CATEGORIES, concepts
 
 ENDPOINT = "https://nebula.cs.vu.nl/api/chat/completions"
 DEFAULT_MODEL = "FAST.gpt-oss:120b"
-PROMPT_VERSION = "1a.2-v6"
+PROMPT_VERSION = "1a.2-v7"
 TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
 
@@ -49,9 +50,9 @@ fields out of any known record. Each diagnostic is an object with "kind", "messa
 optionally "path" (a dot-separated candidate field path such as agents.0.roles). Allowed kinds are
 "missing_information", "ambiguity", "unsupported_vocabulary", "unsupported_relationship", and "structural".
 Write concise diagnostics that explain the issue and preserve the original term or relationship where
-helpful. For an unsupported concept, suggest the term for review in the message only. Never extend the
-HI ontology or insert unapproved concepts into the scenario. Use [] for diagnostics when there
-are no findings. Use strict JSON without Markdown or additional response keys.
+helpful. Include the suggested "term" and its HINT "category" in vocabulary diagnostics. Never extend
+the HI ontology or insert unapproved concepts into the scenario. Use [] for diagnostics when there are
+no findings. Use strict JSON without Markdown or additional response keys.
 
 Example of the output shape when the only described fact is a member named Morgan who is human:
 {{"scenario":{{"agents":[{{"id":"morgan","name":"Morgan","kind":"human"}}]}},"diagnostics":[
@@ -69,7 +70,8 @@ Interpretation rules:
 - HINT identifiers are case-sensitive local IDs, not labels or IRIs. Compare the described meaning
   against the labels and definitions in the relevant category. Choose a concept only when both the
   category and meaning fit. If no concept fits, keep the record and leave that slot unresolved. Record the
-  unsupported term as a vocabulary suggestion. If several plausibly fit, report the ambiguity.
+  unsupported term as a vocabulary suggestion. Check the approved IDs and labels in the relevant
+  category before reporting a term as unavailable. If several plausibly fit, report the ambiguity.
 - Concept fields by category: use_case.concept = UseCase, use_case.domain = Domain, goal.concept = Goal,
   tasks[].concept = Task, agents[].roles = Role, context.concept = Context, context.phenomena = Phenomenon,
   team_constraints and context.constraints = Constraint, capabilities[].concept = Capability,
@@ -77,8 +79,10 @@ Interpretation rules:
   evaluations[].concept = Evaluation, their metrics = Metric, interactions[].intent = InteractionIntent,
   and interactions[].modality = InteractionModality. Agent kind is a separate field (human or artificial).
   Leave an unclear kind unresolved and report why. Keep distinct people, systems, and other entities
-  separate even if they share a role or concept. Use unique lower-case IDs within each entity list and
-  refer to existing entries by their IDs. The application assigns the scenario ID, so omit it.
+  separate even if they share a role or concept. Generate a unique lower-case ID for every proposed
+  entity with an id field and use that ID in references. IDs are application identifiers and require
+  no evidence from the description. Missing IDs need no diagnostic. The application assigns the
+  scenario ID, so omit it.
 - One use case has one implicit HI team (hi:hasHITeam). The model has one team goal and one optional
   operating context. Distinguish Context constraints from independent Team constraints. Report facts
   the canonical cardinality cannot express, such as additional independent teams or goals.
@@ -115,6 +119,11 @@ Complete canonical Scenario JSON schema:
 
 Complete approved HINT vocabulary (IDs, labels, and source definitions by category):
 {vocabulary}"""
+
+
+def system_prompt_sha256() -> str:
+    """Hash the exact UTF-8 text sent as the system message."""
+    return sha256(_system_prompt().encode("utf-8")).hexdigest()
 
 
 def _reject_non_json_constant(constant: str) -> NoReturn:

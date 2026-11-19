@@ -21,6 +21,7 @@ describe('requestInterpretation', () => {
     scenario: null,
     interpretation: {
       status: 'incomplete', model: 'test-model', prompt_version: 'test-v1',
+      prompt_sha256: 'a'.repeat(64),
       diagnostics: [{ kind: 'unsupported_relationship', message: 'No approved relation represents this.' }],
     },
   };
@@ -37,6 +38,12 @@ describe('requestInterpretation', () => {
 
   it('rejects malformed interpretation diagnostics', async () => {
     const interpretation = { ...output.interpretation, diagnostics: [{ kind: 'made-up', message: 'Issue' }] };
+    const result = await requestInterpretation({ goal: 'Goal' }, { fetch: reply(200, { ...output, interpretation }) });
+    expect(result.kind).toBe('unexpected');
+  });
+
+  it.each([undefined, 'A'.repeat(64), 'a'.repeat(63), `${'a'.repeat(63)}\n`])('rejects a missing or malformed prompt hash (%j)', async (prompt_sha256) => {
+    const interpretation = { ...output.interpretation, prompt_sha256 };
     const result = await requestInterpretation({ goal: 'Goal' }, { fetch: reply(200, { ...output, interpretation }) });
     expect(result.kind).toBe('unexpected');
   });

@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator
 
 from .model import Scenario
+from .rdf import HINT
 from .vocabulary import CATEGORIES, concepts
 
 
@@ -49,6 +50,7 @@ class InterpretationFindings(BaseModel):
     status: Literal["complete", "incomplete"]
     model: str
     prompt_version: str
+    prompt_sha256: str
     diagnostics: list[Diagnostic]
 
 
@@ -86,17 +88,74 @@ _REFERENCE_FIELDS = {
     "evaluations": {"experiment": "experiments", "executions": "executions"},
     "interactions": {"agents": "agents", "executions": "executions"},
 }
+_MANAGED_ID_PATH = re.compile(
+    r"(?:scenario\.)?(?:id|(?:use_case|goal)\.id|"
+    r"(?:tasks|agents|capabilities|executions|experiments|evaluations|interactions)(?:\.\d+|\[\d+\])\.id)"
+)
+_LABEL_SEPARATOR = re.compile(r"[\s_-]+")
+
+
+def _is_managed_id_path(path: Any) -> bool:
+    return isinstance(path, str) and _MANAGED_ID_PATH.fullmatch(path.strip()) is not None
 
 
 @cache
-def _approved_terms() -> dict[str, set[str]]:
-    return {category: {term["id"] for term in concepts(category)} for category in CATEGORIES}
+def _approved_terms() -> dict[str, dict[str, str]]:
+    return {category: {term["id"]: term["label"] for term in concepts(category)} for category in CATEGORIES}
+
+
+def _category_for_path(path: str | None) -> str | None:
+    if not path:
+        return None
+    fields = [part for part in re.split(r"[.\[\]]", path.strip().removeprefix("scenario.")) if part and not part.isdecimal()]
+    if len(fields) == 1:
+        return _CONCEPT_FIELDS["Scenario"].get(fields[0])
+    if len(fields) != 2:
+        return None
+    section, field = fields
+    schema = _SCHEMA["properties"].get(section, {})
+    schema = schema.get("items", schema)
+    schema = next((option for option in schema.get("anyOf", ()) if "$ref" in option), schema)
+    title = schema.get("$ref", "").rsplit("/", 1)[-1]
+    return _CONCEPT_FIELDS.get(title, {}).get(field)
+
+
+def _reports_approved_term(note: dict, path: str | None) -> bool:
+    vocabulary = _approved_terms()
+    category = _category_for_path(path)
+    if category is None and isinstance(note.get("category"), str) and note["category"] in vocabulary:
+        category = note["category"]
+
+    term = note.get("term")
+    if not isinstance(term, str) or not term.strip():
+        # Fall back to an identifiable subject in older, free-text diagnostics.
+        message = note["message"]
+        subject_pattern = r"""(`[^`]+`|"[^"]+"|'[^']+'|“[^”]+”|‘[^’]+’|\b[A-Za-z][A-Za-z0-9]*\b)"""
+        denied = re.search(
+            subject_pattern + r"\s+(?:is|was)\s+(?:not\s+(?:an? approved|available|listed|included|present|in)|absent|missing|unavailable)\b",
+            message, re.IGNORECASE,
+        ) or re.search(
+            r"\bno (?:approved )?(?:HINT )?(?:[A-Z][A-Za-z]+ )?(?:concept|term) (?:for|named|called) " + subject_pattern,
+            message, re.IGNORECASE,
+        )
+        term = denied[1] if denied else message
+    term = term.strip().strip("`\"'“”‘’").removeprefix(str(HINT))
+    subject = " ".join(term.split()).casefold()
+    categories = (category,) if category else vocabulary
+    for name in categories:
+        suffix = re.sub(r"([a-z])([A-Z])", r"\1 \2", name).casefold()
+        for identifier, label in vocabulary[name].items():
+            label = " ".join(label.split()).casefold()
+            if subject and subject in (identifier.casefold(), label, label.removesuffix(f" {suffix}")):
+                return True
+    return False
 
 
 class _DraftRecovery:
     def __init__(self, diagnostics: list[Diagnostic]) -> None:
         self.diagnostics = diagnostics
-        self.ids: dict[str, dict[str, str]] = {}
+        self.ids: dict[str, dict[str, str | None]] = {}
+        self.generated_ids: set[str] = set()
 
     def add(self, kind: DiagnosticKind, path: str, message: str) -> None:
         self.diagnostics.append(Diagnostic(kind=kind, path=path, message=message))
@@ -115,10 +174,13 @@ class _DraftRecovery:
             field_path = f"{path}.{field}" if path else field
             if field == "id":
                 old_id = raw.get(field)
-                draft[field] = (old_id if path and isinstance(old_id, str) and _IDENTIFIER_PATTERN.fullmatch(old_id)
-                                else str(uuid4()))
-                if path and old_id is not None and old_id != draft[field]:
-                    self.add("structural", field_path, "Assigned an editor ID because the model supplied an invalid one.")
+                if path and isinstance(old_id, str) and _IDENTIFIER_PATTERN.fullmatch(old_id):
+                    draft[field] = old_id
+                else:
+                    draft[field] = str(uuid4())
+                    self.generated_ids.add(draft[field])
+                    if path and old_id is not None and (not isinstance(old_id, str) or old_id.strip()):
+                        self.add("structural", field_path, "Assigned an editor ID because the model supplied an invalid one.")
                 continue
             category = _CONCEPT_FIELDS.get(name, {}).get(field)
             definition = next((option for option in definition.get("anyOf", ()) if option.get("type") != "null"), definition)
@@ -172,7 +234,7 @@ class _DraftRecovery:
 
     def records(self, schema: dict, source: list, path: str) -> list[dict]:
         draft = []
-        identifiers: dict[str, str] = {}
+        identifiers: dict[str, str | None] = {}
         counts = Counter(item["id"] for item in source if isinstance(item, dict) and isinstance(item.get("id"), str))
         for index, item in enumerate(source):
             if not isinstance(item, dict):
@@ -187,11 +249,27 @@ class _DraftRecovery:
                 if counts[old_id] > 1:
                     self.add("structural", f"{record_path}.id", "Assigned a unique editor ID because the model used the same ID twice.")
                     record["id"] = str(uuid4())
+                    self.generated_ids.add(record["id"])
+                    identifiers[old_id] = None
                 else:
                     identifiers[old_id] = record["id"]
             draft.append(record)
         self.ids[path] = identifiers
         return draft
+
+    def resolve_reference(self, item: str, target: str, scenario: dict) -> str | None:
+        ids = self.ids.get(target, {})
+        if item in ids:
+            return ids[item]
+        # Match display labels or exact approved concepts within the target list.
+        label = _LABEL_SEPARATOR.sub("-", item.strip().casefold())
+        matches = [
+            record["id"] for record in scenario.get(target, [])
+            if item == record.get("concept") or label == _LABEL_SEPARATOR.sub("-", record.get("name", "").casefold())
+        ]
+        if len(matches) == 1 and matches[0] in self.generated_ids:
+            return matches[0]
+        return None
 
     def resolve_references(self, scenario: dict) -> None:
         for section, fields in _REFERENCE_FIELDS.items():
@@ -201,20 +279,20 @@ class _DraftRecovery:
             for index, record in enumerate(records):
                 path = section if section == "goal" else f"{section}.{index}"
                 for field, target in fields.items():
-                    ids = self.ids.get(target, {})
                     value = record.get(field)
                     values = value if isinstance(value, list) else [value] if value else []
                     resolved = []
                     for item in values:
-                        if item not in ids:
+                        identifier = self.resolve_reference(item, target, scenario)
+                        if identifier is None:
                             self.add("technical_validation", f"{path}.{field}",
                                      f"Reference {item[:100]!r} does not resolve to a unique entry in {target}.")
-                        resolved.append(ids.get(item, item))
+                        resolved.append(identifier if identifier is not None else item)
                     if resolved:
                         record[field] = resolved if isinstance(value, list) else resolved[0]
 
 
-def assemble_interpretation(raw: Any, model: str, prompt_version: str) -> InterpretationResult:
+def assemble_interpretation(raw: Any, model: str, prompt_version: str, *, prompt_sha256: str) -> InterpretationResult:
     diagnostics: list[Diagnostic] = []
     recovery = _DraftRecovery(diagnostics)
     envelope = raw if isinstance(raw, dict) else {}
@@ -226,9 +304,13 @@ def assemble_interpretation(raw: Any, model: str, prompt_version: str) -> Interp
                     or not note["message"].strip()):
                 recovery.add("structural", "scenario", "The model returned an unreadable interpretation diagnostic.")
                 continue
-            path = note.get("path")
+            path = note.get("path") if isinstance(note.get("path"), str) else None
+            if note["kind"] == "unsupported_vocabulary" and _reports_approved_term(note, path):
+                continue
+            if note["kind"] == "missing_information" and _is_managed_id_path(path):
+                continue
             diagnostics.append(Diagnostic(kind=note["kind"], message=note["message"].strip()[:1000],
-                                          path=path[:150] if isinstance(path, str) else None))
+                                          path=path[:150] if path else None))
     else:
         recovery.add("structural", "scenario", "The model did not return a list of interpretation diagnostics.")
 
@@ -254,5 +336,5 @@ def assemble_interpretation(raw: Any, model: str, prompt_version: str) -> Interp
     unique = {(note.kind, note.path, note.message): note for note in diagnostics}
     return InterpretationResult(scenario=scenario, interpretation=InterpretationFindings(
         status="complete" if scenario is not None and not unique else "incomplete",
-        model=model, prompt_version=prompt_version, diagnostics=list(unique.values()),
+        model=model, prompt_version=prompt_version, prompt_sha256=prompt_sha256, diagnostics=list(unique.values()),
     ))

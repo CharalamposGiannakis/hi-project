@@ -24,6 +24,7 @@ describe('interpretation document', () => {
     const answers = { ...sentDescription, additional_notes: 'Assistant role under discussion.' };
     const document = createInterpretationDocument(answers, candidate, {
       status: 'incomplete', model: 'test-model', prompt_version: 'test-v1',
+      prompt_sha256: 'b'.repeat(64),
       source_description: sentDescription, generated_scenario: generated,
       diagnostics: [{ kind: 'missing_information', message: 'Agent type is missing.', path: 'agents.0.kind' }],
       source_changed: true, scenario_changed: true,
@@ -37,6 +38,17 @@ describe('interpretation document', () => {
       status: 'simulated_incomplete', source_changed: true, diagnostics: [{ message: 'The agent role is missing.' }],
     });
     expect(readInterpretationDocument(legacy)).toEqual(legacy);
+  });
+
+  it('accepts downloaded Nebula drafts from before prompt hashes were recorded', () => {
+    const answers = { use_case: 'An older description' };
+    const olderDraft = createInterpretationDocument(answers, s1, {
+      status: 'complete', model: 'test-model', prompt_version: 'test-v1', diagnostics: [],
+      source_description: answers, generated_scenario: s1,
+    });
+    expect(readInterpretationDocument(olderDraft)).toEqual(olderDraft);
+    const malformed = { ...olderDraft, interpretation: { ...olderDraft.interpretation, prompt_sha256: 'invalid' } };
+    expect(() => readInterpretationDocument(malformed)).toThrow();
   });
 
   it('leaves omitted goal links unresolved in drafts and rejects duplicate editor identities', () => {

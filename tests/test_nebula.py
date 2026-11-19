@@ -1,4 +1,5 @@
 import json
+from hashlib import sha256
 
 import httpx
 import pytest
@@ -55,6 +56,7 @@ def test_request_includes_exact_answers_canonical_schema_and_all_hint_concepts(s
     assert payload["temperature"] == 0
     system, user = payload["messages"]
     assert (system["role"], user["role"]) == ("system", "user")
+    assert nebula.system_prompt_sha256() == sha256(system["content"].encode("utf-8")).hexdigest()
     assert json.loads(user["content"]) == DESCRIPTION
     assert KEY not in system["content"] and KEY not in user["content"]
     instructions, _, schemas = system["content"].partition("Complete canonical Scenario JSON schema:\n")
@@ -70,6 +72,8 @@ def test_request_includes_exact_answers_canonical_schema_and_all_hint_concepts(s
     assert "goal.required_tasks" in instructions
     assert "unsupported_relationship" in instructions
     assert "A single named agent is enough to return a draft" in instructions
+    assert 'suggested "term" and its HINT "category"' in instructions
+    assert "Missing IDs need no diagnostic" in instructions
 
 
 def test_configured_model_and_fenced_json(stub_nebula, monkeypatch):

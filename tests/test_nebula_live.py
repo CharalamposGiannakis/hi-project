@@ -6,15 +6,20 @@ from time import monotonic
 
 import pytest
 
+from hi_scenario import nebula
 from hi_scenario.interpretation import InterpretationRequest, assemble_interpretation
 from hi_scenario.model import Scenario
-from hi_scenario.nebula import PROMPT_VERSION, request_interpretation
 from hi_scenario.rdf import to_rdf
 from hi_scenario.validation import validate_rdf
 
 
+LIVE_ENABLED = os.getenv("HI_NEBULA_LIVE") == "1"
+S2_REPEATS = int(os.getenv("HI_NEBULA_S2_REPEATS", "1")) if LIVE_ENABLED else 1
+if S2_REPEATS < 1:
+    raise ValueError("HI_NEBULA_S2_REPEATS must be a positive integer.")
+
 pytestmark = pytest.mark.skipif(
-    os.getenv("HI_NEBULA_LIVE") != "1", reason="Set HI_NEBULA_LIVE=1 to evaluate Nebula",
+    not LIVE_ENABLED, reason="Set HI_NEBULA_LIVE=1 to evaluate Nebula",
 )
 
 
@@ -23,16 +28,23 @@ def _interpret(case, description):
         pytest.fail("Set NEBULA_API_KEY in the environment before opting in to live Nebula tests.")
     submitted = InterpretationRequest(description=description)
     start = monotonic()
-    model, raw = request_interpretation(submitted.description)
-    result = assemble_interpretation(raw, model, PROMPT_VERSION)
+    model, raw = nebula.request_interpretation(submitted.description)
+    result = assemble_interpretation(
+        raw, model, nebula.PROMPT_VERSION, prompt_sha256=nebula.system_prompt_sha256(),
+    )
     findings = result.interpretation
     candidate = result.scenario or {}
     counts = Counter(item.kind for item in findings.diagnostics)
+    tasks = candidate.get("tasks", [])
+    task_concepts = {task["id"]: task.get("concept") for task in tasks}
+    required_tasks = candidate.get("goal", {}).get("required_tasks", [])
     print(
-        f"\n{case} ({monotonic() - start:.1f}s, prompt {findings.prompt_version}): {findings.status}; "
-        f"{len(candidate.get('tasks', []))} tasks, {len(candidate.get('agents', []))} agents, "
+        f"\n{case} ({monotonic() - start:.1f}s, model {findings.model}, "
+        f"prompt {findings.prompt_version}, SHA-256 {findings.prompt_sha256}): {findings.status}; "
+        f"{len(tasks)} tasks, {len(candidate.get('agents', []))} agents, "
         f"{len(candidate.get('executions', []))} executions; diagnostic counts {dict(sorted(counts.items()))}"
     )
+    print(f"  Task inventory: {task_concepts}; goal-required task IDs: {required_tasks}", flush=True)
     assert result.scenario is not None, f"{case} produced no editable candidate."
     return result.scenario, findings
 
@@ -106,8 +118,9 @@ def test_live_s4_keeps_known_partial_facts_without_inventing_an_artificial_membe
     assert "agents" in missing and "goal.required_tasks" in missing
 
 
-def test_live_s2_reports_unrepresentable_direct_interaction_goal_link_and_assignment():
-    candidate, findings = _interpret("S2 unsupported relationships", {
+@pytest.mark.parametrize("run", range(1, S2_REPEATS + 1))
+def test_live_s2_reports_unrepresentable_direct_interaction_goal_link_and_assignment(run):
+    candidate, findings = _interpret(f"S2 unsupported relationships, run {run}/{S2_REPEATS}", {
         "use_case": "Collaborative manipulation in industrial robotics.",
         "goal": "The team aims to retrieve a tool safely.",
         "tasks": (

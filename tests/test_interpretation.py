@@ -20,7 +20,9 @@ def scenario_example(index=1):
 
 
 def proposal(candidate, diagnostics=None):
-    return assemble_interpretation({"scenario": candidate, "diagnostics": diagnostics or []}, "test-model", "test-version")
+    return assemble_interpretation(
+        {"scenario": candidate, "diagnostics": diagnostics or []}, "test-model", "test-version", prompt_sha256="0" * 64,
+    )
 
 
 @pytest.mark.parametrize("index", range(1, 8))
@@ -28,7 +30,8 @@ def test_keeps_all_approved_example_facts_and_references(index):
     example = scenario_example(index)
     result = proposal(example)
     assert result.interpretation.model_dump() == {
-        "status": "complete", "model": "test-model", "prompt_version": "test-version", "diagnostics": [],
+        "status": "complete", "model": "test-model", "prompt_version": "test-version",
+        "prompt_sha256": "0" * 64, "diagnostics": [],
     }
     assert result.scenario["id"] != example["id"]
     assert {**result.scenario, "id": example["id"]} == example
@@ -71,6 +74,30 @@ def test_reports_unsupported_terms_and_relationships_without_promoting_them():
     Scenario.model_validate(result.scenario)
 
 
+@pytest.mark.parametrize("claim", [
+    {"term": "RetrieveToolTask", "category": "Task", "message": "RetrieveToolTask is unavailable."},
+    {"term": "  Retrieve  tool ", "category": "Task", "message": "No matching vocabulary."},
+    {"path": "tasks.2.concept", "message": "RetrieveToolTask is not in HINT."},
+    {"path": "scenario.tasks[2].concept", "message": "No approved HINT Task concept for ‘Retrieve tool’."},
+    {"term": "https://w3id.org/hi-thesaurus/RetrieveToolTask", "message": "No matching vocabulary."},
+])
+def test_drops_vocabulary_claims_that_contradict_approved_hint(claim):
+    result = proposal(scenario_example(2), [{"kind": "unsupported_vocabulary", **claim}])
+    assert result.interpretation.status == "complete"
+    assert result.interpretation.diagnostics == []
+
+
+def test_retains_unsupported_terms_and_wrong_category_claims():
+    unsupported = [
+        {"term": "MoodSteward", "category": "Role", "message": "Mood steward needs a separate role."},
+        {"term": "RetrieveToolTask", "category": "Task", "path": "agents.0.roles.0",
+         "message": "RetrieveToolTask is unavailable as a Role."},
+        {"path": "tasks.0.concept", "message": "There is no HINT match for scanning; 'RetrieveToolTask' is an alternative."},
+    ]
+    result = proposal(scenario_example(2), [{"kind": "unsupported_vocabulary", **entry} for entry in unsupported])
+    assert [item.message for item in result.interpretation.diagnostics] == [entry["message"] for entry in unsupported]
+
+
 def test_recovers_known_records_and_never_guesses_an_ambiguous_reference():
     example = scenario_example()
     task = example["tasks"][0]
@@ -95,7 +122,7 @@ def test_null_and_bare_candidates_are_recoverable():
     assert null_result.scenario is None
     assert null_result.interpretation.status == "incomplete"
     assert null_result.interpretation.diagnostics[0].kind == "missing_information"
-    bare_result = assemble_interpretation(scenario_example(), "test-model", "1")
+    bare_result = assemble_interpretation(scenario_example(), "test-model", "1", prompt_sha256="0" * 64)
     assert bare_result.scenario["agents"] == scenario_example()["agents"]
     assert bare_result.interpretation.status == "incomplete"
     assert any(note.kind == "structural" for note in bare_result.interpretation.diagnostics)
@@ -145,6 +172,7 @@ def test_api_keeps_interpretation_separate_from_explicit_rdf_validation(monkeypa
         assert response.status_code == 200
         result = response.json()
         assert result["interpretation"]["prompt_version"] == nebula.PROMPT_VERSION
+        assert result["interpretation"]["prompt_sha256"] == nebula.system_prompt_sha256()
         assert result["interpretation"]["model"] == "test-model"
         assert client.post("/scenarios/preview", json=result["scenario"]).status_code == 200
         assert client.post("/scenarios/preview", json=result).status_code == 422

@@ -19,11 +19,11 @@ export const questions = /** @type {const} */ ([
  * @typedef {'complete' | 'incomplete'} ModelStatus
  * @typedef {'not_interpreted' | 'simulated_complete' | 'simulated_incomplete' | 'unsupported'} LegacyStatus
  * @typedef {{ kind?: DiagnosticKind, message: string, path?: string }} InterpretationDiagnostic
- * @typedef {{ status: ModelStatus, model: string, prompt_version: string, diagnostics: InterpretationDiagnostic[] }} ModelInterpretation
+ * @typedef {{ status: ModelStatus, model: string, prompt_version: string, prompt_sha256?: string, diagnostics: InterpretationDiagnostic[] }} ModelInterpretation
  * @typedef {(ModelInterpretation & { source_description: Answers, generated_scenario: Record<string, unknown> | null })
  *   | { status: LegacyStatus, diagnostics: InterpretationDiagnostic[], source_description?: never, generated_scenario?: never }} InterpretationRecord
  * @typedef {InterpretationRecord & { source_changed?: true, scenario_changed?: true }} Interpretation
- * @typedef {{ scenario: Record<string, unknown> | null, interpretation: ModelInterpretation }} InterpretationResponse
+ * @typedef {{ scenario: Record<string, unknown> | null, interpretation: ModelInterpretation & { prompt_sha256: string } }} InterpretationResponse
  */
 
 export const diagnosticLabels = {
@@ -78,11 +78,17 @@ function isDiagnostic(value) {
     && (!Object.hasOwn(value, 'kind') || (typeof value.kind === 'string' && Object.hasOwn(diagnosticLabels, value.kind)));
 }
 
+/** @param {unknown} value @returns {value is string} */
+function isPromptHash(value) {
+  return typeof value === 'string' && value.length === 64 && !/[^0-9a-f]/.test(value);
+}
+
 /** @param {unknown} value @returns {value is ModelInterpretation} */
 function isModelInterpretation(value) {
   return isRecord(value) && (value.status === 'complete' || value.status === 'incomplete')
     && typeof value.model === 'string' && value.model.length > 0
     && typeof value.prompt_version === 'string' && value.prompt_version.length > 0
+    && (!Object.hasOwn(value, 'prompt_sha256') || isPromptHash(value.prompt_sha256))
     && Array.isArray(value.diagnostics) && value.diagnostics.every((diagnostic) => isDiagnostic(diagnostic) && diagnostic.kind !== undefined);
 }
 
@@ -90,6 +96,7 @@ function isModelInterpretation(value) {
 export function isInterpretationResponse(value) {
   return isRecord(value) && (value.scenario === null || isRecord(value.scenario))
     && isModelInterpretation(value.interpretation)
+    && Object.hasOwn(value.interpretation, 'prompt_sha256')
     && (value.scenario !== null || value.interpretation.status === 'incomplete');
 }
 
@@ -120,8 +127,9 @@ export function readInterpretationDocument(value) {
         || (generated === null && interpretation.status === 'complete')) {
       throw new Error('The interpretation must include the sent description and generated scenario.');
     }
-    const { status, model, prompt_version, diagnostics } = interpretation;
-    record = { status, model, prompt_version, diagnostics, source_description: sentDescription, generated_scenario: generated };
+    const { status, model, prompt_version, prompt_sha256, diagnostics } = interpretation;
+    record = { status, model, prompt_version, ...(prompt_sha256 === undefined ? {} : { prompt_sha256 }),
+      diagnostics, source_description: sentDescription, generated_scenario: generated };
   } else if (isLegacyStatus(status) && Array.isArray(diagnostics) && diagnostics.every(isDiagnostic)) {
     record = { status, diagnostics };
   } else {

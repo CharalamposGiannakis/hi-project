@@ -22,7 +22,7 @@ Researchers create, inspect, edit, validate, and eventually submit HI scenarios 
 
 **Phase 1A — Generate or regenerate**
 
-The wizard sends the full description to FastAPI for interpretation by Nebula. Each request includes the Python `Scenario` schema and all approved HINT concepts from the checked-in thesaurus. The backend checks the proposal and retains supported fields in a canonical-shaped draft even when required facts are missing. The interpretation document records the source sent, proposed candidate, findings, model, and prompt version alongside the current editable fields. Explicit technical validation sends only the edited candidate through the existing RDF and SHACL pipeline.
+The wizard sends the full description to FastAPI for interpretation by Nebula. Each request includes the Python `Scenario` schema and all approved HINT concepts from the checked-in thesaurus. The backend checks the proposal and retains supported fields in a canonical-shaped draft even when required facts are missing. The interpretation document records the source sent, proposed candidate, findings, model, prompt version, and SHA-256 hash of the effective system prompt alongside the current editable fields. Explicit technical validation sends only the edited candidate through the existing RDF and SHACL pipeline.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
