@@ -64,6 +64,8 @@ The wizard sends the full description to FastAPI for interpretation by Nebula. E
 - **Validation:** Keep technical validation and RDF preview in the Scenario Builder. Incomplete or unsupported information must be reported rather than invented.
 - **Submission:** A future **Submit for Scientific Review** action will transfer the scenario to Pillar 2. Phase 1A does not automatically publish to GraphDB.
 
+**Note:**LLM interpretation may skip described information or fail to map concepts to the approved HINT vocabulary; generated scenarios require researcher verification, and unresolved representation gaps remain subject to scientific review. 
+
 **Phase 1B — Deferred**
 
 Natural-language modifications to selected parts of an existing JSON scenario. Consider only if researchers need this functionality.
