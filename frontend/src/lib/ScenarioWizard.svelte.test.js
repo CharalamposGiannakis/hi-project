@@ -36,7 +36,7 @@ it('skips unanswered sections, retains raw answers, and shows notes in the full 
   const textarea = /** @type {HTMLTextAreaElement} */ (document.getElementById('scenario-wizard-answer'));
   const progress = /** @type {HTMLProgressElement} */ (document.querySelector('progress'));
   expect(button('Previous').disabled).toBe(true);
-  expect(button('Simulate interpretation').disabled).toBe(true);
+  expect(button('Convert to JSON using AI').disabled).toBe(true);
   expect(progress.value).toBe(1);
 
   const description = '  A person and a robot work together.\nMore details to follow.  ';
@@ -69,6 +69,6 @@ it('skips unanswered sections, retains raw answers, and shows notes in the full 
     flushSync();
   }
   expect(textarea.value).toBe(description);
-  button('Simulate interpretation').click();
+  button('Convert to JSON using AI').click();
   expect(onInterpret).toHaveBeenCalledOnce();
 });

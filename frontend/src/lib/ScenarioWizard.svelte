@@ -8,8 +8,9 @@
    *   onAnswer: (id: typeof questions[number]['id'], value: string) => void,
    *   onInterpret: () => void,
    *   onLoadExample: (kind: 'complete' | 'incomplete') => void,
+   *   interpreting?: boolean,
    * }} */
-  let { answers, onAnswer, onInterpret, onLoadExample } = $props();
+  let { answers, onAnswer, onInterpret, onLoadExample, interpreting = false } = $props();
 
   let step = $state(0);
   let heading = $state(/** @type {HTMLHeadingElement | undefined} */ (undefined));
@@ -63,9 +64,10 @@
     {/if}
   </details>
 
-  <div class="simulation">
-    <button type="button" class="primary" onclick={onInterpret} disabled={!answeredQuestions.length}>Simulate interpretation</button>
-    <p class="hint">The simulation recognizes the sample descriptions. You can also write and download your own description.</p>
+  <div class="conversion">
+    <button type="button" class="primary" onclick={onInterpret} disabled={!answeredQuestions.length || interpreting}>Convert to JSON using AI</button>
+    <p class="hint">Converting sends your full description to VU Nebula. Review the generated candidate before using it.</p>
+    {#if interpreting}<p class="status" role="status">Interpreting description…</p>{/if}
     <div class="toolbar">
       <button type="button" onclick={() => onLoadExample('complete')}>Load complete description</button>
       <button type="button" onclick={() => onLoadExample('incomplete')}>Load incomplete description</button>
@@ -115,7 +117,7 @@
     overflow-wrap: anywhere;
   }
 
-  .simulation {
+  .conversion {
     margin-top: 1rem;
     padding-top: 1rem;
     border-top: 1px solid var(--border);

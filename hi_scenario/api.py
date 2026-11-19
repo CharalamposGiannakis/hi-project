@@ -10,7 +10,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from rdflib import Graph
 
+from . import nebula
 from .graphdb import GraphDBError, connect_graphdb
+from .interpretation import InterpretationRequest, InterpretationResult, assemble_interpretation
 from .model import Identifier, Scenario
 from .rdf import to_ntriples, to_rdf
 from .validation import validate_rdf
@@ -42,7 +44,7 @@ class SubmissionError(BaseModel):
     code: Literal[
         "invalid_request", "invalid_vocabulary", "shacl_failed", "internal_error",
         "scenario_exists", "scenario_not_found", "graphdb_unavailable",
-        "graphdb_invalid_response", "graphdb_configuration",
+        "graphdb_invalid_response", "graphdb_configuration", "interpretation_unavailable", "interpretation_failed",
     ]
     message: str
     issues: list[InputIssue] = Field(default_factory=list)
@@ -99,20 +101,41 @@ app.add_middleware(
 
 
 @app.exception_handler(RequestValidationError)
-async def invalid_request(_request: Request, exc: RequestValidationError) -> JSONResponse:
+async def invalid_request(request: Request, exc: RequestValidationError) -> JSONResponse:
     # Keep field locations and messages, without echoing payloads or exception contexts.
     issues = [
         InputIssue(location=list(error["loc"]), message=error["msg"], type=error["type"])
         for error in exc.errors()
     ]
-    return _error(422, SubmissionError(
-        code="invalid_request", message="Scenario JSON failed structural validation.", issues=issues,
-    ))
+    message = ("The description could not be submitted for interpretation."
+               if request.scope.get("endpoint") is interpret_scenario else "Scenario JSON failed structural validation.")
+    return _error(422, SubmissionError(code="invalid_request", message=message, issues=issues))
 
 
 @app.exception_handler(GraphDBError)
 async def graphdb_error(_request: Request, exc: GraphDBError) -> JSONResponse:
     return _error(exc.status_code, SubmissionError(code=exc.code, message=str(exc)))
+
+
+@app.post(
+    "/scenarios/interpret",
+    response_model=InterpretationResult,
+    responses={422: {"model": SubmissionError}, 502: {"model": SubmissionError},
+               503: {"model": SubmissionError}, 504: {"model": SubmissionError}, 500: {"model": SubmissionError}},
+    summary="Propose a scenario from a natural-language description",
+    description="Sends the description to Nebula and returns an editable candidate and interpretation diagnostics.",
+)
+def interpret_scenario(request: InterpretationRequest) -> InterpretationResult | JSONResponse:
+    try:
+        model, output = nebula.request_interpretation(request.description)
+        return assemble_interpretation(output, model, nebula.PROMPT_VERSION)
+    except nebula.NebulaError as exc:
+        code = "interpretation_unavailable" if exc.status_code == 503 else "interpretation_failed"
+        return _error(exc.status_code, SubmissionError(code=code, message=str(exc)))
+    except Exception:
+        # Provider output and source descriptions must never be copied into server logs.
+        logger.error("Scenario interpretation failed during backend processing")
+        return _error(500, SubmissionError(code="internal_error", message="Interpretation failed on the server."))
 
 
 def _validated_graph(scenario: Scenario) -> tuple[Graph, ShaclResult] | JSONResponse:

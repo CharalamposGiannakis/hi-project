@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-// Svelte App → FastAPI → RDF → SHACL, against a real backend process. Run with
+// Svelte App → FastAPI → mocked Nebula transport and real RDF/SHACL. Run with
 // `npm run test:integration`; set PYTHON to choose the interpreter (default: ../.venv, then `python`).
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -33,7 +33,9 @@ let backend;
 let baseUrl = '';
 
 beforeAll(async () => {
-  backend = await startBackend();
+  backend = await startBackend({
+    NEBULA_API_KEY: 'integration-test-key', NEBULA_MODEL: 'integration-test-model',
+  }, 'frontend.integration.nebula_stub:app');
   baseUrl = backend.url;
 }, 60_000);
 
@@ -106,6 +108,14 @@ function enterText(root, label, value) {
   flushSync();
 }
 
+/** @param {string} value */
+function enterDescription(value) {
+  const answer = /** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer'));
+  answer.value = value;
+  answer.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
 /** @param {string} json @param {string} name */
 async function importJson(json, name) {
   const input = /** @type {HTMLInputElement} */ (document.querySelector('input[type=file]'));
@@ -122,10 +132,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(draft()).toBeNull();
 
     const description = '  A researcher and an assistant review data.\nTheir roles are undecided.  ';
-    const answer = /** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer'));
-    answer.value = description;
-    answer.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    enterDescription(description);
     const raw = interpretationDocument();
     expect(raw.source_description.use_case).toBe(description);
     expect(raw.scenario).toBeNull();
@@ -138,10 +145,6 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Describe with AI');
     expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer')).value).toBe(description);
     expect(interpretationDocument().source_description).toEqual(raw.source_description);
-    clickButton('Simulate interpretation');
-    expect(interpretationDocument()).toMatchObject({
-      source_description: raw.source_description, scenario: null, interpretation: { status: 'unsupported' },
-    });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -153,22 +156,37 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(before.source_description.use_case).toMatch(/personal assistant/i);
     expect(before.scenario).toBeNull();
 
-    clickButton('Simulate interpretation');
+    clickButton('Convert to JSON using AI');
+    expect(text()).toContain('Interpreting description…');
+    await until(() => interpretationDocument().interpretation.status === 'complete');
     const interpreted = interpretationDocument();
     expect(interpreted.source_description).toEqual(before.source_description);
-    expect(interpreted.interpretation).toMatchObject({ status: 'simulated_complete' });
+    expect(interpreted.interpretation).toMatchObject({
+      status: 'complete', model: 'integration-test-model', prompt_version: expect.stringMatching(/\S/),
+      source_description: before.source_description,
+      generated_scenario: { use_case: legacyExample.use_case, agents: legacyExample.agents },
+    });
+    expect(interpreted.scenario.goal.required_tasks).toEqual([legacyExample.tasks[0].id]);
+    expect(interpreted.scenario.context).toMatchObject({ phenomena: ['SensorNoisePhenomenon'], constraints: ['PrivacyConstraint'] });
+    expect(interpreted.scenario).not.toHaveProperty('executions');
     expect(interpreted.scenario.agents.map((/** @type {{ kind: string }} */ agent) => agent.kind).sort()).toEqual(['artificial', 'human']);
+    expect(validationStatus()).toBe('Not validated');
     const agent = interpreted.scenario.agents.find((/** @type {{ kind: string }} */ choice) => choice.kind === 'human');
     const editor = /** @type {Element} */ (document.getElementById(`agent-${agent.id}`)?.closest('section'));
     enterText(editor, 'Name', 'Research participant');
     const edited = draft();
     expect(edited.agents).toContainEqual({ ...agent, name: 'Research participant' });
-    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(interpretationDocument().interpretation).toMatchObject({
+      generated_scenario: interpreted.interpretation.generated_scenario, scenario_changed: true,
+    });
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    expect(fetchSpy.mock.calls[0][0]).toBe(`${baseUrl}/scenarios/interpret`);
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({ description: before.source_description });
 
     await validateScenario();
-    expect(fetchSpy).toHaveBeenCalledOnce();
-    expect(fetchSpy.mock.calls[0][0]).toBe(`${baseUrl}/scenarios/preview`);
-    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual(edited);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[1][0]).toBe(`${baseUrl}/scenarios/preview`);
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toEqual(edited);
     const rdfToggle = [...document.querySelectorAll('summary')].find((node) => node.textContent?.trim() === 'RDF preview');
     expect(rdfToggle).toBeDefined();
     rdfToggle?.click();
@@ -177,6 +195,11 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(document.querySelector('pre.report')?.textContent).toMatch(/Conforms:\s*True/);
 
     clickButton('Describe with AI');
+    const confirm = vi.fn(() => false);
+    vi.stubGlobal('confirm', confirm);
+    clickButton('Convert to JSON using AI');
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
     clickButton('Structured Editor');
     expect(draft()).toEqual(edited);
     expect(validationStatus()).toBe('Valid');
@@ -189,12 +212,14 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
   it('downloads a partial candidate, reports missing facts and validates after structured repair', async () => {
     await mountApp(baseUrl, false);
     clickButton('Load incomplete description');
-    clickButton('Simulate interpretation');
+    clickButton('Convert to JSON using AI');
+    await until(() => interpretationDocument().interpretation.status === 'incomplete');
     const partial = interpretationDocument();
     expect(partial.scenario.agents).toMatchObject([{ kind: 'human', name: 'Human user' }]);
-    expect(partial.interpretation).toMatchObject({
-      status: 'simulated_incomplete', diagnostics: [expect.objectContaining({ path: 'agents', message: expect.stringMatching(/artificial/) })],
-    });
+    expect(partial.interpretation.diagnostics).toContainEqual(expect.objectContaining({
+      kind: 'missing_information', path: 'agents', message: expect.stringMatching(/artificial/),
+    }));
+    expect(partial.interpretation.diagnostics).toContainEqual(expect.objectContaining({ kind: 'technical_validation', path: 'agents' }));
     const createObjectURL = vi.fn((/** @type {Blob} */ _blob) => 'blob:partial-interpretation');
     vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
     const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -230,6 +255,39 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     await validateScenario();
     expect(document.querySelector('pre.rdf')?.textContent).toContain('"AI assistant provided by the researcher"');
+  });
+
+  it('keeps unsupported concepts and relationships visible as interpretation diagnostics', async () => {
+    await mountApp(baseUrl, false);
+    const description = 'We study precision ranking. Our participants exercise joint authority over the ranking.';
+    enterDescription(description);
+    clickButton('Convert to JSON using AI');
+    await until(() => interpretationDocument().interpretation.status === 'incomplete');
+
+    const result = interpretationDocument();
+    expect(result.source_description.use_case).toBe(description);
+    expect(result.scenario.use_case).toMatchObject({ name: 'Precision ranking', concept: '' });
+    expect(result.scenario).not.toHaveProperty('interactions');
+    expect(result.interpretation.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'unsupported_vocabulary', path: 'use_case.concept' }),
+      expect.objectContaining({ kind: 'unsupported_relationship' }),
+    ]));
+    expect(text()).toContain('Consider precision ranking as a vocabulary suggestion.');
+    expect(text()).toContain('cannot express the proposed joint authority relationship');
+    expect(validationStatus()).toBe('Not validated');
+  });
+
+  it('reports unavailable interpretation without leaking provider details or losing the description', async () => {
+    await mountApp(baseUrl, false);
+    const description = 'Provider temporarily unavailable.';
+    enterDescription(description);
+    clickButton('Convert to JSON using AI');
+    await until(() => Boolean(document.querySelector('[role="alert"]')));
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Nebula could not complete the interpretation');
+    expect(text()).not.toContain('Synthetic upstream provider detail');
+    expect(interpretationDocument().source_description.use_case).toBe(description);
+    expect(draft()).toBeNull();
+    expect(validationStatus()).toBe('Not validated');
   });
 
   it.each(reconstructions)('imports $label, exports it through Copy, reimports it, and previews identical RDF', async ({ canonical, triples }) => {

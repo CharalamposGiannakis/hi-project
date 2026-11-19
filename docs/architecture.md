@@ -22,7 +22,7 @@ Researchers create, inspect, edit, validate, and eventually submit HI scenarios 
 
 **Phase 1A — Generate or regenerate**
 
-Phase 1A.1 implements the wizard, interpretation document, structured editing, and explicit technical validation. The document carries `source_description`, the editable `scenario` candidate, and `interpretation` diagnostics. The candidate uses the canonical model's fields and may be incomplete in a draft. Only the candidate goes to the existing validation endpoint. The simulator recognizes two bundled descriptions. Provider-backed interpretation is planned for the next slice.
+The wizard sends the full description to FastAPI for interpretation by Nebula. Each request includes the Python `Scenario` schema and all approved HINT concepts from the checked-in thesaurus. The backend checks the proposal and retains supported fields in a canonical-shaped draft even when required facts are missing. The interpretation document records the source sent, proposed candidate, findings, model, and prompt version alongside the current editable fields. Explicit technical validation sends only the edited candidate through the existing RDF and SHACL pipeline.
 
 ```text
 ┌─────────────────────────────────────────────────────────┐
@@ -32,7 +32,7 @@ Phase 1A.1 implements the wizard, interpretation document, structured editing, a
 │  Describe your HI scenario     │     Scenario JSON      │
 │                                │                        │
 │  ● ● ● ○ ○ ○ ○ ○ ○ ○ ○         │ {                      │
-│  3 of 11 sections              │    "scenario": {       │
+│  3 of 12 sections              │    "scenario": {       │
 │                                │      ...               │
 │  ───────────────────────────   │    }                   │
 │                                │  }                     │
