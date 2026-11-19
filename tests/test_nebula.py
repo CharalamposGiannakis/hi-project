@@ -64,7 +64,8 @@ def test_request_includes_exact_answers_canonical_schema_and_all_hint_concepts(s
         "\n\nComplete approved HINT vocabulary (IDs, labels, and source definitions by category):\n"
     )
     assert json.loads(schema_text) == Scenario.model_json_schema()
-    vocabulary = json.loads(hint_text)
+    vocabulary_json, _, draft_check = hint_text.partition("\n\nFinal draft check:\n")
+    vocabulary = json.loads(vocabulary_json)
     assert vocabulary == json.loads(export_vocabulary())
     assert len(vocabulary) == 16
     assert sum(map(len, vocabulary.values())) == 215
@@ -72,6 +73,9 @@ def test_request_includes_exact_answers_canonical_schema_and_all_hint_concepts(s
     assert "goal.required_tasks" in instructions
     assert "unsupported_relationship" in instructions
     assert "A single named agent is enough to return a draft" in instructions
+    assert "Inventory before classification" in instructions
+    assert "omit that field and keep the record" in instructions
+    assert "Every explicitly required task also appears in goal.required_tasks" in draft_check
     assert 'suggested "term" and its HINT "category"' in instructions
     assert "Missing IDs need no diagnostic" in instructions
 

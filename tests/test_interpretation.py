@@ -74,6 +74,52 @@ def test_reports_unsupported_terms_and_relationships_without_promoting_them():
     Scenario.model_validate(result.scenario)
 
 
+def test_keeps_linked_records_and_stated_facts_with_unresolved_hint_mappings():
+    candidate = {
+        "use_case": {"name": "Aquarium sensor calibration"},
+        "goal": {"name": "Improve calibration consistency", "required_tasks": ["calibrate"]},
+        "tasks": [{"id": "calibrate", "name": "Calibrate a sensor", "description": "Compare readings to a reference."}],
+        "agents": [
+            {"id": "technician", "name": "Technician", "kind": "human", "roles": ["HumanUserRole"]},
+            {"id": "assistant", "name": "AI assistant", "kind": "artificial", "roles": ["AIAssistantRole"]},
+        ],
+        "context": {"description": "Calibration takes place at a water tank."},
+        "capabilities": [{"id": "mount-fixture", "concept": "SensorMountingCapability",
+                          "agents": ["technician"], "tasks": ["calibrate"]}],
+        "executions": [{"id": "trial-calibration", "task": "calibrate", "agent": "technician",
+                        "method": "CrossInstrumentReferenceMethod"}],
+        "experiments": [{"id": "calibration-trial", "description": "Planned comparison of two reference procedures.",
+                         "alternative_hypothesis": "Calibration is more repeatable with procedure A."}],
+        "evaluations": [{"id": "drift-evaluation", "experiment": "calibration-trial", "executions": ["trial-calibration"],
+                         "metrics": ["CalibrationDriftMetric"], "description": "Measure drift after calibration."}],
+        "interactions": [{"id": "review", "agents": ["technician", "assistant"], "executions": ["trial-calibration"],
+                          "modality": "VerbalDialogueModality", "description": "The pair discuss the observed readings."}],
+    }
+    result = proposal(candidate)
+    draft = result.scenario
+
+    assert result.interpretation.status == "incomplete"
+    assert draft["use_case"]["name"] == candidate["use_case"]["name"]
+    assert draft["use_case"]["concept"] == draft["goal"]["concept"] == ""
+    assert draft["goal"]["required_tasks"] == ["calibrate"]
+    assert draft["tasks"] == [{**candidate["tasks"][0], "concept": ""}]
+    assert draft["agents"] == candidate["agents"]
+    assert draft["context"] == {**candidate["context"], "concept": ""}
+    assert draft["capabilities"] == [{**candidate["capabilities"][0], "concept": ""}]
+    assert draft["executions"] == [{"id": "trial-calibration", "concept": "", "task": "calibrate", "agent": "technician"}]
+    assert draft["experiments"] == [{**candidate["experiments"][0], "concept": "", "null_hypothesis": ""}]
+    assert draft["evaluations"] == [{**candidate["evaluations"][0], "concept": "", "metrics": []}]
+    assert draft["interactions"] == [{**candidate["interactions"][0], "intent": ""}]
+
+    findings = {(note.kind, note.path) for note in result.interpretation.diagnostics}
+    assert {("unsupported_vocabulary", "capabilities.0.concept"),
+            ("unsupported_vocabulary", "executions.0.method"),
+            ("unsupported_vocabulary", "evaluations.0.metrics.0"),
+            ("missing_information", "experiments.0.null_hypothesis")} <= findings
+    with pytest.raises(ValidationError):
+        Scenario.model_validate(draft)
+
+
 @pytest.mark.parametrize("claim", [
     {"term": "RetrieveToolTask", "category": "Task", "message": "RetrieveToolTask is unavailable."},
     {"term": "  Retrieve  tool ", "category": "Task", "message": "No matching vocabulary."},

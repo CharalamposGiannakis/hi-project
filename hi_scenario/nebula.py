@@ -15,7 +15,7 @@ from .vocabulary import CATEGORIES, concepts
 
 ENDPOINT = "https://nebula.cs.vu.nl/api/chat/completions"
 DEFAULT_MODEL = "FAST.gpt-oss:120b"
-PROMPT_VERSION = "1a.2-v7"
+PROMPT_VERSION = "1a.2-v8"
 TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 
 
@@ -59,12 +59,29 @@ Example of the output shape when the only described fact is a member named Morga
 {{"kind":"missing_information","path":"agents.0.roles","message":"Morgan's team role is unspecified."}},
 {{"kind":"missing_information","path":"agents","message":"An artificial member is unspecified."}}]}}
 
+Inventory before classification: add a separate record for every explicitly described task,
+capability, performed execution, interaction, experiment design, and evaluation. Keep its stated
+name, description, hypotheses, and links wherever the schema has those fields. If a HINT concept,
+role, intent, modality, or method has no suitable match, omit that field and keep the record.
+Report that source term as unsupported_vocabulary at the unresolved field's path. Use
+missing_information when the description itself leaves a fact unspecified. Preserve wording
+that has no free-text field in the diagnostic for that record.
+
+For example, if comparison is required to check consistency, an observer can compare readings
+and already did, and the observer proposed a repeatability pilot with one stated hypothesis,
+keep these records and links even when their HINT classifications are unresolved:
+{{"agents":[{{"id":"person","name":"Observer","kind":"human"}}],
+  "goal":{{"id":"consistency","name":"Check consistency","required_tasks":["compare"]}},
+  "tasks":[{{"id":"compare","name":"Compare readings"}}],
+  "capabilities":[{{"id":"comparison","agents":["person"],"tasks":["compare"]}}],
+  "executions":[{{"id":"comparison-run","agent":"person","task":"compare"}}],
+  "experiments":[{{"id":"pilot","description":"Proposed repeatability pilot.",
+    "null_hypothesis":"Repeating the test does not change the result."}}]}}
+Include the unresolved-field diagnostics alongside the scenario.
+
 Interpretation rules:
-- Represent only entities and links supported by the answers. A suggested, planned, hypothetical, or
-  missing fact is not evidence of an observed fact. The canonical minimum is one named use case, one
-  named team goal, at least one required task, and at least one named human and one named artificial
-  team member, each with at least one approved role. A missing minimum is a diagnostic, never a reason
-  to invent a member, type, task, goal, role, relationship, method, or hypothesis. Display names may
+- Represent only entities and links supported by the answers. Preserve expressly described plans
+  for experiments and evaluations as plans. Leave missing fields unresolved. Display names may
   be faithful short labels for clearly described entities, such as "human reviewer" if no proper name
   is given. Do not invent an identity or biography to provide a display name.
 - HINT identifiers are case-sensitive local IDs, not labels or IRIs. Compare the described meaning
@@ -101,12 +118,14 @@ Interpretation rules:
   does not establish execution. The canonical fields do not represent assignment or policy-level
   eligibility independently. When a person or system is explicitly assigned a task, add an
   unsupported_relationship diagnostic for that assignment even when no task was performed.
-  Keep multiple described executions of the same task separate.
+  Keep distinct abilities separate, even for the same agent. Record each stated performance as
+  its own execution linked to the performer and the task, even when its HINT type is unresolved.
 - An interaction has explicit participants (hi:hasAgentInvolved), intent, modality, and optional links
   to particular executions. Do not infer participants from performers. A direct Interaction-to-Goal
   relationship is unsupported by this representation. An evaluation links to its experiment
   (hi:hasExperiment) and any evaluated executions. Distinguish experiment metrics from evaluation
-  metrics. Preserve stated null and alternative hypotheses and flag either when missing.
+  metrics. Preserve explicitly described experiment designs, including their prospective wording.
+  Preserve stated null and alternative hypotheses and flag either when missing.
 
 Before responding, check each described relationship against the fields below. For each distinct
 asserted relationship the schema cannot represent, add its own unsupported_relationship diagnostic.
@@ -118,7 +137,14 @@ Complete canonical Scenario JSON schema:
 {schema}
 
 Complete approved HINT vocabulary (IDs, labels, and source definitions by category):
-{vocabulary}"""
+{vocabulary}
+
+Final draft check:
+- Each separately described task, ability, performed execution, interaction, experiment, and
+  evaluation has a scenario record even if its HINT field is unresolved.
+- Every explicitly required task also appears in goal.required_tasks. Keep the ID links and stated
+  text for partially classified records. Emit diagnostics alongside those records.
+- When the stated term matches an approved concept in the right category, use the approved ID."""
 
 
 def system_prompt_sha256() -> str:
