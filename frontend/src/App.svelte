@@ -12,6 +12,7 @@
   import ReferenceSelect from './lib/ReferenceSelect.svelte';
   import RdfPreview from './lib/RdfPreview.svelte';
   import ScenarioWizard from './lib/ScenarioWizard.svelte';
+  import KnowledgeExplorer from './lib/KnowledgeExplorer.svelte';
   import {
     emptyScenario,
     findConcept,
@@ -33,6 +34,7 @@
   let scenario = $state(initialScenario);
   let emptyEditor = $state(JSON.stringify(initialScenario));
   let loadedCandidate = $state(false);
+  let view = $state(/** @type {'builder' | 'explorer'} */ ('builder'));
   let mode = $state(/** @type {'describe' | 'structured'} */ ('describe'));
   let wizardKey = $state(0);
   let answers = $state(/** @type {import('./lib/interpretation.js').Answers} */ ({}));
@@ -365,19 +367,23 @@
 </script>
 
 <header>
-  <h1>HI Scenario Builder</h1>
-  <p class="lead">
-    Describe a Hybrid Intelligence scenario, refine its HINT concepts, and validate the resulting RDF.
-  </p>
-  <div class="toolbar">
-    <button type="button" onclick={startNew}>New scenario</button>
-    <button type="button" onclick={loadExample}>Load S1 example</button>
-    <label class="button file-button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} /></label>
-  </div>
-  {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
+  <h1>{view === 'builder' ? 'HI Scenario Builder' : 'HI Knowledge Explorer'}</h1>
+  <nav class="toolbar workspace-navigation" aria-label="Research workspace">
+    <button type="button" aria-controls="builder-view" aria-pressed={view === 'builder'} onclick={() => (view = 'builder')}>Scenario Builder</button>
+    <button type="button" aria-controls="explorer-view" aria-pressed={view === 'explorer'} onclick={() => (view = 'explorer')}>Knowledge Explorer</button>
+  </nav>
+  {#if view === 'builder'}
+    <p class="lead">Describe a Hybrid Intelligence scenario, refine its HINT concepts, and validate the resulting RDF.</p>
+    <div class="toolbar">
+      <button type="button" onclick={startNew}>New scenario</button>
+      <button type="button" onclick={loadExample}>Load S1 example</button>
+      <label class="button file-button">Open JSON file… <input type="file" accept=".json,application/json" onchange={openFile} /></label>
+    </div>
+    {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
+  {/if}
 </header>
 
-<main>
+<main id="builder-view" hidden={view !== 'builder'}>
   <div class="scenario-editor">
     <div class="toolbar input-methods" role="group" aria-label="Scenario input method">
       <button type="button" aria-controls="description-panel" aria-pressed={mode === 'describe'} onclick={() => (mode = 'describe')}>Describe with AI</button>
@@ -646,4 +652,8 @@
       <pre class="json" id="scenario-json" role="region" tabindex="0" aria-label="Scenario JSON (read-only)">{json}</pre>
     </section>
   </div>
+</main>
+
+<main id="explorer-view" class="explorer-view" hidden={view !== 'explorer'}>
+  <KnowledgeExplorer active={view === 'explorer'} draft={candidate} />
 </main>

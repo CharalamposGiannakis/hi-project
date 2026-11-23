@@ -24,6 +24,7 @@ services:
     environment:
       GRAPHDB_URL: http://graphdb:7200
       GRAPHDB_REPOSITORY: hi
+      GRAPHDB_APPROVED_SCENARIO_IDS: ${GRAPHDB_APPROVED_SCENARIO_IDS:-}
       GRAPHDB_WORKBENCH_URL: ${WORKBENCH_PUBLIC_URL:?Set the browser-accessible Workbench URL}
       NEBULA_API_KEY: ${NEBULA_API_KEY:-}
       NEBULA_MODEL: ${NEBULA_MODEL:-FAST.gpt-oss:120b}

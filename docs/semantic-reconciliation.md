@@ -179,16 +179,16 @@ Automated tests compare generated scenarios against the original research RDF an
 
 The research material defines twelve Competency Questions (CQs). They describe what researchers should be able to investigate using the knowledge graph.
 
-**Currently, only CQ1 is implemented and verified in the application.** It retrieves the composition of a stored HI team, including its members and their roles.
+The Knowledge Explorer adapts CQ1 (team composition), CQ2 (recorded capabilities and task requirements), CQ5 (execution-linked interactions), CQ8 (execution-linked evaluations and experiments), and CQ11 (contextual phenomena) from the research notebook. The Explorer follows recorded RDF links and preserves each scenario as a separate source.
 
 The remaining questions have different requirements:
 
 | Questions | Current situation |
 |---|---|
-| CQ2–3 | Concern capabilities, tasks, and possible team compositions. Relevant information exists, but application queries remain unverified. |
+| CQ3 | Concerns possible team compositions beyond the recorded capability matches reported by CQ2. |
 | CQ4 | Depends on inferred relationships that the current GraphDB configuration does not provide. |
-| CQ5–8 | Concern interactions, methods, evaluations, experiments, and metrics. Relevant relationships exist, but the queries are not implemented in the application. |
-| CQ9–11 | Concern constraints and contextual phenomena. Some queries require adaptation to the application's scenario identifiers and relationships. |
+| CQ6–7 | Concern additional method, experiment, and metric relationships beyond CQ5 and CQ8. |
+| CQ9–10 | Concern constraints and similarities between scenarios and require further adaptation. |
 | CQ12 | Concerns compliance with contextual constraints, which the current model does not explicitly represent. |
 
 An independent offline comparison also found different results for CQ3, CQ7, CQ9, and CQ10 between the original research data and the reconstructed scenarios. These differences relate to representation choices already documented above.

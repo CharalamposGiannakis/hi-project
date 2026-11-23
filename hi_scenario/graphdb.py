@@ -1,7 +1,8 @@
-"""Small GraphDB adapter: create-only scenario storage and the adapted CQ1."""
+"""GraphDB access for scenario storage and scoped exploration."""
 
 import os
-from urllib.parse import urlencode
+import re
+from urllib.parse import urlencode, urlsplit
 from contextlib import contextmanager
 from threading import Lock
 from typing import Annotated
@@ -125,9 +126,9 @@ class GraphDBStore:
         self.settings = settings
         self.endpoint = f"/repositories/{settings.repository}"
 
-    def _request(self, path: str, **kwargs) -> httpx.Response:
+    def _request(self, path: str, *, method: str = "POST", **kwargs) -> httpx.Response:
         try:
-            response = self.client.post(path, **kwargs)
+            response = self.client.request(method, path, **kwargs)
             response.raise_for_status()
             return response
         except httpx.HTTPError as exc:
@@ -136,10 +137,13 @@ class GraphDBStore:
             ) from exc
 
     def _query(self, query: str) -> dict:
-        response = self._request(
+        return self._query_result(self._request(
             self.endpoint, data={"query": query, "infer": "false"},
             headers={"Accept": "application/sparql-results+json"},
-        )
+        ))
+
+    @staticmethod
+    def _query_result(response: httpx.Response) -> dict:
         try:
             result = response.json()
             if not isinstance(result, dict):
@@ -147,6 +151,36 @@ class GraphDBStore:
             return result
         except ValueError as exc:
             raise _invalid_response() from exc
+
+    def explore(self, query: str, staged: dict[str, Graph] | None = None) -> dict:
+        if not staged:
+            return self._query(query)
+
+        transactions = self.endpoint + "/transactions"
+        start = self._request(transactions)
+        # Retain the configured server even if a proxy rewrites the Location authority.
+        location = start.headers.get("Location", "")
+        try:
+            match = re.search(re.escape(transactions) + r"/([A-Za-z0-9_-]+)$", urlsplit(location).path)
+        except ValueError as exc:
+            raise _invalid_response() from exc
+        if match is None:
+            raise _invalid_response()
+        transaction = transactions + "/" + match[1]
+        try:
+            for iri, graph in staged.items():
+                self._request(
+                    transaction, method="PUT", params={"action": "ADD", "context": f"<{iri}>"},
+                    content=to_ntriples(graph).encode("utf-8"), headers={"Content-Type": "application/n-triples"},
+                )
+            return self._query_result(self._request(
+                transaction, method="PUT", params={"action": "QUERY", "infer": "false"},
+                content=query.encode("utf-8"),
+                headers={"Content-Type": "application/sparql-query", "Accept": "application/sparql-results+json"},
+            ))
+        finally:
+            # The staged graphs must never enter the committed repository.
+            self._request(transaction, method="DELETE")
 
     def exists(self, iri: str) -> bool:
         result = self._query(f"ASK {{ GRAPH <{iri}> {{ ?s ?p ?o }} }}")

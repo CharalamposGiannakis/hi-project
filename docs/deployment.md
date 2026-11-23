@@ -31,6 +31,8 @@ WORKBENCH_AUTH_PASSWORD_HASH='<operator-bcrypt-hash>'
 
 For AI interpretation, add `NEBULA_API_KEY` using the backend's Nebula credential. You can also set `NEBULA_MODEL` to override `FAST.gpt-oss:120b`. Compose passes these settings only to the backend. Update the backend service when rotating the key. Use `config -q` to check Compose configuration without displaying interpolated credentials.
 
+For the Knowledge Explorer, optionally set `GRAPHDB_APPROVED_SCENARIO_IDS` to a comma-separated list of existing saved scenario IDs with explicit approval from the scientific authority. The setting is passed only to the backend. If none of the listed graphs are available or the setting is empty, the Explorer offers the bundled experimental reference corpus. The API reserves listed IDs for approved content.
+
 `APP_SITE_ADDRESS` and `WORKBENCH_SITE_ADDRESS` are Caddy site addresses; `WORKBENCH_PUBLIC_URL` is the browser-facing address returned by the API, not GraphDB's internal URL. Use different credentials for the app and Workbench. Generate each hash interactively with the pinned Caddy image:
 
 ```bash
