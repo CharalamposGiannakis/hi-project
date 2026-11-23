@@ -1,108 +1,50 @@
 # Architecture
 
-This document briefly describes the HI system's architecture, current implementation, and planned development. The goal is to provide a clear overview of how the components fit together and how the project is progressing.
+Three pillars share one canonical `Scenario` JSON model and one technical validation pipeline. See the [README](../README.md) for the current workflow and API.
 
-#### Stakeholders
+## Roles
 
-1. **Researchers and technical reviewers:** Researchers from different disciplines contribute HI scenarios; technical reviewers assess the system and provide engineering feedback.
-2. **Scientific Authority (Ilaria):** Maintains the scientific meaning and consistency of the shared knowledge graph and approves published scenarios.
-3. **Engineers (Babis):** Build, operate, and evolve the system while respecting scientific decisions.
+- **Researchers** contribute scenarios from their domains. Technical reviewers provide engineering feedback.
+- **Scientific Authority (Ilaria)** stewards the shared knowledge graph and makes scientific decisions.
+- **Engineering (Babis)** builds, operates, and maintains the system.
 
-#### Current System
+## Pillar 1 — Scenario Builder with LLM Assistance
 
-The Svelte Builder supports guided description and structured scenario entry using HINT concepts. FastAPI validates scenario JSON, generates RDF, and checks SHACL constraints. The backend also provides GraphDB storage and team-composition exploration (CQ1).
+**Implemented · Phase 1A**
 
-## Three Architectural Pillars
+- The Svelte wizard and structured editor share a draft. Researchers can describe scenarios in plain language, correct HINT-backed fields, and preview, export, or reopen incomplete drafts.
+- On request, FastAPI sends the full description to VU Nebula with the `Scenario` schema and approved HINT vocabulary. The prompt asks Nebula to inventory entities before classifying them, so partial proposals can retain stated details and links even when HINT mappings are unresolved.
+- The draft keeps the source sent to Nebula, generated proposal, findings, model, prompt version, and SHA-256 of the effective system prompt alongside the editable candidate. Researchers verify the proposal against the source. Regeneration requires confirmation before replacing an existing candidate.
+- Explicit validation checks the edited candidate against the model and HINT, generates RDF, and runs SHACL.
 
-The pillars can be developed independently but share one scenario representation and validation pipeline.
+**Planned.** Researchers choose when to submit a draft for scientific review. Submissions can include unresolved semantic issues.
 
-### Pillar 1 — Scenario Builder with LLM Assistance
+**Deferred · Phase 1B.** Natural-language edits to selected parts of an existing candidate, if researchers need them.
 
-Researchers create, inspect, edit, validate, and eventually submit HI scenarios for scientific review.
+## Pillar 2 — Scientific Knowledge Management
 
-**Phase 1A — Generate or regenerate**
+**Planned**
 
-The wizard sends the full description to FastAPI for interpretation by Nebula. Each request includes the Python `Scenario` schema and all approved HINT concepts from the checked-in thesaurus. The prompt asks Nebula to inventory described entities before classifying them so records with unresolved HINT fields can retain their stated details and links. The backend checks the proposal and retains supported fields in a canonical-shaped draft even when required facts are missing. The interpretation document records the source sent, proposed candidate, findings, model, prompt version, and SHA-256 hash of the effective system prompt alongside the current editable fields. Explicit technical validation sends only the edited candidate through the existing RDF and SHACL pipeline.
+- Ilaria reviews the original description, proposed representation, and findings. She can correct the representation, approve it for publication, or reject the submission. Scientific approval is separate from technical validation.
+- Preserve the original submission, revisions, and scientific decisions. Keep resolved issues in the permanent record.
+- Classify issues by type and group related issues across scenarios for shared resolution. Resolutions may inform changes to HINT or the HI ontology.
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│                  HI Scenario Builder                    │
-├────────────────────────────────┬────────────────────────┤
-│                                │                        │
-│  Describe your HI scenario     │     Scenario JSON      │
-│                                │                        │
-│  ● ● ● ○ ○ ○ ○ ○ ○ ○ ○         │ {                      │
-│  3 of 12 sections              │    "scenario": {       │
-│                                │      ...               │
-│  ───────────────────────────   │    }                   │
-│                                │  }                     │
-│  Agent Capabilities            │                        │
-│                                │                        │
-│  What can each agent do?       │                        │
-│  Which tasks can they perform? │                        │
-│                                │                        │
-│  ┌──────────────────────────┐  │                        │
-│  │                          │  │                        │
-│  │ Your description...      │  │                        │
-│  │                          │  │                        │
-│  └──────────────────────────┘  │                        │
-│                                │                        │
-│  [Previous]        [Next]      │                        │
-│                                │                        │
-│  [View full description]       │                        │
-│                                │                        │
-│  [Convert to JSON using AI]    │                        │
-└────────────────────────────────┴────────────────────────┘
-```
+## Pillar 3 — Query & Exploration
 
-- **Input:** HIDe-inspired wizard with optional natural-language questions, progress indicators, Previous/Next navigation, and an Additional Notes section.
-- **Live JSON:** Answers immediately update the source-description portion of the JSON preview without requiring LLM interpretation.
-- **AI interpretation:** **Convert to JSON using AI** processes the complete description and produces structured scenario JSON, unresolved issues, and semantic suggestions.
-- **Structured editing:** The generated JSON populates the existing dropdown editor. Researchers can add, remove, and correct elements; the JSON updates automatically.
-- **JSON viewer:** Preserve the right-side preview, **Open JSON in new tab**, and JSON download.
-- **Regeneration:** Researchers can modify their descriptions and regenerate the scenario. Existing manual corrections must not be overwritten without confirmation.
-- **Validation:** Keep technical validation and RDF preview in the Scenario Builder. Incomplete or unsupported information must be reported rather than invented.
-- **Submission:** A future **Submit for Scientific Review** action will transfer the scenario to Pillar 2. Phase 1A does not automatically publish to GraphDB.
+**Implemented.** The API saves validated scenarios as GraphDB named graphs and runs the team-composition query (CQ1) over saved graphs. The Builder workflow ends at validation and JSON export.
 
-**Note:**LLM interpretation may skip described information or fail to map concepts to the approved HINT vocabulary; generated scenarios require researcher verification, and unresolved representation gaps remain subject to scientific review. 
+**Planned.** Query approved knowledge on its own or explicitly include selected provisional scenarios through named-graph scopes. Keep provisional scenarios private to their researcher's workspace.
 
-**Phase 1B — Deferred**
+**Later.** More competency questions, SPARQL exploration, and LLM explanations grounded in query results.
 
-Natural-language modifications to selected parts of an existing JSON scenario. Consider only if researchers need this functionality.
+## Persistence — preferred direction
 
-### Pillar 2 — Scientific Authority Workspace
+- Use one GraphDB repository for scenario named graphs and linked lifecycle metadata. Express metadata in a separate workflow vocabulary.
+- FastAPI registers each scenario once for review and exploration. Track its identity, owner, lifecycle status, and history. Retain original descriptions and draft JSON even before scenario RDF can be generated.
+- Test draft storage, review updates, and scoped queries in GraphDB before deciding whether SQLite is needed.
 
-**Planned.**
+## Open engineering decisions
 
-- Receive submissions from the Scenario Builder.
-- Review scenarios, original descriptions, unresolved issues, and semantic suggestions.
-- Correct, approve, reject, and publish scenarios.
-- Preserve scenario revisions and scientific decisions.
-- Publish approved scenarios to GraphDB.
-
-**Open architectural decision — Persistence**
-
-Two alternatives are under consideration:
-
-1. **SQLite + GraphDB:** SQLite manages drafts, submissions, and reviews; GraphDB stores scenario knowledge.
-2. **GraphDB only:** Named graphs store scenarios and workflow metadata. A separate workflow vocabulary represents submissions, descriptions, issues, revisions, and scientific decisions. Original JSON can be preserved as an RDF literal.
-
-The decision remains open pending a small implementation experiment.
-
-### Pillar 3 — Query & Exploration
-
-**Partially implemented.**
-
-- SPARQL queries and competency questions (CQ1 currently implemented).
-- Explore approved scenarios or selected combinations of approved and provisional scenarios.
-- Use named graphs to distinguish experimental knowledge from scientifically approved knowledge.
-- Provide readable query results and potentially LLM-generated explanations grounded in retrieved data.
-
-## Notes
-
-- Technical validation does not constitute scientific approval.
-- Experimental scenarios must remain distinguishable from approved knowledge.
-- The three pillars share one scenario representation and validation pipeline.
-- GraphDB is the existing knowledge-graph database; the workflow persistence approach remains undecided.
-
-
+- **Workspace lifecycle and access.** Decide draft retention, researcher identification, and workspace permissions.
+- **Revision history.** Decide which intermediate revisions to retain and how to keep the review handoff simple.
+- **Issue clustering.** Decide how to represent and group issues and whether LLM assistance is useful.
