@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from rdflib import Graph
 
-from . import nebula
-from .graphdb import GraphDBError, connect_graphdb
+from . import explorer, nebula
+from .graphdb import GraphDBError, connect_graphdb, scenario_graph_iri
 from .interpretation import InterpretationRequest, InterpretationResult, assemble_interpretation
 from .model import Identifier, Scenario
 from .rdf import to_ntriples, to_rdf
@@ -43,7 +43,7 @@ class InputIssue(BaseModel):
 class SubmissionError(BaseModel):
     code: Literal[
         "invalid_request", "invalid_vocabulary", "shacl_failed", "internal_error",
-        "scenario_exists", "scenario_not_found", "graphdb_unavailable",
+        "scenario_exists", "scenario_id_reserved", "scenario_not_found", "graphdb_unavailable",
         "graphdb_invalid_response", "graphdb_configuration", "interpretation_unavailable", "interpretation_failed",
     ]
     message: str
@@ -107,8 +107,13 @@ async def invalid_request(request: Request, exc: RequestValidationError) -> JSON
         InputIssue(location=list(error["loc"]), message=error["msg"], type=error["type"])
         for error in exc.errors()
     ]
-    message = ("The description could not be submitted for interpretation."
-               if request.scope.get("endpoint") is interpret_scenario else "Scenario JSON failed structural validation.")
+    endpoint = request.scope.get("endpoint")
+    if endpoint is interpret_scenario:
+        message = "The description could not be submitted for interpretation."
+    elif endpoint is query_explorer:
+        message = "The Explorer query is incomplete or the current scenario failed structural validation."
+    else:
+        message = "Scenario JSON failed structural validation."
     return _error(422, SubmissionError(code="invalid_request", message=message, issues=issues))
 
 
@@ -191,6 +196,11 @@ def preview_scenario(scenario: Scenario) -> ScenarioPreview | JSONResponse:
     description="Create-only. Existing IDs are rejected; no scenario or reference graph is overwritten.",
 )
 def save_scenario(scenario: Scenario) -> SavedScenario | JSONResponse:
+    # Application writes cannot fill an empty graph reserved for approved content.
+    if scenario_graph_iri(scenario.id) in explorer.configured_approved_graphs():
+        return _error(409, SubmissionError(
+            code="scenario_id_reserved", message="This scenario ID is reserved for the approved corpus. Use a new ID.",
+        ))
     prepared = _validated_graph(scenario)
     if isinstance(prepared, JSONResponse):
         return prepared
@@ -221,3 +231,25 @@ def scenario_team(scenario_id: Identifier) -> TeamComposition | JSONResponse:
     except Exception:
         logger.exception("Scenario team retrieval failed")
         return _error(500, SubmissionError(code="internal_error", message="Scenario processing failed on the server."))
+
+
+@app.get("/explorer/catalog", summary="List available shared scenarios and competency questions")
+def explorer_catalog() -> explorer.ExplorerCatalog:
+    with connect_graphdb() as store:
+        return explorer.catalog(store)
+
+
+@app.post(
+    "/explorer/query", response_model=explorer.ExplorerResult,
+    summary="Run a predefined competency question in selected named graphs",
+)
+def query_explorer(request: explorer.ExplorerRequest) -> explorer.ExplorerResult | JSONResponse:
+    explorer.validate_parameters(request)
+    graph = None
+    if request.scenario is not None:
+        prepared = _validated_graph(request.scenario)
+        if isinstance(prepared, JSONResponse):
+            return prepared
+        graph, _ = prepared
+    with connect_graphdb() as store:
+        return explorer.answer(store, request, graph)

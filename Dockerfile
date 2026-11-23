@@ -6,6 +6,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY hi_scenario/ ./hi_scenario/
 COPY infra/ ./infra/
 COPY ontology/ ./ontology/
+COPY examples/ ./examples/
 
 USER 10001:10001
 CMD ["python", "-m", "uvicorn", "hi_scenario.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--root-path", "/api"]

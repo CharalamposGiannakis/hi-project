@@ -31,9 +31,11 @@ Three pillars share one canonical `Scenario` JSON model and one technical valida
 
 ## Pillar 3 — Query & Exploration
 
-**Implemented.** The API saves validated scenarios as GraphDB named graphs and runs the team-composition query (CQ1) over saved graphs. The Builder workflow ends at validation and JSON export.
+**Implemented · Slice 1.** The Explorer runs CQ1, CQ2, CQ5, CQ8, and CQ11 against explicitly selected scenario named graphs with inference disabled. It identifies each result's source scenario and uses the existing ontology and HINT reference graphs for labels.
 
-**Planned.** Query approved knowledge on its own or explicitly include selected provisional scenarios through named-graph scopes. Keep provisional scenarios private to their researcher's workspace.
+The Builder stays open in the browser while the researcher explores. FastAPI validates the current canonical draft before staging its RDF under a unique named graph inside an uncommitted GraphDB transaction. GraphDB can query that graph alongside explicitly allowed shared graphs. The transaction is rolled back after the request, so a valid or explored draft does not enter the shared corpus. This keeps the slice independent of persistent workspaces and researcher accounts.
+
+The operator supplies the IDs of saved graphs with an explicit scientific approval decision. If no such graph is available, the Explorer stages the bundled S1–S7 reference scenarios in the query transaction and labels them as experimental. Future review and publication metadata belongs to Pillar 2.
 
 **Later.** More competency questions, SPARQL exploration, and LLM explanations grounded in query results.
 

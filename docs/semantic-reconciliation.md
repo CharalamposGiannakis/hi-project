@@ -179,16 +179,22 @@ Automated tests compare generated scenarios against the original research RDF an
 
 The research material defines twelve Competency Questions (CQs). They describe what researchers should be able to investigate using the knowledge graph.
 
-**Currently, only CQ1 is implemented and verified in the application.** It retrieves the composition of a stored HI team, including its members and their roles.
+The Knowledge Explorer adapts CQ1 (team composition), CQ2 (recorded capabilities and task requirements), CQ5 (execution-linked interactions), CQ8 (execution-linked evaluations and experiments), and CQ11 (contextual phenomena) from the research notebook. The Explorer follows recorded RDF links and preserves each scenario as a separate source.
+
+CQ2 derives coverage when members of the same team collectively supply every recorded `requiresCapability` requirement, matching exact HINT capability concepts. Rows identify the contributing members and both the requirement and owned capability records. This covers S1 data collection and S7 multimodal input interpretation without assigning task execution. The ontology declares `requiresCapability` as the inverse of `allowsTask`, although their descriptions express necessity and enablement respectively. Its `isEligibleForTask` chain uses a single `hasCapability`/`allowsTask` path. Ilaria needs to confirm whether all such links express jointly necessary requirements and whether this differs from intended eligibility. The query uses the recorded requirements as a conjunction pending that decision.
+
+CQ8 includes evaluated executions linked to the goal by either `towardsGoal` or realization of a task listed in `requiresTask`. This recovers all five S2 experiments, including the three whose execution tasks are outside its required-task list, and retains both S5 experiments. The generator already adds `towardsGoal` to every canonical execution. Each metric row identifies its Evaluation/`hasMetricConcept` or Experiment/`hasMetricTested` source, owner, and predicate. Equal metric concepts on the two relationships remain separate assertions.
+
+CQ5 requires recorded execution–interaction links for goal-required tasks. S2 and S3 have interactions without execution links, so their empty CQ5 answers include a notice about those missing links. Researcher review is needed to establish the relationships.
 
 The remaining questions have different requirements:
 
 | Questions | Current situation |
 |---|---|
-| CQ2–3 | Concern capabilities, tasks, and possible team compositions. Relevant information exists, but application queries remain unverified. |
+| CQ3 | Concerns possible team compositions beyond the recorded capability matches reported by CQ2. |
 | CQ4 | Depends on inferred relationships that the current GraphDB configuration does not provide. |
-| CQ5–8 | Concern interactions, methods, evaluations, experiments, and metrics. Relevant relationships exist, but the queries are not implemented in the application. |
-| CQ9–11 | Concern constraints and contextual phenomena. Some queries require adaptation to the application's scenario identifiers and relationships. |
+| CQ6–7 | Concern additional method, experiment, and metric relationships beyond CQ5 and CQ8. |
+| CQ9–10 | Concern constraints and similarities between scenarios and require further adaptation. |
 | CQ12 | Concerns compliance with contextual constraints, which the current model does not explicitly represent. |
 
 An independent offline comparison also found different results for CQ3, CQ7, CQ9, and CQ10 between the original research data and the reconstructed scenarios. These differences relate to representation choices already documented above.

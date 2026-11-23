@@ -27,7 +27,9 @@ main {
 }
 .scenario-editor { grid-area: editor; min-width: 0; }
 .input-methods { margin: 0 0 0.75rem; }
-.input-methods [aria-pressed='true'] { background: #eef3f8; font-weight: 600; }
+.input-methods [aria-pressed='true'], .workspace-navigation [aria-pressed='true'] { background: #eef3f8; font-weight: 600; }
+main.explorer-view { display: block; }
+main[hidden] { display: none; }
 header > .toolbar { margin-bottom: 1rem; }
 .sidebar {
   grid-area: sidebar;

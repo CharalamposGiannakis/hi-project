@@ -1,12 +1,13 @@
 // Client for the scenario endpoints in hi_scenario/api.py. The backend is the
 // authoritative validator; this module only classifies its responses.
 import { isInterpretationResponse } from './interpretation.js';
+import { concepts } from './scenario.js';
 
 /**
  * @typedef {{ location: (string | number)[], message: string, type: string }} InputIssue
  * @typedef {{
  *   code: 'invalid_request' | 'invalid_vocabulary' | 'shacl_failed' | 'internal_error'
- *     | 'scenario_exists' | 'scenario_not_found' | 'graphdb_unavailable'
+ *     | 'scenario_exists' | 'scenario_id_reserved' | 'scenario_not_found' | 'graphdb_unavailable'
  *     | 'graphdb_invalid_response' | 'graphdb_configuration' | 'interpretation_unavailable' | 'interpretation_failed',
  *   message: string, issues: InputIssue[], shacl_report: string | null,
  * }} SubmissionError
@@ -29,6 +30,21 @@ import { isInterpretationResponse } from './interpretation.js';
  * @typedef {{ kind: 'ok', preview: ScenarioPreview } | Failure} PreviewResult
  * @typedef {{ kind: 'ok', saved: SavedScenario } | Failure} SaveResult
  * @typedef {{ kind: 'ok', team: TeamComposition } | Failure} TeamResult
+ * @typedef {'cq1' | 'cq2' | 'cq5' | 'cq8' | 'cq11'} ExplorerQuestionId
+ * @typedef {'draft' | 'shared' | 'combined'} ExplorerScope
+ * @typedef {'approved' | 'reference' | 'provisional'} PublicationStatus
+ * @typedef {{ id: string, scenario_id: string, name: string, description: string | null,
+ *   publication_status: PublicationStatus, graph_iri: string }} ExplorerSource
+ * @typedef {{ id: string, label: string, category: import('./scenario.js').Category }} ExplorerParameter
+ * @typedef {{ id: ExplorerQuestionId, label: string, description: string, parameters: ExplorerParameter[] }} ExplorerQuestion
+ * @typedef {{ shared_source: 'approved' | 'reference', scenarios: ExplorerSource[], questions: ExplorerQuestion[], warnings?: string[] }} ExplorerCatalog
+ * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, scenario?: object,
+ *   shared_scenario_id?: string, parameters?: Record<string, string> }} ExplorerRequest
+ * @typedef {{ id: string, label: string }} ExplorerColumn
+ * @typedef {{ label: string, iri: string }} ExplorerEvidence
+ * @typedef {{ source_id: string, values: Record<string, string | null>, evidence: ExplorerEvidence[] }} ExplorerRow
+ * @typedef {{ code: string, message: string, source_id?: string | null }} ExplorerNotice
+ * @typedef {{ sources: ExplorerSource[], columns: ExplorerColumn[], rows: ExplorerRow[], truncated: boolean, notices?: ExplorerNotice[] }} ExplorerResults
  * @typedef {{ fetch?: typeof globalThis.fetch, baseUrl?: string, timeoutMs?: number, signal?: AbortSignal }} Options
  */
 
@@ -96,6 +112,51 @@ function isTeam(body) {
         m.roles.every(/** @param {any} r */ (r) => isType(r) && isOptionalString(r.definition)),
     )
   );
+}
+
+/** @param {any} source @returns {source is ExplorerSource} */
+function isExplorerSource(source) {
+  return isString(source?.id) && isString(source.scenario_id) && isString(source.name)
+    && isOptionalString(source.description) && isString(source.graph_iri)
+    && ['approved', 'reference', 'provisional'].includes(source.publication_status);
+}
+
+/** @param {any} question @returns {question is ExplorerQuestion} */
+function isExplorerQuestion(question) {
+  const { id, label, description, parameters } = question ?? {};
+  return ['cq1', 'cq2', 'cq5', 'cq8', 'cq11'].includes(id)
+    && isString(label) && isString(description) && Array.isArray(parameters)
+    && parameters.every((parameter) => isString(parameter?.id) && isString(parameter.label)
+      && typeof parameter.category === 'string' && Object.hasOwn(concepts, parameter.category));
+}
+
+/** @param {any} body @returns {body is ExplorerCatalog} */
+function isExplorerCatalog(body) {
+  return ['approved', 'reference'].includes(body?.shared_source)
+    && Array.isArray(body.scenarios) && body.scenarios.every(isExplorerSource)
+    && Array.isArray(body.questions) && body.questions.every(isExplorerQuestion)
+    && (body.warnings === undefined || (Array.isArray(body.warnings) && body.warnings.every(isString)));
+}
+
+/** @param {any} row @returns {row is ExplorerRow} */
+function isExplorerRow(row) {
+  const { source_id, values, evidence } = row ?? {};
+  return isString(source_id) && values && typeof values === 'object' && !Array.isArray(values)
+    && Object.values(values).every(isOptionalString) && Array.isArray(evidence)
+    && evidence.every((item) => isString(item?.label) && isString(item.iri));
+}
+
+/** @param {any} body @returns {body is ExplorerResults} */
+function isExplorerResults(body) {
+  const { truncated, sources, columns, rows } = body ?? {};
+  return typeof truncated === 'boolean' && Array.isArray(sources) && sources.every(isExplorerSource)
+    && Array.isArray(columns) && columns.every((column) => isString(column?.id) && isString(column.label))
+    && Array.isArray(rows) && rows.every((row) => isExplorerRow(row)
+      && sources.some((source) => source.id === row.source_id))
+    && (body.notices === undefined || (Array.isArray(body.notices) && body.notices.every(
+      (/** @type {any} */ notice) => isString(notice?.code) && isString(notice.message)
+        && (notice.source_id == null || sources.some((source) => source.id === notice.source_id)),
+    )));
 }
 
 /** @param {any} body @returns {body is SubmissionError} */
@@ -193,4 +254,14 @@ export async function fetchTeam(scenarioId, options = {}) {
   const path = `/scenarios/${encodeURIComponent(scenarioId)}/team`;
   const result = await call('GET', path, undefined, isTeam, options);
   return result.kind === 'ok' ? { kind: 'ok', team: result.data } : result;
+}
+
+/** @param {Options} [options] */
+export function fetchExplorerCatalog(options = {}) {
+  return call('GET', '/explorer/catalog', undefined, isExplorerCatalog, options);
+}
+
+/** @param {ExplorerRequest} request @param {Options} [options] */
+export function requestExplorerQuery(request, options = {}) {
+  return call('POST', '/explorer/query', request, isExplorerResults, options);
 }

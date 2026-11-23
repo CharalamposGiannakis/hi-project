@@ -1,6 +1,6 @@
 # HI Scenario Builder
 
-The HI Scenario Builder is a research prototype for describing Hybrid Intelligence (HI) scenarios and validating their RDF against the checked-in HI resources. A Svelte wizard and structured editor share a JSON draft. FastAPI validates canonical scenario JSON and HINT concepts, generates deterministic RDF, and runs SHACL. The API also supports GraphDB storage and team-composition queries.
+The HI Scenario Builder is a research prototype for describing Hybrid Intelligence (HI) scenarios and validating their RDF against the checked-in HI resources. A Svelte wizard and structured editor share a JSON draft. FastAPI validates canonical scenario JSON and HINT concepts, generates deterministic RDF, and runs SHACL. The Knowledge Explorer runs predefined competency questions in GraphDB.
 
 The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated research demonstration, not a production service. Credentials are distributed separately.
 
@@ -10,6 +10,7 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 2. Choose **Convert to JSON using AI** to send your description to VU Nebula. Review the proposed facts and HINT mappings in the Structured Editor. **Scenario JSON** holds interpretation findings about missing or unsupported information. Review the source evidence before accepting any proposed scientific fact.
 3. Switch to **Structured Editor** at any point to add or edit HINT-backed fields. Use **Expand all** or **Collapse all** to navigate the eleven sections. Your answers and structured edits stay available as you switch between input methods. **Load S1 example** opens the bundled canonical scenario.
 4. Choose **Validate Scenario** when you're ready for a technical check. Follow diagnostics to fields that need correction. A valid result includes N-Triples and the SHACL report. Editing the structured scenario clears that result. Scientific approval is a separate process.
+5. Open **Knowledge Explorer** to query your current scenario, the shared scenarios, or both. Select a competency question and any HINT filters, then choose **Run Query**. Each result identifies its source scenario and links its evidence to RDF identifiers. The Explorer technically validates your current scenario before querying it. Returning to **Scenario Builder** keeps the open draft and edits.
 
 **Download JSON** saves incomplete descriptions and partial candidates. A draft holds the full description, guided answers, and notes in `source_description` and the editable candidate in `scenario`. The `interpretation` record retains the text sent to Nebula, the generated candidate, findings, model identifier, and prompt version. When the description or candidate has changed, those findings refer to the original proposal. After the structured scenario passes local form checks, **Download canonical JSON** exports the scenario for use with the API. **Open JSON file…** accepts either format.
 
@@ -23,9 +24,9 @@ Entity identities are application-assigned and scenario-scoped; shared names, ty
 
 - **Validation has limits.** HINT categories and references are checked by Python; passing the existing SHACL shapes does not establish full ontology completeness or research correctness. Some canonical examples retain documented omissions or provisional alignments awaiting Ilaria's confirmation.
 - **Interpretations need review.** Nebula can miss, misclassify, or introduce facts. Use the source description, proposal, and findings to check the result. The full description is sent to Nebula when you request interpretation. Submit only content authorized for that service. [VU Nebula](https://rdm.vu.nl/tools/nebula/index.html)
-- **Only CQ1 is implemented and verified.** It returns actual saved members and their roles, with labels from RDF and HINT. The application does not calculate capability eligibility or infer task performers or interaction participants.
+- **Explorer coverage.** CQ1 lists team members and roles. CQ2 derives team coverage of all recorded task requirements and identifies each capability's contributing members. CQ5 follows interactions explicitly linked to executions of goal-required tasks and reports recorded interactions missing execution links. CQ8 follows executions through required tasks or `towardsGoal`, preserving evaluation and experiment metric sources. CQ11 lists contextual phenomena associated with the team. Capability coverage is distinct from actual task execution. Missing evidence is shown as unrecorded information.
 - **Concurrency is limited.** Use one backend worker and one instance. Its save lock is process-local; independent API, importer, or GraphDB administrator writes are not coordinated.
-- **There is no administrator-only approval/publication workflow.** The API has no administrator role or approval gate for saves. Deployment authentication provides shared access, without per-researcher roles or an audit trail. Researcher drafts, administrator review, and shared publication are not separated by the current application.
+- **Publication is operator configured.** The Explorer labels saved scenarios as approved using `GRAPHDB_APPROVED_SCENARIO_IDS`. The operator must verify Ilaria's scientific approval of the exact stored content before configuring it. This list carries no approval evidence, reviewer identity, or version binding. With no available approved scenarios, the Explorer uses the bundled S1–S7 experimental references and warns if configured IDs resolved to none. Current Builder drafts and bundled references are staged in a GraphDB transaction for the query and rolled back. Deployment authentication provides shared access, without per-researcher accounts or a review workflow.
 
 The seven canonical examples are available as JSON:
 
@@ -62,6 +63,8 @@ npm run dev
 ```
 
 Open the app at `http://localhost:5173`, API documentation at `http://127.0.0.1:8000/docs`, or Workbench at `http://127.0.0.1:7200` (select repository `hi`). Local GraphDB is unauthenticated and bound to loopback. `setup` creates the repository if needed and refreshes the ontology and HINT reference graphs without deleting scenario graphs. Repository `hi` uses the `empty` ruleset with `owl:sameAs` optimization disabled; queries use explicit named graphs and `infer=false`.
+
+To try the Explorer, load S1 in the Builder and run CQ1 for **My current scenario**. Then try the shared source alone and alongside your own scenario. Select S1 to compare the same team under separate provisional and experimental reference source labels. Try CQ5 on experimental S2 to see how absent execution links are reported. Return to the Builder and check that your edits are still there. Nebula and the canonical importer are optional for this walkthrough.
 
 For local AI interpretation, create a private `.env.nebula` in the repository root with your Nebula key. Start Uvicorn as shown above. The backend reads the file automatically when you request interpretation. The model setting is optional and defaults to `FAST.gpt-oss:120b`.
 

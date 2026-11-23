@@ -1,4 +1,4 @@
-// Persistence and CQ1 through the API client against the local Compose GraphDB.
+// Persistence and exploration through the API client against local GraphDB.
 // Skipped when GraphDB is not reachable. Removes only the scenario graphs it created.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import example from '../../examples/s1.json';
@@ -8,7 +8,7 @@ import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
 import s7 from '../../examples/s7.json';
-import { fetchTeam, requestPreview, saveScenario } from '../src/lib/api.js';
+import { fetchExplorerCatalog, fetchTeam, requestExplorerQuery, requestPreview, saveScenario } from '../src/lib/api.js';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -56,7 +56,7 @@ async function storedLabel(id, agent) {
 
 beforeAll(async () => {
   if (!graphdbReady) return;
-  backends.push(await startBackend());
+  backends.push(await startBackend({ GRAPHDB_APPROVED_SCENARIO_IDS: '' }));
   backends.push(await startBackend({ GRAPHDB_URL: `http://127.0.0.1:${await closedPort()}`, GRAPHDB_TIMEOUT_SECONDS: '2' }));
   [api, apiWithoutGraphDB] = backends.map((b) => b.url);
 }, 60_000);
@@ -114,6 +114,32 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', () => {
+  it('explores a draft alongside an approved named graph and rolls back the draft', async () => {
+    const id = `${RUN}-explorer`;
+    await saveAndTrack(scenario(id, (data) => { data.agents[0].name = 'Published fixture member'; }));
+    const explorer = await startBackend({ GRAPHDB_APPROVED_SCENARIO_IDS: id });
+    backends.push(explorer);
+    const options = { baseUrl: explorer.url };
+    expect(await fetchExplorerCatalog(options)).toMatchObject({
+      kind: 'ok', data: { shared_source: 'approved', scenarios: [{ scenario_id: id }] },
+    });
+
+    const draft = scenario(id, (data) => { data.agents[0].name = 'Private draft fixture member'; });
+    const answer = await requestExplorerQuery({
+      question_id: 'cq1', scope: 'combined', shared_scenario_id: id, scenario: draft,
+    }, options);
+    expect(answer.kind).toBe('ok');
+    if (answer.kind !== 'ok') throw new Error(JSON.stringify(answer));
+    expect(answer.data.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ source_id: `approved:${id}`, values: expect.objectContaining({ member: 'Published fixture member' }) }),
+      expect.objectContaining({ source_id: `provisional:${id}`, values: expect.objectContaining({ member: 'Private draft fixture member' }) }),
+    ]));
+    const provisional = answer.data.sources.find((source) => source.publication_status === 'provisional');
+    if (!provisional) throw new Error('Missing provisional source');
+    expect(await select(`SELECT ?s WHERE { GRAPH <${provisional.graph_iri}> { ?s ?p ?o } } LIMIT 1`)).toEqual([]);
+    expect(await storedLabel(id, draft.agents[0].id)).toEqual(['Published fixture member']);
+  }, 30_000);
+
   it('S7: saves 29 identities, separate Team/Context constraints, seven evaluation links, and both episodes', async () => {
     const id = `${RUN}-s7`;
     const data = { ...structuredClone(s7), id };

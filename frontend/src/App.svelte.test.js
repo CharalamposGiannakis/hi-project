@@ -32,6 +32,15 @@ const fullDescriptionInput = () => /** @type {HTMLTextAreaElement} */ (document.
 const notesInput = () => /** @type {HTMLTextAreaElement} */ (document.getElementById('scenario-additional-notes'));
 const useCaseName = () => /** @type {HTMLInputElement} */ (document.getElementById('use-case-name'));
 
+/** @param {string} id @param {string} value */
+function selectValue(id, value) {
+  const input = document.getElementById(id);
+  if (!(input instanceof HTMLSelectElement)) throw new Error(`No select: ${id}`);
+  input.value = value;
+  input.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+}
+
 function textOutsideJson() {
   const body = /** @type {HTMLBodyElement} */ (document.body.cloneNode(true));
   body.querySelector('pre.json')?.remove();
@@ -683,5 +692,184 @@ describe('AI interpretation', () => {
     expect(interfaceText).not.toContain('internal-trace');
     expect(draft().source_description).toEqual({ use_case: sourceText });
     expect(candidate()).toBeNull();
+  });
+});
+
+describe('Knowledge Explorer', () => {
+  const explorer = () => document.getElementById('explorer-view');
+  const reference = {
+    id: 'reference:s7', scenario_id: 's7', name: 'Reference museum guide', description: 'Reference scenario detail.',
+    publication_status: 'reference', graph_iri: 'urn:hi:reference:s7',
+  };
+  const current = { ...reference, id: 'provisional:s7', name: 'Edited museum guide', publication_status: 'provisional', graph_iri: 'urn:hi:current:s7' };
+  const catalog = {
+    shared_source: 'reference', scenarios: [reference],
+    questions: [
+      { id: 'cq1', label: 'CQ1 · Team members and roles', description: 'Which team members are recorded?', parameters: [] },
+      { id: 'cq2', label: 'CQ2 · Tasks supported by capabilities', description: 'Which requirements are covered?',
+        parameters: [{ id: 'capability', label: 'Supporting capability', category: 'Capability' }] },
+      { id: 'cq5', label: 'CQ5 · Interactions during task execution', description: '', parameters: [] },
+      { id: 'cq8', label: 'CQ8 · Experiments, metrics, and hypotheses', description: '', parameters: [] },
+      { id: 'cq11', label: 'CQ11 · Contextual phenomena', description: '', parameters: [] },
+    ],
+  };
+
+  it.each([false, true])('explains missing CQ5 links with source provenance when other results exist (%s)', async (hasRows) => {
+    const notice = {
+      code: 'interaction_execution_links_missing', source_id: reference.id,
+      message: 'Interactions are recorded, but none are linked to task executions.',
+    };
+    const fetch = vi.fn(async (/** @type {string} */ url) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? catalog : {
+        sources: [reference], columns: [{ id: 'task', label: 'Task' }], truncated: false, notices: [notice],
+        rows: hasRows ? [{ source_id: reference.id, values: { task: 'Explain findings' }, evidence: [] }] : [],
+      },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
+    document.getElementById('explorer-source-approved')?.click();
+    flushSync();
+    selectValue('explorer-question', 'cq5');
+    click('Run query');
+    await until(() => expect(explorer()?.textContent).toContain(notice.message));
+    const sourceNotice = [...(explorer()?.querySelectorAll('[role="status"]') ?? [])]
+      .find((node) => node.textContent?.includes(notice.message));
+    expect(sourceNotice?.textContent).toContain(reference.name);
+    expect(sourceNotice?.textContent).toContain('Experimental reference');
+    if (hasRows) expect(explorer()?.textContent).toContain('Explain findings');
+    else {
+      expect(explorer()?.textContent).toContain('No matching execution–interaction links were found.');
+      expect(explorer()?.textContent).toContain('CQ5 requires recorded links between interactions and executions of goal-required tasks.');
+      expect(explorer()?.querySelector('tbody')).toBeNull();
+    }
+  });
+
+  it('shows an unavailable approved corpus warning alongside the reference source label', async () => {
+    const warning = 'Configured approved scenario IDs have no available graphs. Showing experimental references.';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...catalog, warnings: [warning] }))));
+    render();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain(warning));
+    expect(explorer()?.textContent).toContain('Experimental reference scenarios');
+  });
+
+  it('combines explicitly selected sources, renders row evidence, and preserves Builder edits', async () => {
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ request) => {
+      if (url.endsWith('/explorer/catalog')) return new Response(JSON.stringify(catalog));
+      const payload = JSON.parse(String(request.body));
+      return new Response(JSON.stringify(payload.question_id === 'cq11' ? {
+        sources: [reference], columns: [{ id: 'context', label: 'Context' }], rows: [], truncated: false,
+      } : {
+        sources: [current, reference], columns: [{ id: 'task', label: 'Task' }, { id: 'method', label: 'Method' }], truncated: true,
+        rows: [{ source_id: current.id, values: { task: 'Inspect museum exhibits', method: null }, evidence: [{ label: 'Task', iri: 'urn:hi:task:own' }] },
+          { source_id: reference.id, values: { task: 'Guide museum visitors', method: 'Observation' }, evidence: [{ label: 'Task', iri: 'urn:hi:task:shared' }] }],
+      }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    render();
+    await importJson(s7);
+    enter(useCaseName(), current.name);
+    const edited = draft();
+    expect(fetch).not.toHaveBeenCalled();
+
+    click('Knowledge Explorer');
+    expect(document.getElementById('builder-view')?.hidden).toBe(true);
+    expect(explorer()?.hidden).toBe(false);
+    await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
+    document.getElementById('explorer-source-combined')?.click();
+    flushSync();
+    selectValue('explorer-scenario', reference.scenario_id);
+    expect(explorer()?.textContent).toContain(reference.description);
+    selectValue('explorer-question', 'cq2');
+    selectValue('explorer-parameter-capability', 'SensingCapability');
+    click('Run query');
+    await until(() => expect(explorer()?.textContent).toContain('Inspect museum exhibits'));
+    expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('/explorer/query'), expect.objectContaining({
+      method: 'POST', body: expect.any(String),
+    }));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({
+      question_id: 'cq2', scope: 'combined', scenario: edited.scenario, shared_scenario_id: 's7', parameters: { capability: 'SensingCapability' },
+    });
+    const rows = explorer()?.querySelectorAll('tbody tr');
+    expect(rows).toHaveLength(2);
+    expect(rows?.[0].textContent).toContain('Provisional draft');
+    expect(rows?.[0].textContent).toContain('Not recorded');
+    expect(rows?.[1].textContent).toContain('Experimental reference');
+    rows?.[0]?.querySelector('summary')?.click();
+    expect(rows?.[0]?.querySelector('details')?.open).toBe(true);
+    expect(rows?.[0]?.querySelector('code')?.textContent).toBe('urn:hi:task:own');
+    expect(explorer()?.textContent).toContain('The result limit was reached.');
+
+    document.getElementById('explorer-source-approved')?.click();
+    flushSync();
+    selectValue('explorer-question', 'cq11');
+    expect(explorer()?.textContent).not.toContain('Inspect museum exhibits');
+    click('Run query');
+    await until(() => expect(explorer()?.textContent).toContain('No evidence was found'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({ question_id: 'cq11', scope: 'shared', shared_scenario_id: 's7' });
+
+    click('Scenario Builder');
+    expect(explorer()?.hidden).toBe(true);
+    expect(useCaseName().value).toBe(current.name);
+    expect(draft()).toEqual(edited);
+    expect(validationStatus()).toBe('Not validated');
+  });
+
+  it('keeps draft queries usable when the shared catalog fails and discards results after a draft edit', async () => {
+    /** @type {(response: Response) => void} */
+    let respond = () => {};
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => {
+      if (url.endsWith('/explorer/catalog')) return new Response('{}', { status: 503 });
+      return new Promise((resolve) => { respond = resolve; });
+    });
+    vi.stubGlobal('fetch', fetch);
+    render();
+    await importJson(s7);
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain('Shared scenarios could not be loaded.'));
+    expect(explorer()?.querySelectorAll('#explorer-question option')).toHaveLength(5);
+    click('Run query');
+    expect(explorer()?.textContent).toContain('Running query…');
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({ question_id: 'cq1', scope: 'draft', scenario: s7 });
+
+    click('Scenario Builder');
+    enter(useCaseName(), 'New museum draft');
+    expect(fetch.mock.calls.at(-1)?.[1].signal?.aborted).toBe(true);
+    click('Knowledge Explorer');
+    expect(explorer()?.textContent).not.toContain('Running query…');
+    const lateResponse = new Response(JSON.stringify({
+      sources: [current], columns: [{ id: 'task', label: 'Task' }], truncated: false,
+      rows: [{ source_id: current.id, values: { task: 'Stale evidence result' }, evidence: [] }],
+    }));
+    const read = vi.spyOn(lateResponse, 'json');
+    respond(lateResponse);
+    await until(() => expect(read).toHaveBeenCalled());
+    expect(explorer()?.textContent).not.toContain('Stale evidence result');
+    expect(fetch.mock.calls.filter(([url]) => url.endsWith('/explorer/catalog'))).toHaveLength(1);
+  });
+
+  it('labels approved scenarios and lets a researcher query them without a Builder draft', async () => {
+    const approved = { ...reference, id: 'approved:s7', name: 'Approved museum guide', publication_status: 'approved' };
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? { ...catalog, shared_source: 'approved', scenarios: [approved] }
+        : { sources: [approved], columns: [], rows: [], truncated: false },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain('Approved scenarios'));
+    expect(explorer()?.textContent).not.toContain('Experimental reference');
+    const run = /** @type {HTMLButtonElement} */ (document.getElementById('explorer-run'));
+    expect(run.disabled).toBe(true);
+    document.getElementById('explorer-source-approved')?.click();
+    flushSync();
+    selectValue('explorer-scenario', approved.scenario_id);
+    expect(explorer()?.querySelector('#explorer-scenario option:checked')?.textContent).toContain('Approved museum guide');
+    expect(run.disabled).toBe(false);
+    click('Run query');
+    await until(() => expect(explorer()?.textContent).toContain('No evidence was found'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({ question_id: 'cq1', scope: 'shared', shared_scenario_id: 's7' });
   });
 });
