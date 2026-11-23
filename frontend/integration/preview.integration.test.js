@@ -108,9 +108,16 @@ function enterText(root, label, value) {
   flushSync();
 }
 
-/** @param {string} value */
-function enterDescription(value) {
-  const answer = /** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer'));
+/** @param {string} [id] */
+function descriptionInput(id = 'scenario-wizard-answer') {
+  const answer = document.getElementById(id);
+  if (!(answer instanceof HTMLTextAreaElement)) throw new Error(`No description input "${id}"`);
+  return answer;
+}
+
+/** @param {string} value @param {string} [id] */
+function enterDescription(value, id) {
+  const answer = descriptionInput(id);
   answer.value = value;
   answer.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
@@ -122,6 +129,22 @@ async function importJson(json, name) {
   Object.defineProperty(input, 'files', { value: [{ name, text: async () => json }], configurable: true });
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await until(() => text().includes(`Loaded ${name}`));
+}
+
+async function downloadJson() {
+  const createObjectURL = vi.fn((/** @type {Blob} */ _blob) => 'blob:interpretation');
+  vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  clickButton('Download JSON');
+  expect(download).toHaveBeenCalledOnce();
+  const blob = createObjectURL.mock.calls[0][0];
+  const content = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+  return JSON.parse(String(content));
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
@@ -143,17 +166,31 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Previous');
     clickButton('Structured Editor');
     clickButton('Describe with AI');
-    expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer')).value).toBe(description);
+    expect(descriptionInput().value).toBe(description);
     expect(interpretationDocument().source_description).toEqual(raw.source_description);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('loads a complete interpretation, edits an agent and validates only on request', async () => {
+  it('combines all description inputs in a complete interpretation and validates edits only on request', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     await mountApp(baseUrl, false);
-    clickButton('Load complete description');
+    const source = {
+      use_case: 'A personal assistant HI system for health and lifestyle.',
+      full_description: '  A human user and an AI assistant collaborate on wellbeing — the goal requires collecting user self-reports and sensor activity data.\nTheir setting is health monitoring.  ',
+      additional_notes: '  Sensor noise can affect measurements.\nPrivacy is a constraint.  ',
+    };
+    enterDescription(source.use_case);
+    clickButton('Write full description');
+    enterDescription(source.full_description, 'scenario-full-description');
+    clickButton('Back to questions');
+    expect(descriptionInput().value).toBe(source.use_case);
+    clickButton('Add additional notes');
+    enterDescription(source.additional_notes, 'scenario-additional-notes');
+    clickButton('Back to questions');
+    clickButton('Write full description');
+    expect(descriptionInput('scenario-full-description').value).toBe(source.full_description);
     const before = interpretationDocument();
-    expect(before.source_description.use_case).toMatch(/personal assistant/i);
+    expect(before.source_description).toEqual(source);
     expect(before.scenario).toBeNull();
 
     clickButton('Convert to JSON using AI');
@@ -171,6 +208,20 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(interpreted.scenario).not.toHaveProperty('executions');
     expect(interpreted.scenario.agents.map((/** @type {{ kind: string }} */ agent) => agent.kind).sort()).toEqual(['artificial', 'human']);
     expect(validationStatus()).toBe('Not validated');
+
+    const exported = await downloadJson();
+    expect(exported).toEqual(interpreted);
+    await importJson(JSON.stringify(exported), 'mixed-description.json');
+    expect(interpretationDocument()).toEqual(interpreted);
+    clickButton('Describe with AI');
+    expect(descriptionInput().value).toBe(source.use_case);
+    clickButton('Write full description');
+    expect(descriptionInput('scenario-full-description').value).toBe(source.full_description);
+    clickButton('Back to questions');
+    clickButton('Add additional notes');
+    expect(descriptionInput('scenario-additional-notes').value).toBe(source.additional_notes);
+    clickButton('Structured Editor');
+
     const agent = interpreted.scenario.agents.find((/** @type {{ kind: string }} */ choice) => choice.kind === 'human');
     const editor = /** @type {Element} */ (document.getElementById(`agent-${agent.id}`)?.closest('section'));
     enterText(editor, 'Name', 'Research participant');
@@ -211,7 +262,16 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
   it('downloads a partial candidate, reports missing facts and validates after structured repair', async () => {
     await mountApp(baseUrl, false);
-    clickButton('Load incomplete description');
+    enterDescription('A personal assistant HI system for health and lifestyle.');
+    clickButton('Next');
+    enterDescription('Maintain and improve user wellbeing.');
+    clickButton('Next');
+    enterDescription('The goal requires collecting user self-reports and sensor-based activity data.');
+    clickButton('Next');
+    enterDescription('A human user is on the team in the role of user. Other team members are still to be determined.');
+    clickButton('Next');
+    clickButton('Next');
+    enterDescription('In a health-monitoring setting, sensor noise can affect measurements. User privacy is a constraint in this setting.');
     clickButton('Convert to JSON using AI');
     await until(() => interpretationDocument().interpretation.status === 'incomplete');
     const partial = interpretationDocument();
@@ -220,18 +280,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       kind: 'missing_information', path: 'agents', message: expect.stringMatching(/artificial/),
     }));
     expect(partial.interpretation.diagnostics).toContainEqual(expect.objectContaining({ kind: 'technical_validation', path: 'agents' }));
-    const createObjectURL = vi.fn((/** @type {Blob} */ _blob) => 'blob:partial-interpretation');
-    vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
-    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-    clickButton('Download JSON');
-    expect(download).toHaveBeenCalledOnce();
-    const blob = createObjectURL.mock.calls[0][0];
-    const exported = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(JSON.parse(String(reader.result)));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(blob);
-    });
+    const exported = await downloadJson();
     expect(exported).toEqual(partial);
     await importJson(JSON.stringify(exported), 'partial.json');
     expect(interpretationDocument()).toEqual(partial);

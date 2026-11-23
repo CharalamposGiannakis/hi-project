@@ -6,12 +6,12 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 
 ## Researcher workflow
 
-1. In **Describe with AI**, answer any of the optional questions in your own words. Use **Previous** and **Next** to navigate, **Additional notes** to record anything else, and **View full description** to review your answers. Your text appears in the JSON preview as you type.
+1. In **Describe with AI**, choose **Write full description** to type or paste a scenario, or use **Previous** and **Next** to answer the optional guided questions. Use **Add additional notes** for supplementary information. **View full description** and the JSON preview show the text from all three inputs.
 2. Choose **Convert to JSON using AI** to send your description to VU Nebula. Review the proposed facts, HINT mappings, and any missing or unsupported information. A partial proposal can open in the Structured Editor and be corrected. Review the source evidence before accepting any proposed scientific fact.
 3. Switch to **Structured Editor** at any point to add or edit HINT-backed fields. Use **Expand all** or **Collapse all** to navigate the eleven sections. Your answers and structured edits stay available as you switch between input methods. **Load S1 example** opens the bundled canonical scenario.
 4. Choose **Validate Scenario** when you're ready for a technical check. Follow diagnostics to fields that need correction. A valid result includes N-Triples and the SHACL report. Editing the structured scenario clears that result. Scientific approval is a separate process.
 
-**Download JSON** saves incomplete descriptions and partial candidates. A draft holds the current answers in `source_description` and the editable candidate in `scenario`. The `interpretation` record retains the answers sent to Nebula, the generated candidate, findings, model identifier, and prompt version. When the description or candidate has changed, those findings refer to the original proposal. After the structured scenario passes local form checks, **Download canonical JSON** exports the scenario for use with the API. **Open JSON file…** accepts either format.
+**Download JSON** saves incomplete descriptions and partial candidates. A draft holds the full description, guided answers, and notes in `source_description` and the editable candidate in `scenario`. The `interpretation` record retains the text sent to Nebula, the generated candidate, findings, model identifier, and prompt version. When the description or candidate has changed, those findings refer to the original proposal. After the structured scenario passes local form checks, **Download canonical JSON** exports the scenario for use with the API. **Open JSON file…** accepts either format.
 
 **Open JSON in new tab** opens a read-only snapshot viewer. **Refresh JSON** or reloading the viewer retrieves the latest draft directly from the open Builder tab. Reloading the Builder requires opening a new viewer. The viewer uses BroadcastChannel and keeps its snapshot in memory until you refresh or close it.
 
@@ -63,13 +63,14 @@ npm run dev
 
 Open the app at `http://localhost:5173`, API documentation at `http://127.0.0.1:8000/docs`, or Workbench at `http://127.0.0.1:7200` (select repository `hi`). Local GraphDB is unauthenticated and bound to loopback. `setup` creates the repository if needed and refreshes the ontology and HINT reference graphs without deleting scenario graphs. Repository `hi` uses the `empty` ruleset with `owl:sameAs` optimization disabled; queries use explicit named graphs and `infer=false`.
 
-To enable AI interpretation, set `NEBULA_API_KEY` in the backend process environment before starting Uvicorn. `NEBULA_MODEL` defaults to `FAST.gpt-oss:120b`. In PowerShell, enter the key without echoing it or putting it in command history:
+For local AI interpretation, create a private `.env.nebula` in the repository root with your Nebula key. Start Uvicorn as shown above. The backend reads the file automatically when you request interpretation. The model setting is optional and defaults to `FAST.gpt-oss:120b`.
 
-```powershell
-$env:NEBULA_API_KEY = [System.Net.NetworkCredential]::new('', (Read-Host 'Nebula API key' -AsSecureString)).Password
+```dotenv
+NEBULA_API_KEY=<your-nebula-api-key>
+NEBULA_MODEL=FAST.gpt-oss:120b
 ```
 
-Start the backend from that terminal. The key is only used by FastAPI. The Structured Editor and technical validation are available without configuring Nebula.
+Explicit process environment values take precedence. The local file is ignored by Git and excluded from Docker builds. The Structured Editor and technical validation remain available without a Nebula key.
 
 Run the ordinary checks from the repository root:
 
@@ -128,7 +129,7 @@ Broader CQ investigation is tracked in [Issue #15](https://github.com/Charalampo
 
 ## API overview
 
-Preview and save accept the canonical JSON model illustrated by S1. Interpretation accepts wizard answers in a `description` object. The local base URL is `http://127.0.0.1:8000` and deployment serves the API under `/api`. [S1 canonical example](examples/s1.json)
+Preview and save accept the canonical JSON model illustrated by S1. Interpretation accepts the optional `full_description`, guided answers, and `additional_notes` in a `description` object. The local base URL is `http://127.0.0.1:8000` and deployment serves the API under `/api`. [S1 canonical example](examples/s1.json)
 
 | Endpoint | Result |
 | --- | --- |

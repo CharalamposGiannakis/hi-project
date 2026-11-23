@@ -12,7 +12,7 @@ Three pillars share one canonical `Scenario` JSON model and one technical valida
 
 **Implemented · Phase 1A**
 
-- The Svelte wizard and structured editor share a draft. Researchers can describe scenarios in plain language, correct HINT-backed fields, and preview, export, or reopen incomplete drafts.
+- The full-description editor, guided questions, additional notes, and structured editor share a draft. Researchers can correct HINT-backed fields and preview, export, or reopen incomplete drafts.
 - On request, FastAPI sends the full description to VU Nebula with the `Scenario` schema and approved HINT vocabulary. The prompt asks Nebula to inventory entities before classifying them, so partial proposals can retain stated details and links even when HINT mappings are unresolved.
 - The draft keeps the source sent to Nebula, generated proposal, findings, model, prompt version, and SHA-256 of the effective system prompt alongside the editable candidate. Researchers verify the proposal against the source. Regeneration requires confirmation before replacing an existing candidate.
 - Explicit validation checks the edited candidate against the model and HINT, generates RDF, and runs SHACL.

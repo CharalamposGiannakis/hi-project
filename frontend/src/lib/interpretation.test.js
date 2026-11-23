@@ -8,7 +8,7 @@ import { fromContract, validate } from './scenario.js';
 
 describe('interpretation document', () => {
   it('round-trips the exact source text with no candidate or prior interpretation', () => {
-    const answers = { use_case: '  Early idea\n', additional_notes: 'Roles undecided.' };
+    const answers = { use_case: '  Early idea\n', full_description: '  Complete narrative\nSecond line.  ', additional_notes: 'Roles undecided.' };
     const document = createInterpretationDocument(answers, null, { status: 'not_interpreted', diagnostics: [] });
     expect(readInterpretationDocument(JSON.parse(JSON.stringify(document)))).toEqual({
       source_description: answers,
@@ -70,6 +70,7 @@ describe('interpretation document', () => {
   it.each([
     { source_description: { typo: 'a description' } },
     { source_description: { goal: 10 } },
+    { source_description: { full_description: 10 } },
     { scenario: [] },
     { interpretation: { status: 'unknown', diagnostics: [] } },
     { interpretation: { status: 'unsupported', diagnostics: [{ message: 'See agents', path: 2 }] } },

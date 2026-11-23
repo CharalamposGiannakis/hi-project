@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte';
   import { issuePath, requestInterpretation } from './lib/api.js';
-  import { createInterpretationDocument, diagnosticLabels, questions, readInterpretationDocument, sampleDescriptions } from './lib/interpretation.js';
+  import { createInterpretationDocument, descriptionFields, diagnosticLabels, readInterpretationDocument } from './lib/interpretation.js';
   import { createJsonSource } from './lib/json-viewer-channel.js';
   import example from '../../examples/s1.json';
   import EditorSection from './lib/EditorSection.svelte';
@@ -62,7 +62,7 @@
   let validationTarget = $derived({ contract, editorJson });
   let candidate = $derived(loadedCandidate || editorJson !== emptyEditor ? contract : null);
   let sourceChanged = $derived(interpretation.source_description
-    ? questions.some(({ id }) => answers[id] !== interpretation.source_description?.[id])
+    ? descriptionFields.some(({ id }) => answers[id] !== interpretation.source_description?.[id])
     : interpretation.source_changed === true);
   let scenarioChanged = $derived(Boolean(interpretation.generated_scenario && JSON.stringify(candidate) !== generatedBaseline));
   let displayedFindings = $derived(noCandidateAttempt ?? interpretation);
@@ -246,21 +246,11 @@
     }
   }
 
-  /** @param {import('./lib/interpretation.js').QuestionId} id @param {string} value */
+  /** @param {import('./lib/interpretation.js').AnswerId} id @param {string} value */
   function answer(id, value) {
     if ((answers[id] ?? '') === value) return;
     if (value) answers[id] = value;
     else delete answers[id];
-    markSourceChanged();
-  }
-
-  /** @param {'complete' | 'incomplete'} kind */
-  function loadDescription(kind) {
-    const sample = sampleDescriptions[kind];
-    if (JSON.stringify(answers) === JSON.stringify(sample)) return;
-    if (Object.values(answers).some((value) => value.length > 0)
-        && !confirm('Replace your current description with the sample text?')) return;
-    answers = { ...sample };
     markSourceChanged();
   }
 
@@ -392,7 +382,7 @@
     </div>
     <div id="description-panel" hidden={mode !== 'describe'}>
       {#key wizardKey}
-        <ScenarioWizard {answers} onAnswer={answer} onInterpret={interpret} onLoadExample={loadDescription} interpreting={pendingInterpretation !== null} />
+        <ScenarioWizard {answers} onAnswer={answer} onInterpret={interpret} interpreting={pendingInterpretation !== null} />
       {/key}
     </div>
     <form id="structured-panel" hidden={mode !== 'structured'} onsubmit={(e) => e.preventDefault()} novalidate>

@@ -43,15 +43,23 @@ def _completion(request: httpx.Request) -> httpx.Response:
             {"kind": "unsupported_vocabulary", "path": "use_case.concept", "message": "Consider precision ranking as a vocabulary suggestion."},
             {"kind": "unsupported_relationship", "message": "The scenario cannot express the proposed joint authority relationship."},
         ]
+    elif "full_description" in description:
+        assert description == {
+            "use_case": "A personal assistant HI system for health and lifestyle.",
+            "full_description": (
+                "  A human user and an AI assistant collaborate on wellbeing — the goal requires collecting user "
+                "self-reports and sensor activity data.\nTheir setting is health monitoring.  "
+            ),
+            "additional_notes": "  Sensor noise can affect measurements.\nPrivacy is a constraint.  ",
+        }
     else:
         assert description["use_case"] == "A personal assistant HI system for health and lifestyle."
         assert "wellbeing" in description["goal"]
         assert "self-reports" in description["tasks"]
-        if "still to be determined" in description["agents"]:
-            scenario["agents"] = [agent for agent in S1["agents"] if agent["kind"] == "human"]
-            diagnostics = [{"kind": "missing_information", "path": "agents", "message": "Identify an artificial team member and its role."}]
-        else:
-            assert "AI assistant" in description["agents"]
+        assert "still to be determined" in description["agents"]
+        assert "sensor noise" in description["context"]
+        scenario["agents"] = [agent for agent in S1["agents"] if agent["kind"] == "human"]
+        diagnostics = [{"kind": "missing_information", "path": "agents", "message": "Identify an artificial team member and its role."}]
 
     content = json.dumps({"scenario": scenario, "diagnostics": diagnostics})
     return httpx.Response(200, json={

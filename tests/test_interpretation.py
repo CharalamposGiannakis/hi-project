@@ -185,8 +185,9 @@ def test_drops_empty_placeholder_records_but_keeps_a_named_member():
     assert result.scenario["executions"] == []
 
 
-@pytest.mark.parametrize("description", [{}, {"goal": "  "}, {"made_up": "Something"}, {"goal": 4},
-                                         {"goal": "a" * 10_001, "tasks": "b" * 10_000}])
+@pytest.mark.parametrize("description", [{}, {"goal": "  "}, {"full_description": "  "}, {"made_up": "Something"},
+                                         {"goal": 4}, {"goal": "a" * 10_001, "tasks": "b" * 10_000},
+                                         {"full_description": "a" * 20_000, "additional_notes": "b"}])
 def test_invalid_description_never_reaches_provider(description, monkeypatch):
     def unexpected(_answers):
         pytest.fail("Invalid researcher input reached Nebula")
@@ -200,7 +201,11 @@ def test_invalid_description_never_reaches_provider(description, monkeypatch):
 
 
 def test_api_keeps_interpretation_separate_from_explicit_rdf_validation(monkeypatch):
-    answers = {"use_case": "  A human and a machine work together.\n", "additional_notes": "No further details."}
+    answers = {
+        "full_description": "  A human and a machine work together.\n",
+        "use_case": "Research collaboration",
+        "additional_notes": "No further details.",
+    }
     example = scenario_example()
 
     def generate(description):

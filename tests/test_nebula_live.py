@@ -24,11 +24,14 @@ pytestmark = pytest.mark.skipif(
 
 
 def _interpret(case, description):
-    if not os.getenv("NEBULA_API_KEY", "").strip():
-        pytest.fail("Set NEBULA_API_KEY in the environment before opting in to live Nebula tests.")
     submitted = InterpretationRequest(description=description)
     start = monotonic()
-    model, raw = nebula.request_interpretation(submitted.description)
+    try:
+        model, raw = nebula.request_interpretation(submitted.description)
+    except nebula.NebulaError as error:
+        if error.status_code == 503:
+            pytest.fail("Set NEBULA_API_KEY in the environment or .env.nebula for live tests.", pytrace=False)
+        pytest.fail(str(error), pytrace=False)
     result = assemble_interpretation(
         raw, model, nebula.PROMPT_VERSION, prompt_sha256=nebula.system_prompt_sha256(),
     )
