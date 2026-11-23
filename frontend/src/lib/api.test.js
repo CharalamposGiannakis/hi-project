@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiUrl, fetchExplorerCatalog, fetchTeam, issuePath, requestExplorerQuery, requestInterpretation, requestPreview, saveScenario } from './api.js';
+import { apiUrl, fetchExplorerCatalog, fetchTeam, issuePath, requestConceptExploration, requestExplorerQuery, requestInterpretation, requestPreview, saveScenario } from './api.js';
 
 it('uses a relative API route when the deployed bundle requests it', () => {
   vi.stubEnv('VITE_API_URL', '/api');
@@ -42,6 +42,32 @@ describe('Explorer result messages', () => {
     });
     const notices = [{ code: 'missing_links', source_id: 'other-researcher', message: 'Outside selected scope.' }];
     expect(await requestExplorerQuery(request, { fetch: reply(200, { ...answer, notices }) })).toMatchObject({
+      kind: 'unexpected',
+    });
+  });
+});
+
+describe('requestConceptExploration', () => {
+  const source = {
+    id: 'reference:s5', scenario_id: 's5', name: 'Diagnosis', description: null,
+    publication_status: 'reference', graph_iri: 'urn:reference:s5',
+  };
+  const answer = {
+    sources: [source], columns: [{ id: 'concept', label: 'HINT concept' }], truncated: false,
+    rows: [{ source_id: source.id, values: { concept: 'Privacy Constraint' },
+      evidence: [{ label: 'Concept', iri: 'https://w3id.org/hi-thesaurus/PrivacyConstraint' }] }],
+  };
+  it('posts the selected concept scope and accepts source-attributed relationships', async () => {
+    const request = /** @type {const} */ ({ scope: 'shared', category: 'Constraint', concept: 'PrivacyConstraint', compare: false });
+    const fetch = reply(200, answer);
+    expect(await requestConceptExploration(request, { fetch, baseUrl: '/api' })).toEqual({ kind: 'ok', data: answer });
+    expect(fetch).toHaveBeenCalledWith('/api/explorer/concepts', expect.objectContaining({
+      method: 'POST', body: JSON.stringify(request),
+    }));
+  });
+  it('rejects a relationship attributed to an unqueried source', async () => {
+    const rows = [{ ...answer.rows[0], source_id: 'another-researcher' }];
+    expect(await requestConceptExploration({ scope: 'shared' }, { fetch: reply(200, { ...answer, rows }) })).toMatchObject({
       kind: 'unexpected',
     });
   });

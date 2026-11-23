@@ -31,7 +31,9 @@ Three pillars share one canonical `Scenario` JSON model and one technical valida
 
 ## Pillar 3 — Query & Exploration
 
-**Implemented · Slice 1.** The Explorer runs CQ1, CQ2, CQ5, CQ8, and CQ11 against explicitly selected scenario named graphs with inference disabled. It identifies each result's source scenario and uses the existing ontology and HINT reference graphs for labels.
+**Implemented · Slices 1–2.** The Explorer runs CQ1, CQ2, CQ5, CQ8, and CQ11 against explicitly selected scenario named graphs with inference disabled. It identifies each result's source scenario and uses the existing ontology and HINT reference graphs for labels.
+
+Cross-scenario concept search covers capabilities, team and context constraints, execution methods, and evaluation and experiment metrics. Comparison pairs the current draft with one selected shared scenario and matches exact HINT concept identifiers within each category. GraphDB checks overlap before limiting the displayed relationship rows. Common concepts retain their distinct relationships and source evidence. The result expresses recorded vocabulary overlap and differences in the available representations. Missing assertions and scientific equivalence require researcher interpretation.
 
 The Builder stays open in the browser while the researcher explores. FastAPI validates the current canonical draft before staging its RDF under a unique named graph inside an uncommitted GraphDB transaction. GraphDB can query that graph alongside explicitly allowed shared graphs. The transaction is rolled back after the request, so a valid or explored draft does not enter the shared corpus. This keeps the slice independent of persistent workspaces and researcher accounts.
 

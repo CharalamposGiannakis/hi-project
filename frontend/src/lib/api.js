@@ -40,6 +40,9 @@ import { concepts } from './scenario.js';
  * @typedef {{ shared_source: 'approved' | 'reference', scenarios: ExplorerSource[], questions: ExplorerQuestion[], warnings?: string[] }} ExplorerCatalog
  * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, scenario?: object,
  *   shared_scenario_id?: string, parameters?: Record<string, string> }} ExplorerRequest
+ * @typedef {'Capability' | 'Constraint' | 'Method' | 'Metric'} ExplorationCategory
+ * @typedef {{ scope: ExplorerScope, scenario?: object, shared_scenario_id?: string,
+ *   category?: ExplorationCategory | null, concept?: string | null, compare?: boolean }} ConceptExplorationRequest
  * @typedef {{ id: string, label: string }} ExplorerColumn
  * @typedef {{ label: string, iri: string }} ExplorerEvidence
  * @typedef {{ source_id: string, values: Record<string, string | null>, evidence: ExplorerEvidence[] }} ExplorerRow
@@ -264,4 +267,9 @@ export function fetchExplorerCatalog(options = {}) {
 /** @param {ExplorerRequest} request @param {Options} [options] */
 export function requestExplorerQuery(request, options = {}) {
   return call('POST', '/explorer/query', request, isExplorerResults, options);
+}
+
+/** @param {ConceptExplorationRequest} request @param {Options} [options] */
+export function requestConceptExploration(request, options = {}) {
+  return call('POST', '/explorer/concepts', request, isExplorerResults, options);
 }

@@ -3,6 +3,7 @@
   import { fetchExplorerCatalog, requestExplorerQuery } from './api.js';
   import { concepts } from './scenario.js';
   import { vocabularyLabel } from './vocabulary-labels.js';
+  import CrossScenarioExplorer from './CrossScenarioExplorer.svelte';
 
   /** @typedef {import('./api.js').ExplorerQuestionId} QuestionId */
   /** @typedef {import('./api.js').ExplorerScope} Scope */
@@ -23,6 +24,7 @@
   const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional draft' };
 
   let scope = $state(/** @type {Scope} */ ('draft'));
+  let mode = $state(/** @type {'questions' | 'find' | 'compare'} */ ('questions'));
   let questionId = $state(/** @type {QuestionId} */ ('cq1'));
   let sharedScenarioId = $state('');
   let parameters = $state(/** @type {Record<string, string>} */ ({}));
@@ -101,6 +103,13 @@
   }
 </script>
 
+<nav class="toolbar" aria-label="Knowledge Explorer tools">
+  <button type="button" aria-pressed={mode === 'questions'} onclick={() => (mode = 'questions')}>Competency questions</button>
+  <button type="button" aria-pressed={mode === 'find'} onclick={() => (mode = 'find')}>Find concepts</button>
+  <button type="button" aria-pressed={mode === 'compare'} onclick={() => (mode = 'compare')}>Compare scenarios</button>
+</nav>
+
+<div hidden={mode !== 'questions'}>
 <section class="explorer-panel" aria-labelledby="explorer-controls-heading">
   <h2 id="explorer-controls-heading">Query scenarios</h2>
   <form onsubmit={(event) => { event.preventDefault(); void run(); }}>
@@ -243,6 +252,12 @@
     {/if}
   </section>
 {/if}
+</div>
+
+<div hidden={mode === 'questions'}>
+  <CrossScenarioExplorer active={active && mode !== 'questions'} compare={mode === 'compare'} {draft}
+    {shared} loading={loadingCatalog} catalogFailed={catalog !== null && catalog.kind !== 'ok'} onretry={loadCatalog} />
+</div>
 
 <style>
   .explorer-panel {

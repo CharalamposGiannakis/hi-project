@@ -755,6 +755,48 @@ describe('Knowledge Explorer', () => {
     expect(explorer()?.textContent).toContain('Experimental reference scenarios');
   });
 
+  it('opens concept search and draft comparison from the Explorer while preserving Builder edits', async () => {
+    const shared = { ...reference, id: 'reference:s5', scenario_id: 's5', name: 'Recorded S5 diagnosis' };
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? { ...catalog, scenarios: [shared] } : {
+        sources: [shared], columns: [{ id: 'concept', label: 'HINT concept' }, { id: 'overlap', label: 'Vocabulary overlap' }],
+        rows: [{ source_id: shared.id, values: { concept: 'Diagnosis Accuracy Metric', overlap: 'Recorded in both' },
+          evidence: [{ label: 'Metric', iri: 'https://w3id.org/hi-thesaurus/DiagnosisAccuracyMetric' }] }],
+        truncated: false,
+      },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    await importJson(s5);
+    enter(useCaseName(), 'My diagnosis comparison draft');
+    const edited = draft();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain(shared.name));
+    click('Find concepts');
+    selectValue('concept-value', 'KnowledgeGraphQueryingCapability');
+    document.getElementById('concept-run')?.click();
+    flushSync();
+    await until(() => expect(explorer()?.textContent).toContain('1 recorded concept relationships.'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({
+      scope: 'shared', compare: false, category: 'Capability', concept: 'KnowledgeGraphQueryingCapability',
+    });
+
+    click('Compare scenarios');
+    selectValue('concept-scenario', 's5');
+    document.getElementById('concept-run')?.click();
+    flushSync();
+    await until(() => expect(document.getElementById('concept-results-heading')).not.toBeNull());
+    await until(() => expect(fetch).toHaveBeenCalledTimes(3));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({
+      scope: 'combined', compare: true, category: null, scenario: edited.scenario, shared_scenario_id: 's5',
+    });
+    click('Competency questions');
+    expect(document.getElementById('explorer-question')?.closest('[hidden]')).toBeNull();
+    click('Scenario Builder');
+    expect(useCaseName().value).toBe('My diagnosis comparison draft');
+    expect(draft()).toEqual(edited);
+  });
+
   it('combines explicitly selected sources, renders row evidence, and preserves Builder edits', async () => {
     const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ request) => {
       if (url.endsWith('/explorer/catalog')) return new Response(JSON.stringify(catalog));

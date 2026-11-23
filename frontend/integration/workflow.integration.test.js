@@ -8,7 +8,7 @@ import s4 from '../../examples/s4.json';
 import s5 from '../../examples/s5.json';
 import s6 from '../../examples/s6.json';
 import s7 from '../../examples/s7.json';
-import { fetchExplorerCatalog, fetchTeam, requestExplorerQuery, requestPreview, saveScenario } from '../src/lib/api.js';
+import { fetchExplorerCatalog, fetchTeam, requestConceptExploration, requestExplorerQuery, requestPreview, saveScenario } from '../src/lib/api.js';
 import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
@@ -114,6 +114,38 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', () => {
+  it('finds shared concepts and compares a current scenario with S5 without publishing', async () => {
+    const options = { baseUrl: api };
+    const found = await requestConceptExploration({
+      scope: 'shared', category: 'Capability', concept: 'KnowledgeGraphQueryingCapability',
+    }, options);
+    if (found.kind !== 'ok') throw new Error(JSON.stringify(found));
+    expect(new Set(found.data.rows.map((row) => row.source_id)))
+      .toEqual(new Set(['s2', 's4', 's5', 's6', 's7'].map((id) => `reference:${id}`)));
+
+    const privacy = await requestConceptExploration({
+      scope: 'shared', category: 'Constraint', concept: 'PrivacyConstraint',
+    }, options);
+    if (privacy.kind !== 'ok') throw new Error(JSON.stringify(privacy));
+    expect(new Set(privacy.data.rows.map((row) => row.source_id)))
+      .toEqual(new Set(['s1', 's4', 's5', 's7'].map((id) => `reference:${id}`)));
+    expect(new Set(privacy.data.rows.map((row) => row.values.connection)))
+      .toEqual(new Set(['Team constraint', 'Context constraint']));
+
+    const comparison = await requestConceptExploration({
+      scope: 'combined', scenario: scenario('s5'), shared_scenario_id: 's5', compare: true,
+    }, options);
+    if (comparison.kind !== 'ok') throw new Error(JSON.stringify(comparison));
+    expect(new Set(comparison.data.sources.map((source) => source.id))).toEqual(new Set(['provisional:s5', 'reference:s5']));
+    expect(new Set(comparison.data.rows.map((row) => row.values.overlap)))
+      .toEqual(new Set(['Recorded in both', 'Recorded only in draft', 'Recorded only in shared']));
+    expect(comparison.data.truncated).toBe(false);
+    expect(comparison.data.rows.every((row) => row.evidence.length > 0)).toBe(true);
+    for (const source of comparison.data.sources) {
+      expect(await select(`SELECT ?s WHERE { GRAPH <${source.graph_iri}> { ?s ?p ?o } } LIMIT 1`)).toEqual([]);
+    }
+  }, 30_000);
+
   it('explores a draft alongside an approved named graph and rolls back the draft', async () => {
     const id = `${RUN}-explorer`;
     await saveAndTrack(scenario(id, (data) => { data.agents[0].name = 'Published fixture member'; }));

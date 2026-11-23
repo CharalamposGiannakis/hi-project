@@ -124,6 +124,12 @@ def _query(client, **data):
     return response.json()
 
 
+def _concepts(client, **data):
+    response = client.post("/explorer/concepts", json=data)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
 def _rows_with(result, label):
     return [row for row in result["rows"] if label in row["values"].values()]
 
@@ -242,6 +248,89 @@ def test_incomplete_draft_is_rejected_before_opening_a_transaction(explorer):
     assert store.started == 0
 
 
+@pytest.mark.parametrize(("category", "concept", "expected"), [
+    ("Capability", "KnowledgeGraphQueryingCapability", {"s2", "s4", "s5", "s6", "s7"}),
+    ("Constraint", "PrivacyConstraint", {"s1", "s4", "s5", "s7"}),
+])
+def test_concept_search_finds_recorded_scenarios_and_relationships(explorer, category, concept, expected):
+    client, store = explorer
+    result = _concepts(client, scope="shared", category=category, concept=concept)
+    assert {row["source_id"] for row in result["rows"]} == {f"reference:{item}" for item in expected}
+    assert all(row["evidence"] for row in result["rows"])
+    assert not result["truncated"]
+    if category == "Constraint":
+        assert {row["values"]["connection"] for row in result["rows"]} == {"Team constraint", "Context constraint"}
+        assert {row["source_id"] for row in result["rows"] if row["values"]["connection"] == "Team constraint"} == {"reference:s7"}
+    assert all(not any(store.committed.quads((None, None, None, iri))) for iri in store.staged_contexts)
+
+
+def test_compare_current_scenario_with_s5_retains_common_and_different_concept_evidence(explorer):
+    client, store = explorer
+    scenario = _example("draft-comparison", "Draft participant")
+    result = _concepts(client, scope="combined", scenario=scenario, shared_scenario_id="s5", compare=True)
+    assert {source["id"] for source in result["sources"]} == {"provisional:draft-comparison", "reference:s5"}
+    assert {row["values"]["overlap"] for row in result["rows"]} == {
+        "Recorded in both", "Recorded only in draft", "Recorded only in shared",
+    }
+    privacy = [row for row in result["rows"] if any(
+        item["label"] == "HINT concept" and item["iri"].endswith("/PrivacyConstraint") for item in row["evidence"]
+    )]
+    assert {row["source_id"] for row in privacy} == {"provisional:draft-comparison", "reference:s5"}
+    assert {row["values"]["overlap"] for row in privacy} == {"Recorded in both"}
+    assert not result["truncated"]
+    assert store.started == store.rolled_back == 1
+
+
+def test_concept_comparison_keeps_matching_scenario_ids_and_approved_scope_separate(explorer, monkeypatch):
+    client, store = explorer
+    monkeypatch.setenv("GRAPHDB_APPROVED_SCENARIO_IDS", APPROVED_ID)
+    scenario = _example(APPROVED_ID, "Private capability owner")
+    scenario["team_constraints"] = ["PrivacyConstraint"]
+    result = _concepts(
+        client, scope="combined", scenario=scenario, shared_scenario_id=APPROVED_ID,
+        category="Constraint", concept="PrivacyConstraint", compare=True,
+    )
+    assert {row["source_id"] for row in result["rows"]} == {f"provisional:{APPROVED_ID}", f"approved:{APPROVED_ID}"}
+    assert {row["values"]["overlap"] for row in result["rows"]} == {"Recorded in both"}
+    assert {(row["source_id"], row["values"]["connection"]) for row in result["rows"]} == {
+        (f"provisional:{APPROVED_ID}", "Team constraint"),
+        (f"provisional:{APPROVED_ID}", "Context constraint"),
+        (f"approved:{APPROVED_ID}", "Context constraint"),
+    }
+    denied = client.post("/explorer/concepts", json={
+        "scope": "shared", "shared_scenario_id": UNLISTED_ID, "category": "Capability",
+    })
+    assert denied.status_code == 404
+    assert all(not any(store.committed.quads((None, None, None, iri))) for iri in store.staged_contexts)
+
+
+@pytest.mark.parametrize("payload", [
+    {"scope": "shared", "compare": True},
+    {"scope": "combined", "scenario": _example("draft", "Human"), "compare": True},
+    {"scope": "draft", "scenario": _example("draft", "Human"), "shared_scenario_id": "s5"},
+    {"scope": "shared", "category": "Role"},
+    {"scope": "shared", "category": "Constraint", "concept": "KnowledgeGraphQueryingCapability"},
+    {"scope": "shared", "category": "Capability", "concept": "UnknownCapability"},
+    {"scope": "shared", "category": "Capability", "graph_iri": "urn:private:unlisted"},
+])
+def test_invalid_concept_exploration_is_rejected_before_staging(explorer, payload):
+    client, store = explorer
+    response = client.post("/explorer/concepts", json=payload)
+    assert response.status_code == 422, response.text
+    assert store.started == 0
+
+
+def test_concept_query_failure_rolls_back_current_scenario(explorer):
+    client, store = explorer
+    store.fail_queries = True
+    response = client.post("/explorer/concepts", json={
+        "scope": "draft", "scenario": _example("draft", "Private member"), "category": "Capability",
+    })
+    assert response.status_code == 503
+    assert response.json()["code"] == "graphdb_unavailable"
+    assert store.started == store.rolled_back == 1
+
+
 @pytest.mark.skipif(os.getenv("HI_GRAPHDB_LIVE") != "1", reason="Set HI_GRAPHDB_LIVE=1 for the local GraphDB check")
 @pytest.mark.parametrize(("scenario_id", "question_id", "rows_per_source"), [
     ("s1", "cq1", 2), ("s1", "cq2", 4), ("s1", "cq5", 2), ("s1", "cq8", 6), ("s1", "cq11", 3),
@@ -273,3 +362,37 @@ def test_live_explorer_queries_both_named_graphs_and_rolls_back(monkeypatch, sce
     with graphdb.connect_graphdb() as store:
         for source in result["sources"]:
             assert not store.exists(source["graph_iri"])
+
+
+@pytest.mark.skipif(os.getenv("HI_GRAPHDB_LIVE") != "1", reason="Set HI_GRAPHDB_LIVE=1 for the local GraphDB check")
+@pytest.mark.parametrize(("category", "concept", "expected"), [
+    ("Capability", "KnowledgeGraphQueryingCapability", {"s2", "s4", "s5", "s6", "s7"}),
+    ("Constraint", "PrivacyConstraint", {"s1", "s4", "s5", "s7"}),
+])
+def test_live_concept_search_uses_explicit_sources_and_rolls_back(monkeypatch, category, concept, expected):
+    settings = graphdb.GraphDBSettings.from_env()
+    assert settings.url.host in {"127.0.0.1", "localhost", "[::1]"}
+    monkeypatch.delenv("GRAPHDB_APPROVED_SCENARIO_IDS", raising=False)
+    with TestClient(api.app) as client:
+        result = _concepts(client, scope="shared", category=category, concept=concept)
+    assert {row["source_id"] for row in result["rows"]} == {f"reference:{item}" for item in expected}
+    assert not result["truncated"]
+    assert all(row["evidence"] for row in result["rows"])
+    with graphdb.connect_graphdb() as store:
+        assert all(not store.exists(source["graph_iri"]) for source in result["sources"])
+
+
+@pytest.mark.skipif(os.getenv("HI_GRAPHDB_LIVE") != "1", reason="Set HI_GRAPHDB_LIVE=1 for the local GraphDB check")
+def test_live_concept_comparison_preserves_provisional_and_reference_sources(monkeypatch):
+    settings = graphdb.GraphDBSettings.from_env()
+    assert settings.url.host in {"127.0.0.1", "localhost", "[::1]"}
+    monkeypatch.delenv("GRAPHDB_APPROVED_SCENARIO_IDS", raising=False)
+    with TestClient(api.app) as client:
+        result = _concepts(client, scope="combined", scenario=_example("s5", "Private member"), shared_scenario_id="s5", compare=True)
+    assert {source["id"] for source in result["sources"]} == {"provisional:s5", "reference:s5"}
+    assert {row["values"]["overlap"] for row in result["rows"]} == {
+        "Recorded in both", "Recorded only in draft", "Recorded only in shared",
+    }
+    assert not result["truncated"]
+    with graphdb.connect_graphdb() as store:
+        assert all(not store.exists(source["graph_iri"]) for source in result["sources"])

@@ -110,7 +110,7 @@ async def invalid_request(request: Request, exc: RequestValidationError) -> JSON
     endpoint = request.scope.get("endpoint")
     if endpoint is interpret_scenario:
         message = "The description could not be submitted for interpretation."
-    elif endpoint is query_explorer:
+    elif endpoint in (query_explorer, query_concepts):
         message = "The Explorer query is incomplete or the current scenario failed structural validation."
     else:
         message = "Scenario JSON failed structural validation."
@@ -253,3 +253,18 @@ def query_explorer(request: explorer.ExplorerRequest) -> explorer.ExplorerResult
         graph, _ = prepared
     with connect_graphdb() as store:
         return explorer.answer(store, request, graph)
+
+
+@app.post(
+    "/explorer/concepts", response_model=explorer.ExplorerResult,
+    summary="Find recorded HINT concepts and compare a draft with a shared scenario",
+)
+def query_concepts(request: explorer.ConceptExplorationRequest) -> explorer.ExplorerResult | JSONResponse:
+    graph = None
+    if request.scenario is not None:
+        prepared = _validated_graph(request.scenario)
+        if isinstance(prepared, JSONResponse):
+            return prepared
+        graph, _ = prepared
+    with connect_graphdb() as store:
+        return explorer.explore_concepts(store, request, graph)

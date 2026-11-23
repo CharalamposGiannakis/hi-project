@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from rdflib import Graph
 
+from .explorer_concepts import CONCEPT_COLUMNS, build_concept_query, parse_concept_rows
 from .explorer_queries import EXPLORER_QUESTIONS, build_explorer_query, parse_explorer_rows
 from .graphdb import GraphDBError, GraphDBStore, _invalid_response, _text, _value, scenario_graph_iri
 from .model import Concept, Identifier, Scenario
@@ -22,14 +23,12 @@ QuestionId = Literal["cq1", "cq2", "cq5", "cq8", "cq11"]
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
-class ExplorerRequest(BaseModel):
+class ScopeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question_id: QuestionId
     scope: Scope
     scenario: Scenario | None = None
     shared_scenario_id: Identifier | None = None
-    parameters: dict[str, Concept] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def check_scope(self) -> Self:
@@ -39,6 +38,25 @@ class ExplorerRequest(BaseModel):
             raise ValueError("A current scenario is required for this scope.")
         if self.scope == "draft" and self.shared_scenario_id is not None:
             raise ValueError("A shared scenario requires a shared or combined scope.")
+        return self
+
+
+class ExplorerRequest(ScopeRequest):
+    question_id: QuestionId
+    parameters: dict[str, Concept] = Field(default_factory=dict)
+
+
+class ConceptExplorationRequest(ScopeRequest):
+    category: Literal["Capability", "Constraint", "Method", "Metric"] | None = None
+    concept: Concept | None = None
+    compare: bool = False
+
+    @model_validator(mode="after")
+    def check_comparison(self) -> Self:
+        if self.compare and (self.scope != "combined" or self.shared_scenario_id is None):
+            raise ValueError("Choose your current scenario and one shared scenario for comparison.")
+        if self.concept is not None and self.category is None:
+            raise ValueError("Choose a category when filtering by a HINT concept.")
         return self
 
 
@@ -233,9 +251,9 @@ def _unlinked_interaction_notices(
     return notices
 
 
-def answer(
-    store: GraphDBStore, request: ExplorerRequest, draft_graph: Graph | None,
-) -> ExplorerResult:
+def _query_sources(
+    store: GraphDBStore, request: ScopeRequest, draft_graph: Graph | None,
+) -> tuple[list[ScenarioSource], dict[str, Graph], list[ExplorerNotice]]:
     nonce = uuid4().hex
     staged: dict[str, Graph] = {}
     sources = []
@@ -257,7 +275,13 @@ def answer(
                 source = source.model_copy(update={"graph_iri": iri})
                 staged[iri] = to_rdf(_reference_scenarios()[source.scenario_id])
             sources.append(source)
+    return sources, staged, notices
 
+
+def answer(
+    store: GraphDBStore, request: ExplorerRequest, draft_graph: Graph | None,
+) -> ExplorerResult:
+    sources, staged, notices = _query_sources(store, request, draft_graph)
     source_ids = {source.graph_iri: source.id for source in sources}
     query = build_explorer_query(request.question_id, list(source_ids), request.parameters)
     try:
@@ -271,4 +295,27 @@ def answer(
     return ExplorerResult(
         sources=sources, columns=EXPLORER_QUESTIONS[request.question_id]["columns"],
         rows=[ExplorerRow(**row) for row in rows], truncated=truncated, notices=notices,
+    )
+
+
+def explore_concepts(
+    store: GraphDBStore, request: ConceptExplorationRequest, draft_graph: Graph | None,
+) -> ExplorerResult:
+    if request.concept is not None and not any(
+        concept["id"] == request.concept for concept in concepts(request.category)
+    ):
+        raise GraphDBError(422, "invalid_request", "Choose a supported HINT concept for this category.")
+    sources, staged, notices = _query_sources(store, request, draft_graph)
+    source_ids = {source.graph_iri: source.id for source in sources}
+    comparison = (sources[0].graph_iri, sources[1].graph_iri) if request.compare else None
+    query = build_concept_query(list(source_ids), request.category, request.concept, comparison)
+    try:
+        rows, truncated = parse_concept_rows(store.explore(query, staged), list(source_ids))
+        for row in rows:
+            row["source_id"] = source_ids[row.pop("graph_iri")]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _invalid_response() from exc
+    return ExplorerResult(
+        sources=sources, columns=CONCEPT_COLUMNS, rows=[ExplorerRow(**row) for row in rows],
+        truncated=truncated, notices=notices,
     )
