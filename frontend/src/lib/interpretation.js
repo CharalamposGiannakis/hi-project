@@ -13,9 +13,14 @@ export const questions = /** @type {const} */ ([
   { id: 'additional_notes', title: 'Additional notes', prompt: 'What else should a reader know, including uncertainties or open questions?' },
 ]);
 
+export const descriptionFields = /** @type {const} */ ([
+  { id: 'full_description', title: 'Full description' },
+  ...questions,
+]);
+
 /**
- * @typedef {typeof questions[number]['id']} QuestionId
- * @typedef {Partial<Record<QuestionId, string>>} Answers
+ * @typedef {typeof descriptionFields[number]['id']} AnswerId
+ * @typedef {Partial<Record<AnswerId, string>>} Answers
  * @typedef {'complete' | 'incomplete'} ModelStatus
  * @typedef {'not_interpreted' | 'simulated_complete' | 'simulated_incomplete' | 'unsupported'} LegacyStatus
  * @typedef {{ kind?: DiagnosticKind, message: string, path?: string }} InterpretationDiagnostic
@@ -37,19 +42,6 @@ export const diagnosticLabels = {
 
 /** @typedef {keyof typeof diagnosticLabels} DiagnosticKind */
 
-const complete = /** @satisfies {Answers} */ ({
-  use_case: 'A personal assistant HI system for health and lifestyle.',
-  goal: 'Maintain and improve user wellbeing.',
-  tasks: 'The goal requires collecting user self-reports and sensor-based activity data.',
-  agents: 'The team has two members: a human user and an AI assistant, each acting in that role.',
-  context: 'In a health-monitoring setting, sensor noise can affect measurements. User privacy is a constraint in this setting.',
-});
-
-export const sampleDescriptions = {
-  complete,
-  incomplete: { ...complete, agents: 'A human user is on the team in the role of user. Other team members are still to be determined.' },
-};
-
 /** @param {Answers} answers @param {Record<string, unknown> | null} scenario @param {Interpretation} interpretation */
 export function createInterpretationDocument(answers, scenario, interpretation) {
   return { source_description: { ...answers }, scenario, interpretation };
@@ -63,7 +55,7 @@ function isRecord(value) {
 /** @param {unknown} value @returns {value is Answers} */
 function isAnswers(value) {
   return isRecord(value) && Object.entries(value).every(([key, answer]) =>
-    questions.some(({ id }) => id === key) && typeof answer === 'string');
+    descriptionFields.some(({ id }) => id === key) && typeof answer === 'string');
 }
 
 /** @param {unknown} value @returns {value is LegacyStatus} */
@@ -110,7 +102,7 @@ export function readInterpretationDocument(value) {
 
   const { source_description: source, scenario, interpretation } = value;
   if (!isAnswers(source)) {
-    throw new Error('The source description must contain text answers for known wizard questions.');
+    throw new Error('The source description must contain text for known description fields.');
   }
   if (scenario !== null && !isRecord(scenario)) throw new Error('The scenario must be an object or null.');
   if (!isRecord(interpretation) || (Object.hasOwn(interpretation, 'source_changed') && interpretation.source_changed !== true)

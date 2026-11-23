@@ -70,6 +70,13 @@ const text = () => document.body.textContent ?? '';
 const interpretationDocument = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
 const draft = () => interpretationDocument().scenario;
 const validationStatus = () => document.querySelector('[data-validation-status]')?.textContent?.trim();
+
+function textOutsideJson() {
+  const copy = /** @type {HTMLElement} */ (document.body.cloneNode(true));
+  copy.querySelector('pre.json')?.remove();
+  return copy.textContent ?? '';
+}
+
 /** @param {string} label */
 function clickButton(label) {
   const button = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
@@ -108,9 +115,16 @@ function enterText(root, label, value) {
   flushSync();
 }
 
-/** @param {string} value */
-function enterDescription(value) {
-  const answer = /** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer'));
+/** @param {string} [id] */
+function descriptionInput(id = 'scenario-wizard-answer') {
+  const answer = document.getElementById(id);
+  if (!(answer instanceof HTMLTextAreaElement)) throw new Error(`No description input "${id}"`);
+  return answer;
+}
+
+/** @param {string} value @param {string} [id] */
+function enterDescription(value, id) {
+  const answer = descriptionInput(id);
   answer.value = value;
   answer.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
@@ -122,6 +136,22 @@ async function importJson(json, name) {
   Object.defineProperty(input, 'files', { value: [{ name, text: async () => json }], configurable: true });
   input.dispatchEvent(new Event('change', { bubbles: true }));
   await until(() => text().includes(`Loaded ${name}`));
+}
+
+async function downloadJson() {
+  const createObjectURL = vi.fn((/** @type {Blob} */ _blob) => 'blob:interpretation');
+  vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  clickButton('Download JSON');
+  expect(download).toHaveBeenCalledOnce();
+  const blob = createObjectURL.mock.calls[0][0];
+  const content = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsText(blob);
+  });
+  return JSON.parse(String(content));
 }
 
 describe('Svelte → FastAPI → RDF → SHACL', () => {
@@ -143,17 +173,31 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     clickButton('Previous');
     clickButton('Structured Editor');
     clickButton('Describe with AI');
-    expect(/** @type {HTMLTextAreaElement} */ (document.querySelector('#scenario-wizard-answer')).value).toBe(description);
+    expect(descriptionInput().value).toBe(description);
     expect(interpretationDocument().source_description).toEqual(raw.source_description);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('loads a complete interpretation, edits an agent and validates only on request', async () => {
+  it('combines all description inputs in a complete interpretation and validates edits only on request', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     await mountApp(baseUrl, false);
-    clickButton('Load complete description');
+    const source = {
+      use_case: 'A personal assistant HI system for health and lifestyle.',
+      full_description: '  A human user and an AI assistant collaborate on wellbeing — the goal requires collecting user self-reports and sensor activity data.\nTheir setting is health monitoring.  ',
+      additional_notes: '  Sensor noise can affect measurements.\nPrivacy is a constraint.  ',
+    };
+    enterDescription(source.use_case);
+    clickButton('Write full description');
+    enterDescription(source.full_description, 'scenario-full-description');
+    clickButton('Back to questions');
+    expect(descriptionInput().value).toBe(source.use_case);
+    clickButton('Add additional notes');
+    enterDescription(source.additional_notes, 'scenario-additional-notes');
+    clickButton('Back to questions');
+    clickButton('Write full description');
+    expect(descriptionInput('scenario-full-description').value).toBe(source.full_description);
     const before = interpretationDocument();
-    expect(before.source_description.use_case).toMatch(/personal assistant/i);
+    expect(before.source_description).toEqual(source);
     expect(before.scenario).toBeNull();
 
     clickButton('Convert to JSON using AI');
@@ -171,6 +215,20 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(interpreted.scenario).not.toHaveProperty('executions');
     expect(interpreted.scenario.agents.map((/** @type {{ kind: string }} */ agent) => agent.kind).sort()).toEqual(['artificial', 'human']);
     expect(validationStatus()).toBe('Not validated');
+
+    const exported = await downloadJson();
+    expect(exported).toEqual(interpreted);
+    await importJson(JSON.stringify(exported), 'mixed-description.json');
+    expect(interpretationDocument()).toEqual(interpreted);
+    clickButton('Describe with AI');
+    expect(descriptionInput().value).toBe(source.use_case);
+    clickButton('Write full description');
+    expect(descriptionInput('scenario-full-description').value).toBe(source.full_description);
+    clickButton('Back to questions');
+    clickButton('Add additional notes');
+    expect(descriptionInput('scenario-additional-notes').value).toBe(source.additional_notes);
+    clickButton('Structured Editor');
+
     const agent = interpreted.scenario.agents.find((/** @type {{ kind: string }} */ choice) => choice.kind === 'human');
     const editor = /** @type {Element} */ (document.getElementById(`agent-${agent.id}`)?.closest('section'));
     enterText(editor, 'Name', 'Research participant');
@@ -211,7 +269,16 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
 
   it('downloads a partial candidate, reports missing facts and validates after structured repair', async () => {
     await mountApp(baseUrl, false);
-    clickButton('Load incomplete description');
+    enterDescription('A personal assistant HI system for health and lifestyle.');
+    clickButton('Next');
+    enterDescription('Maintain and improve user wellbeing.');
+    clickButton('Next');
+    enterDescription('The goal requires collecting user self-reports and sensor-based activity data.');
+    clickButton('Next');
+    enterDescription('A human user is on the team in the role of user. Other team members are still to be determined.');
+    clickButton('Next');
+    clickButton('Next');
+    enterDescription('In a health-monitoring setting, sensor noise can affect measurements. User privacy is a constraint in this setting.');
     clickButton('Convert to JSON using AI');
     await until(() => interpretationDocument().interpretation.status === 'incomplete');
     const partial = interpretationDocument();
@@ -220,18 +287,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
       kind: 'missing_information', path: 'agents', message: expect.stringMatching(/artificial/),
     }));
     expect(partial.interpretation.diagnostics).toContainEqual(expect.objectContaining({ kind: 'technical_validation', path: 'agents' }));
-    const createObjectURL = vi.fn((/** @type {Blob} */ _blob) => 'blob:partial-interpretation');
-    vi.stubGlobal('URL', class extends URL { static createObjectURL = createObjectURL; static revokeObjectURL = vi.fn(); });
-    const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
-    clickButton('Download JSON');
-    expect(download).toHaveBeenCalledOnce();
-    const blob = createObjectURL.mock.calls[0][0];
-    const exported = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(JSON.parse(String(reader.result)));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsText(blob);
-    });
+    const exported = await downloadJson();
     expect(exported).toEqual(partial);
     await importJson(JSON.stringify(exported), 'partial.json');
     expect(interpretationDocument()).toEqual(partial);
@@ -240,7 +296,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     clickButton('Validate Scenario');
     expect(validationStatus()).toBe('Needs corrections');
-    expect(text()).toContain('The team needs at least one human and one artificial agent.');
+    expect(textOutsideJson()).toContain('The team needs at least one human and one artificial agent.');
     expect(fetchSpy).not.toHaveBeenCalled();
 
     clickButton('Add artificial agent');
@@ -257,7 +313,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(document.querySelector('pre.rdf')?.textContent).toContain('"AI assistant provided by the researcher"');
   });
 
-  it('keeps unsupported concepts and relationships visible as interpretation diagnostics', async () => {
+  it('keeps unsupported interpretation findings in JSON without rendering a findings panel', async () => {
     await mountApp(baseUrl, false);
     const description = 'We study precision ranking. Our participants exercise joint authority over the ranking.';
     enterDescription(description);
@@ -268,23 +324,51 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(result.source_description.use_case).toBe(description);
     expect(result.scenario.use_case).toMatchObject({ name: 'Precision ranking', concept: '' });
     expect(result.scenario).not.toHaveProperty('interactions');
+    const vocabularyFinding = 'Consider precision ranking as a vocabulary suggestion.';
+    const relationshipFinding = 'The scenario cannot express the proposed joint authority relationship.';
     expect(result.interpretation.diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'unsupported_vocabulary', path: 'use_case.concept' }),
-      expect.objectContaining({ kind: 'unsupported_relationship' }),
+      expect.objectContaining({ kind: 'unsupported_vocabulary', path: 'use_case.concept', message: vocabularyFinding }),
+      expect.objectContaining({ kind: 'unsupported_relationship', message: relationshipFinding }),
     ]));
-    expect(text()).toContain('Consider precision ranking as a vocabulary suggestion.');
-    expect(text()).toContain('cannot express the proposed joint authority relationship');
+    expect(textOutsideJson()).not.toContain(vocabularyFinding);
+    expect(textOutsideJson()).not.toContain(relationshipFinding);
+    const headings = [...document.querySelectorAll('h2, h3')].map((heading) => heading.textContent?.trim());
+    expect(headings).not.toContain('AI interpretation');
     expect(validationStatus()).toBe('Not validated');
+
+    const exported = await downloadJson();
+    expect(exported).toEqual(result);
+    await importJson(JSON.stringify(exported), 'findings.json');
+    expect(interpretationDocument()).toEqual(result);
+    expect(textOutsideJson()).not.toContain(vocabularyFinding);
+    expect(textOutsideJson()).not.toContain(relationshipFinding);
   });
 
-  it('reports unavailable interpretation without leaking provider details or losing the description', async () => {
+  it('reports an empty interpretation briefly and keeps the findings in JSON', async () => {
+    await mountApp(baseUrl, false);
+    const description = 'The study is still unspecified.';
+    const finding = 'Specify the study goal before interpreting it.';
+    enterDescription(description);
+    clickButton('Convert to JSON using AI');
+    await until(() => textOutsideJson().includes('AI interpretation did not produce an editable scenario.'));
+    expect(descriptionInput().value).toBe(description);
+    expect(draft()).toBeNull();
+    expect(interpretationDocument().interpretation.diagnostics).toContainEqual({
+      kind: 'missing_information', path: 'goal', message: finding,
+    });
+    expect(textOutsideJson()).not.toContain(finding);
+  });
+
+  it('reports an interpretation failure without exposing provider details or losing the description', async () => {
     await mountApp(baseUrl, false);
     const description = 'Provider temporarily unavailable.';
     enterDescription(description);
     clickButton('Convert to JSON using AI');
     await until(() => Boolean(document.querySelector('[role="alert"]')));
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Nebula could not complete the interpretation');
+    expect(document.querySelector('[role="alert"]')?.textContent?.trim()).toBe('AI interpretation failed. Try again.');
+    expect(text()).not.toContain('Nebula could not complete the interpretation');
     expect(text()).not.toContain('Synthetic upstream provider detail');
+    expect(descriptionInput().value).toBe(description);
     expect(interpretationDocument().source_description.use_case).toBe(description);
     expect(draft()).toBeNull();
     expect(validationStatus()).toBe('Not validated');

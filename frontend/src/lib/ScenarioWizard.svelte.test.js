@@ -19,7 +19,7 @@ function button(label) {
   return control;
 }
 
-it('skips unanswered sections, retains raw answers, and shows notes in the full description', async () => {
+function render() {
   const answers = $state(/** @type {import('./interpretation.js').Answers} */ ({}));
   const onInterpret = vi.fn();
   wizard = mount(ScenarioWizard, {
@@ -28,21 +28,36 @@ it('skips unanswered sections, retains raw answers, and shows notes in the full 
       answers,
       onAnswer: (id, value) => { answers[id] = value; },
       onInterpret,
-      onLoadExample: vi.fn(),
     },
   });
   flushSync();
+  return { answers, onInterpret };
+}
 
-  const textarea = /** @type {HTMLTextAreaElement} */ (document.getElementById('scenario-wizard-answer'));
+/** @param {string} id */
+function textareaById(id) {
+  const element = document.getElementById(id);
+  if (!(element instanceof HTMLTextAreaElement)) throw new Error(`Missing textarea ${id}`);
+  return element;
+}
+
+/** @param {HTMLTextAreaElement} textarea @param {string} value */
+function enter(textarea, value) {
+  textarea.value = value;
+  textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
+it('skips unanswered sections, retains raw answers, and shows notes in the full description', async () => {
+  const { answers, onInterpret } = render();
+  const textarea = textareaById('scenario-wizard-answer');
   const progress = /** @type {HTMLProgressElement} */ (document.querySelector('progress'));
   expect(button('Previous').disabled).toBe(true);
   expect(button('Convert to JSON using AI').disabled).toBe(true);
   expect(progress.value).toBe(1);
 
   const description = '  A person and a robot work together.\nMore details to follow.  ';
-  textarea.value = description;
-  textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  enter(textarea, description);
   expect(answers.use_case).toBe(description);
   for (let index = 1; index < questions.length; index++) {
     button('Next').click();
@@ -54,9 +69,7 @@ it('skips unanswered sections, retains raw answers, and shows notes in the full 
   expect(textarea.value).toBe('');
   expect(button('Next').disabled).toBe(true);
 
-  textarea.value = 'Team roles are still under discussion.';
-  textarea.dispatchEvent(new Event('input', { bubbles: true }));
-  flushSync();
+  enter(textarea, 'Team roles are still under discussion.');
   document.querySelector('summary')?.click();
   const fullDescription = document.querySelector('details');
   expect(fullDescription?.open).toBe(true);
@@ -71,4 +84,45 @@ it('skips unanswered sections, retains raw answers, and shows notes in the full 
   expect(textarea.value).toBe(description);
   button('Convert to JSON using AI').click();
   expect(onInterpret).toHaveBeenCalledOnce();
+});
+
+it('opens distinct blank editors, keeps both values and returns to the same question', async () => {
+  const { answers } = render();
+  button('Next').click();
+  await tick();
+  const fullDescription = '  A human and an AI plan a route.\nThe human checks the plan.  ';
+  const notes = '  How do they handle uncertain routes?\nStill open.  ';
+
+  button('Write full description').click();
+  await tick();
+  const fullEditor = textareaById('scenario-full-description');
+  expect(document.activeElement).toBe(fullEditor);
+  expect(fullEditor.value).toBe('');
+  expect(button('Convert to JSON using AI').disabled).toBe(true);
+  enter(fullEditor, fullDescription);
+  expect(button('Convert to JSON using AI').disabled).toBe(false);
+
+  button('Add additional notes').click();
+  await tick();
+  const notesEditor = textareaById('scenario-additional-notes');
+  expect(document.activeElement).toBe(notesEditor);
+  expect(notesEditor.value).toBe('');
+  enter(notesEditor, notes);
+
+  button('Back to questions').click();
+  await tick();
+  expect(document.activeElement?.textContent).toBe('Goal');
+  const goal = 'Plan a safe route.';
+  enter(textareaById('scenario-wizard-answer'), goal);
+  expect(answers).toEqual({ full_description: fullDescription, additional_notes: notes, goal });
+
+  button('Write full description').click();
+  await tick();
+  expect(textareaById('scenario-full-description').value).toBe(fullDescription);
+  button('Add additional notes').click();
+  await tick();
+  expect(textareaById('scenario-additional-notes').value).toBe(notes);
+
+  document.querySelector('summary')?.click();
+  expect([...document.querySelectorAll('.description dd')].map((answer) => answer.textContent)).toEqual([fullDescription, goal, notes]);
 });

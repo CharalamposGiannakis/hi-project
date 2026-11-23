@@ -1,4 +1,5 @@
 import json
+import os
 from hashlib import sha256
 
 import httpx
@@ -10,13 +11,18 @@ from hi_scenario.vocabulary import export_vocabulary
 
 
 KEY = "test-nebula-credential"
-DESCRIPTION = {"use_case": "  A human and AI work together.\nTask types are undecided.  ", "additional_notes": "Ébauche."}
+DESCRIPTION = {
+    "full_description": "  A human and AI work together.\nTask types are undecided.  ",
+    "use_case": "Research collaboration",
+    "additional_notes": "Ébauche.",
+}
 
 
 @pytest.fixture
-def stub_nebula(monkeypatch):
+def stub_nebula(monkeypatch, tmp_path):
     """Exercise the real HTTP client request and response handling without using the network."""
     client = httpx.Client
+    monkeypatch.setattr(nebula, "_LOCAL_CONFIG", tmp_path / ".env.nebula")
     monkeypatch.setenv("NEBULA_API_KEY", KEY)
     monkeypatch.delenv("NEBULA_MODEL", raising=False)
 
@@ -70,6 +76,8 @@ def test_request_includes_exact_answers_canonical_schema_and_all_hint_concepts(s
     assert len(vocabulary) == 16
     assert sum(map(len, vocabulary.values())) == 215
     assert "formal assignment alone" in instructions
+    assert "full_description field" in instructions
+    assert "refer to the same scenario" in instructions
     assert "goal.required_tasks" in instructions
     assert "unsupported_relationship" in instructions
     assert "A single named agent is enough to return a draft" in instructions
@@ -85,6 +93,67 @@ def test_configured_model_and_fenced_json(stub_nebula, monkeypatch):
     requests = stub_nebula(lambda _: completion('```json\n{"scenario": null, "diagnostics": []}\n```'))
     assert nebula.request_interpretation(DESCRIPTION) == ("custom-model", {"scenario": None, "diagnostics": []})
     assert json.loads(requests[0].content)["model"] == "custom-model"
+
+
+def test_local_file_supplies_unset_settings_without_changing_the_environment(stub_nebula, monkeypatch):
+    monkeypatch.delenv("NEBULA_API_KEY")
+    config = (
+        "# Local Nebula settings\n"
+        f"  export NEBULA_API_KEY = '{KEY}' # operator note\n"
+        "NEBULA_MODEL=\"local-model\"\n"
+        "UNRELATED_SETTING=ignore-me\n"
+        "NEBULA_MODEL='unterminated\n"
+    )
+    nebula._LOCAL_CONFIG.write_text(config, encoding="utf-8-sig")
+    monkeypatch.delenv("UNRELATED_SETTING", raising=False)
+    requests = stub_nebula(lambda _: completion("{}"))
+
+    assert nebula.request_interpretation(DESCRIPTION) == ("local-model", {})
+    assert requests[0].headers["Authorization"] == f"Bearer {KEY}"
+    assert "NEBULA_API_KEY" not in os.environ
+    assert "NEBULA_MODEL" not in os.environ
+    assert "UNRELATED_SETTING" not in os.environ
+
+    nebula._LOCAL_CONFIG.write_text(config + "NEBULA_API_KEY= # temporarily disabled\n", encoding="utf-8-sig")
+    with pytest.raises(nebula.NebulaError) as error:
+        nebula.request_interpretation(DESCRIPTION)
+    assert error.value.status_code == 503
+    assert len(requests) == 1
+
+
+def test_each_explicit_environment_value_has_priority_over_the_file(stub_nebula, monkeypatch):
+    nebula._LOCAL_CONFIG.write_text("NEBULA_API_KEY=file-key\nNEBULA_MODEL=file-model\n", encoding="utf-8")
+    requests = stub_nebula(lambda _: completion("{}"))
+
+    assert nebula.request_interpretation(DESCRIPTION) == ("file-model", {})
+    assert requests[0].headers["Authorization"] == f"Bearer {KEY}"
+    monkeypatch.delenv("NEBULA_API_KEY")
+    monkeypatch.setenv("NEBULA_MODEL", "model-from-env")
+    assert nebula.request_interpretation(DESCRIPTION) == ("model-from-env", {})
+    assert requests[1].headers["Authorization"] == "Bearer file-key"
+
+    monkeypatch.setenv("NEBULA_MODEL", "")
+    assert nebula.request_interpretation(DESCRIPTION) == (nebula.DEFAULT_MODEL, {})
+    monkeypatch.setenv("NEBULA_API_KEY", "")
+    with pytest.raises(nebula.NebulaError) as error:
+        nebula.request_interpretation(DESCRIPTION)
+    assert error.value.status_code == 503
+    assert len(requests) == 3
+
+
+@pytest.mark.parametrize("contents", [b'NEBULA_API_KEY="unterminated\n', b'\xff', None])
+def test_unreadable_or_malformed_local_file_is_safely_ignored(stub_nebula, monkeypatch, contents):
+    monkeypatch.delenv("NEBULA_API_KEY")
+    if contents is None:
+        nebula._LOCAL_CONFIG.mkdir()
+    else:
+        nebula._LOCAL_CONFIG.write_bytes(contents)
+    requests = stub_nebula(lambda _: pytest.fail("Unconfigured interpretation must not contact Nebula"))
+
+    with pytest.raises(nebula.NebulaError) as error:
+        nebula.request_interpretation(DESCRIPTION)
+    assert error.value.status_code == 503
+    assert requests == []
 
 
 def test_missing_key_keeps_backend_usable_and_does_not_send_a_request(stub_nebula, monkeypatch):

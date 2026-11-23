@@ -14,7 +14,7 @@ from .vocabulary import CATEGORIES, concepts
 
 
 Question = Literal[
-    "use_case", "goal", "tasks", "agents", "capabilities", "context", "team_constraints",
+    "full_description", "use_case", "goal", "tasks", "agents", "capabilities", "context", "team_constraints",
     "executions", "interactions", "experiments", "evaluations", "additional_notes",
 ]
 MAX_DESCRIPTION_LENGTH = 20_000
