@@ -37,7 +37,10 @@ def _completion(request: httpx.Request) -> httpx.Response:
         },
     }
     diagnostics = []
-    if "precision ranking" in description["use_case"]:
+    if description["use_case"] == "The study is still unspecified.":
+        scenario = None
+        diagnostics = [{"kind": "missing_information", "path": "goal", "message": "Specify the study goal before interpreting it."}]
+    elif "precision ranking" in description["use_case"]:
         scenario = {"use_case": {"id": "precision-ranking", "name": "Precision ranking"}}
         diagnostics = [
             {"kind": "unsupported_vocabulary", "path": "use_case.concept", "message": "Consider precision ranking as a vocabulary suggestion."},

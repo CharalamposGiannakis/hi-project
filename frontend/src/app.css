@@ -152,7 +152,6 @@ pre.report { white-space: pre-wrap; font-size: 0.75rem; }
 .preview h2 { margin-bottom: 0.35rem; }
 .preview [data-validation-status] { margin: 0.75rem 0 0.25rem; font-weight: 600; }
 .preview details { margin-top: 0.5rem; }
-.interpretation-findings { border-top: 1px solid var(--border); margin-top: 0.85rem; padding-top: 0.65rem; }
 .save { border-bottom: 1px solid var(--border); padding-bottom: 0.75rem; margin-bottom: 1rem; }
 .save h3 { margin: 1rem 0 0.25rem; font-size: 0.95rem; }
 a.button { display: inline-block; text-decoration: none; }

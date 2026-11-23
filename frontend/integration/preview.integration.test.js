@@ -70,6 +70,13 @@ const text = () => document.body.textContent ?? '';
 const interpretationDocument = () => JSON.parse(document.querySelector('pre.json')?.textContent ?? '{}');
 const draft = () => interpretationDocument().scenario;
 const validationStatus = () => document.querySelector('[data-validation-status]')?.textContent?.trim();
+
+function textOutsideJson() {
+  const copy = /** @type {HTMLElement} */ (document.body.cloneNode(true));
+  copy.querySelector('pre.json')?.remove();
+  return copy.textContent ?? '';
+}
+
 /** @param {string} label */
 function clickButton(label) {
   const button = [...document.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
@@ -289,7 +296,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     clickButton('Validate Scenario');
     expect(validationStatus()).toBe('Needs corrections');
-    expect(text()).toContain('The team needs at least one human and one artificial agent.');
+    expect(textOutsideJson()).toContain('The team needs at least one human and one artificial agent.');
     expect(fetchSpy).not.toHaveBeenCalled();
 
     clickButton('Add artificial agent');
@@ -306,7 +313,7 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(document.querySelector('pre.rdf')?.textContent).toContain('"AI assistant provided by the researcher"');
   });
 
-  it('keeps unsupported concepts and relationships visible as interpretation diagnostics', async () => {
+  it('keeps unsupported interpretation findings in JSON without rendering a findings panel', async () => {
     await mountApp(baseUrl, false);
     const description = 'We study precision ranking. Our participants exercise joint authority over the ranking.';
     enterDescription(description);
@@ -317,23 +324,51 @@ describe('Svelte → FastAPI → RDF → SHACL', () => {
     expect(result.source_description.use_case).toBe(description);
     expect(result.scenario.use_case).toMatchObject({ name: 'Precision ranking', concept: '' });
     expect(result.scenario).not.toHaveProperty('interactions');
+    const vocabularyFinding = 'Consider precision ranking as a vocabulary suggestion.';
+    const relationshipFinding = 'The scenario cannot express the proposed joint authority relationship.';
     expect(result.interpretation.diagnostics).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'unsupported_vocabulary', path: 'use_case.concept' }),
-      expect.objectContaining({ kind: 'unsupported_relationship' }),
+      expect.objectContaining({ kind: 'unsupported_vocabulary', path: 'use_case.concept', message: vocabularyFinding }),
+      expect.objectContaining({ kind: 'unsupported_relationship', message: relationshipFinding }),
     ]));
-    expect(text()).toContain('Consider precision ranking as a vocabulary suggestion.');
-    expect(text()).toContain('cannot express the proposed joint authority relationship');
+    expect(textOutsideJson()).not.toContain(vocabularyFinding);
+    expect(textOutsideJson()).not.toContain(relationshipFinding);
+    const headings = [...document.querySelectorAll('h2, h3')].map((heading) => heading.textContent?.trim());
+    expect(headings).not.toContain('AI interpretation');
     expect(validationStatus()).toBe('Not validated');
+
+    const exported = await downloadJson();
+    expect(exported).toEqual(result);
+    await importJson(JSON.stringify(exported), 'findings.json');
+    expect(interpretationDocument()).toEqual(result);
+    expect(textOutsideJson()).not.toContain(vocabularyFinding);
+    expect(textOutsideJson()).not.toContain(relationshipFinding);
   });
 
-  it('reports unavailable interpretation without leaking provider details or losing the description', async () => {
+  it('reports an empty interpretation briefly and keeps the findings in JSON', async () => {
+    await mountApp(baseUrl, false);
+    const description = 'The study is still unspecified.';
+    const finding = 'Specify the study goal before interpreting it.';
+    enterDescription(description);
+    clickButton('Convert to JSON using AI');
+    await until(() => textOutsideJson().includes('AI interpretation did not produce an editable scenario.'));
+    expect(descriptionInput().value).toBe(description);
+    expect(draft()).toBeNull();
+    expect(interpretationDocument().interpretation.diagnostics).toContainEqual({
+      kind: 'missing_information', path: 'goal', message: finding,
+    });
+    expect(textOutsideJson()).not.toContain(finding);
+  });
+
+  it('reports an interpretation failure without exposing provider details or losing the description', async () => {
     await mountApp(baseUrl, false);
     const description = 'Provider temporarily unavailable.';
     enterDescription(description);
     clickButton('Convert to JSON using AI');
     await until(() => Boolean(document.querySelector('[role="alert"]')));
-    expect(document.querySelector('[role="alert"]')?.textContent).toContain('Nebula could not complete the interpretation');
+    expect(document.querySelector('[role="alert"]')?.textContent?.trim()).toBe('AI interpretation failed. Try again.');
+    expect(text()).not.toContain('Nebula could not complete the interpretation');
     expect(text()).not.toContain('Synthetic upstream provider detail');
+    expect(descriptionInput().value).toBe(description);
     expect(interpretationDocument().source_description.use_case).toBe(description);
     expect(draft()).toBeNull();
     expect(validationStatus()).toBe('Not validated');

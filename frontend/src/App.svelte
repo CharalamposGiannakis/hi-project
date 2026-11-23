@@ -1,7 +1,7 @@
 <script>
   import { onDestroy, onMount, tick } from 'svelte';
   import { issuePath, requestInterpretation } from './lib/api.js';
-  import { createInterpretationDocument, descriptionFields, diagnosticLabels, readInterpretationDocument } from './lib/interpretation.js';
+  import { createInterpretationDocument, descriptionFields, readInterpretationDocument } from './lib/interpretation.js';
   import { createJsonSource } from './lib/json-viewer-channel.js';
   import example from '../../examples/s1.json';
   import EditorSection from './lib/EditorSection.svelte';
@@ -43,7 +43,7 @@
   let pendingInterpretation = $state.raw(/** @type {{ controller: AbortController, target: object } | null} */ (null));
   let interpretationMessage = $state('');
   let interpretationFailed = $state(false);
-  let noCandidateAttempt = $state.raw(/** @type {import('./lib/interpretation.js').ModelInterpretation | null} */ (null));
+  const noCandidateMessage = 'AI interpretation did not produce an editable scenario.';
   let showErrors = $state(false);
   let status = $state('');
   let loadError = $state('');
@@ -65,7 +65,10 @@
     ? descriptionFields.some(({ id }) => answers[id] !== interpretation.source_description?.[id])
     : interpretation.source_changed === true);
   let scenarioChanged = $derived(Boolean(interpretation.generated_scenario && JSON.stringify(candidate) !== generatedBaseline));
-  let displayedFindings = $derived(noCandidateAttempt ?? interpretation);
+  let interpretationNotice = $derived(interpretationMessage
+    || (sourceChanged ? 'The description has changed since interpretation.'
+      : scenarioChanged ? 'The structured scenario differs from the generated draft.'
+      : interpretation.generated_scenario === null ? noCandidateMessage : ''));
   let draftInterpretation = $derived.by(() => {
     const { source_changed: _source, scenario_changed: _scenario, ...record } = interpretation;
     return { ...record, ...(sourceChanged ? { source_changed: /** @type {const} */ (true) } : {}),
@@ -260,7 +263,6 @@
     pendingInterpretation = null;
     interpretationMessage = message;
     interpretationFailed = false;
-    noCandidateAttempt = null;
   }
 
   async function interpret() {
@@ -280,21 +282,22 @@
 
     if (result.kind !== 'ok') {
       interpretationFailed = true;
-      if (result.kind === 'rejected') {
-        const { code, message, issues } = result.error;
-        interpretationMessage = code === 'invalid_request'
-          ? [message, ...new Set(issues.map((issue) => issue.message))].join('\n')
-          : message;
+      const code = result.kind === 'rejected' ? result.error.code : null;
+      if (code === 'invalid_request') {
+        interpretationMessage = 'Check the description length and try again.';
+      } else if (code === 'interpretation_unavailable' || result.kind === 'unavailable') {
+        interpretationMessage = 'AI interpretation is unavailable right now. Try again later.';
       } else {
-        interpretationMessage = result.message;
+        interpretationMessage = 'AI interpretation failed. Try again.';
       }
       return;
     }
     const { scenario: generated, interpretation: findings } = result.data;
     const record = { ...findings, source_description: description, generated_scenario: generated };
     if (generated === null) {
-      if (interpretation.generated_scenario) noCandidateAttempt = findings;
-      else interpretation = record;
+      if (!interpretation.generated_scenario) interpretation = record;
+      interpretationFailed = true;
+      interpretationMessage = noCandidateMessage;
       return;
     }
 
@@ -303,7 +306,7 @@
       editor = fromContract(generated, { allowDraft: true });
     } catch {
       interpretationFailed = true;
-      interpretationMessage = 'The AI returned a candidate that the Structured Editor could not open.';
+      interpretationMessage = noCandidateMessage;
       return;
     }
     generatedBaseline = JSON.stringify(toContract(editor));
@@ -380,6 +383,11 @@
       <button type="button" aria-controls="description-panel" aria-pressed={mode === 'describe'} onclick={() => (mode = 'describe')}>Describe with AI</button>
       <button type="button" id="structured-mode" aria-controls="structured-panel" aria-pressed={mode === 'structured'} onclick={() => (mode = 'structured')}>Structured Editor</button>
     </div>
+    {#if pendingInterpretation}
+      {#if mode === 'structured'}<p class="status" role="status">Interpreting description…</p>{/if}
+    {:else if interpretationNotice}
+      <p class:error={interpretationFailed} class:status={!interpretationFailed} role={interpretationFailed ? 'alert' : 'status'}>{interpretationNotice}</p>
+    {/if}
     <div id="description-panel" hidden={mode !== 'describe'}>
       {#key wizardKey}
         <ScenarioWizard {answers} onAnswer={answer} onInterpret={interpret} interpreting={pendingInterpretation !== null} />
@@ -617,42 +625,6 @@
             </li>
           {/each}
         </ul>
-      {/if}
-      {#if interpretation.status !== 'not_interpreted' || pendingInterpretation || interpretationMessage}
-        <section class="interpretation-findings" aria-labelledby="interpretation-heading">
-          <h3 id="interpretation-heading">AI interpretation</h3>
-          {#if pendingInterpretation && mode === 'structured'}
-            <p class="status" role="status">Interpreting description…</p>
-          {/if}
-          {#if interpretationMessage}
-            <p class:error={interpretationFailed} class:hint={!interpretationFailed} role={interpretationFailed ? 'alert' : 'status'}>{interpretationMessage}</p>
-          {/if}
-          {#if displayedFindings.status !== 'not_interpreted'}
-            <p class="hint" role="status">
-              {noCandidateAttempt || interpretation.generated_scenario === null ? 'The AI did not return an editable candidate.'
-                : displayedFindings.status === 'complete' ? 'The AI generated a candidate. Review it in the Structured Editor.'
-                : displayedFindings.status === 'incomplete' ? 'The AI reported issues to review.'
-                : 'These findings came from the Phase 1A.1 simulator.'}
-            </p>
-          {/if}
-          {#if !noCandidateAttempt && sourceChanged}
-            <p class="warn">The description has changed since interpretation.</p>
-          {/if}
-          {#if !noCandidateAttempt && scenarioChanged}
-            <p class="warn">The structured scenario has changed. These findings describe the generated draft.</p>
-          {/if}
-          {#if displayedFindings.diagnostics.length}
-            <ul class="issues">
-              {#each displayedFindings.diagnostics as diagnostic}
-                <li>
-                  {#if diagnostic.kind}<strong>{diagnosticLabels[diagnostic.kind]}.</strong>{/if}
-                  {diagnostic.message}
-                  {#if diagnostic.path}<code>{diagnostic.path}</code>{/if}
-                </li>
-              {/each}
-            </ul>
-          {/if}
-        </section>
       {/if}
     </aside>
 

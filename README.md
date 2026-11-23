@@ -7,7 +7,7 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 ## Researcher workflow
 
 1. In **Describe with AI**, choose **Write full description** to type or paste a scenario, or use **Previous** and **Next** to answer the optional guided questions. Use **Add additional notes** for supplementary information. **View full description** and the JSON preview show the text from all three inputs.
-2. Choose **Convert to JSON using AI** to send your description to VU Nebula. Review the proposed facts, HINT mappings, and any missing or unsupported information. A partial proposal can open in the Structured Editor and be corrected. Review the source evidence before accepting any proposed scientific fact.
+2. Choose **Convert to JSON using AI** to send your description to VU Nebula. Review the proposed facts and HINT mappings in the Structured Editor. **Scenario JSON** holds interpretation findings about missing or unsupported information. Review the source evidence before accepting any proposed scientific fact.
 3. Switch to **Structured Editor** at any point to add or edit HINT-backed fields. Use **Expand all** or **Collapse all** to navigate the eleven sections. Your answers and structured edits stay available as you switch between input methods. **Load S1 example** opens the bundled canonical scenario.
 4. Choose **Validate Scenario** when you're ready for a technical check. Follow diagnostics to fields that need correction. A valid result includes N-Triples and the SHACL report. Editing the structured scenario clears that result. Scientific approval is a separate process.
 
