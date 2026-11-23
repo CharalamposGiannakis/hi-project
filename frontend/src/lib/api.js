@@ -37,13 +37,14 @@ import { concepts } from './scenario.js';
  *   publication_status: PublicationStatus, graph_iri: string }} ExplorerSource
  * @typedef {{ id: string, label: string, category: import('./scenario.js').Category }} ExplorerParameter
  * @typedef {{ id: ExplorerQuestionId, label: string, description: string, parameters: ExplorerParameter[] }} ExplorerQuestion
- * @typedef {{ shared_source: 'approved' | 'reference', scenarios: ExplorerSource[], questions: ExplorerQuestion[] }} ExplorerCatalog
+ * @typedef {{ shared_source: 'approved' | 'reference', scenarios: ExplorerSource[], questions: ExplorerQuestion[], warnings?: string[] }} ExplorerCatalog
  * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, scenario?: object,
  *   shared_scenario_id?: string, parameters?: Record<string, string> }} ExplorerRequest
  * @typedef {{ id: string, label: string }} ExplorerColumn
  * @typedef {{ label: string, iri: string }} ExplorerEvidence
  * @typedef {{ source_id: string, values: Record<string, string | null>, evidence: ExplorerEvidence[] }} ExplorerRow
- * @typedef {{ sources: ExplorerSource[], columns: ExplorerColumn[], rows: ExplorerRow[], truncated: boolean }} ExplorerResults
+ * @typedef {{ code: string, message: string, source_id?: string | null }} ExplorerNotice
+ * @typedef {{ sources: ExplorerSource[], columns: ExplorerColumn[], rows: ExplorerRow[], truncated: boolean, notices?: ExplorerNotice[] }} ExplorerResults
  * @typedef {{ fetch?: typeof globalThis.fetch, baseUrl?: string, timeoutMs?: number, signal?: AbortSignal }} Options
  */
 
@@ -133,7 +134,8 @@ function isExplorerQuestion(question) {
 function isExplorerCatalog(body) {
   return ['approved', 'reference'].includes(body?.shared_source)
     && Array.isArray(body.scenarios) && body.scenarios.every(isExplorerSource)
-    && Array.isArray(body.questions) && body.questions.every(isExplorerQuestion);
+    && Array.isArray(body.questions) && body.questions.every(isExplorerQuestion)
+    && (body.warnings === undefined || (Array.isArray(body.warnings) && body.warnings.every(isString)));
 }
 
 /** @param {any} row @returns {row is ExplorerRow} */
@@ -150,7 +152,11 @@ function isExplorerResults(body) {
   return typeof truncated === 'boolean' && Array.isArray(sources) && sources.every(isExplorerSource)
     && Array.isArray(columns) && columns.every((column) => isString(column?.id) && isString(column.label))
     && Array.isArray(rows) && rows.every((row) => isExplorerRow(row)
-      && sources.some((source) => source.id === row.source_id));
+      && sources.some((source) => source.id === row.source_id))
+    && (body.notices === undefined || (Array.isArray(body.notices) && body.notices.every(
+      (/** @type {any} */ notice) => isString(notice?.code) && isString(notice.message)
+        && (notice.source_id == null || sources.some((source) => source.id === notice.source_id)),
+    )));
 }
 
 /** @param {any} body @returns {body is SubmissionError} */

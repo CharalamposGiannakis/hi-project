@@ -714,6 +714,47 @@ describe('Knowledge Explorer', () => {
     ],
   };
 
+  it.each([false, true])('explains missing CQ5 links with source provenance when other results exist (%s)', async (hasRows) => {
+    const notice = {
+      code: 'interaction_execution_links_missing', source_id: reference.id,
+      message: 'Interactions are recorded, but none are linked to task executions.',
+    };
+    const fetch = vi.fn(async (/** @type {string} */ url) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? catalog : {
+        sources: [reference], columns: [{ id: 'task', label: 'Task' }], truncated: false, notices: [notice],
+        rows: hasRows ? [{ source_id: reference.id, values: { task: 'Explain findings' }, evidence: [] }] : [],
+      },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
+    document.getElementById('explorer-source-approved')?.click();
+    flushSync();
+    selectValue('explorer-question', 'cq5');
+    click('Run query');
+    await until(() => expect(explorer()?.textContent).toContain(notice.message));
+    const sourceNotice = [...(explorer()?.querySelectorAll('[role="status"]') ?? [])]
+      .find((node) => node.textContent?.includes(notice.message));
+    expect(sourceNotice?.textContent).toContain(reference.name);
+    expect(sourceNotice?.textContent).toContain('Experimental reference');
+    if (hasRows) expect(explorer()?.textContent).toContain('Explain findings');
+    else {
+      expect(explorer()?.textContent).toContain('No matching execution–interaction links were found.');
+      expect(explorer()?.textContent).toContain('CQ5 requires recorded links between interactions and executions of goal-required tasks.');
+      expect(explorer()?.querySelector('tbody')).toBeNull();
+    }
+  });
+
+  it('shows an unavailable approved corpus warning alongside the reference source label', async () => {
+    const warning = 'Configured approved scenario IDs have no available graphs. Showing experimental references.';
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ...catalog, warnings: [warning] }))));
+    render();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain(warning));
+    expect(explorer()?.textContent).toContain('Experimental reference scenarios');
+  });
+
   it('combines explicitly selected sources, renders row evidence, and preserves Builder edits', async () => {
     const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ request) => {
       if (url.endsWith('/explorer/catalog')) return new Response(JSON.stringify(catalog));

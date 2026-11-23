@@ -42,9 +42,9 @@ def evidence(row, label):
 
 @pytest.mark.parametrize(("question", "expected"), [
     ("cq1", (2, 2, 3, 2, 2, 2, 2)),
-    ("cq2", (2, 11, 6, 6, 6, 6, 6)),
+    ("cq2", (4, 11, 6, 6, 6, 6, 8)),
     ("cq5", (2, 0, 0, 2, 4, 4, 4)),
-    ("cq8", (3, 2, 3, 3, 2, 4, 4)),
+    ("cq8", (6, 10, 6, 6, 4, 8, 8)),
     ("cq11", (3, 2, 2, 2, 2, 2, 2)),
 ])
 def test_queries_keep_results_in_their_named_graph_on_the_canonical_corpus(data, question, expected):
@@ -73,18 +73,37 @@ def test_cq1_keeps_same_named_members_separate_and_uses_named_reference_labels(d
     assert "Wrong graph label" not in {row["values"]["role"] for row in rows}
 
 
-def test_cq2_requires_every_capability_on_the_same_member_in_the_same_graph(data):
+@pytest.mark.parametrize(("scenario", "task_id", "members"), [
+    ("s1", "data-collection", {"AI assistant", "Human user"}),
+    ("s7", "interpret-multimodal-input", {"AI virtual guide", "Human visitor"}),
+])
+def test_cq2_covers_collaborative_requirements_without_execution_claims(data, scenario, task_id, members):
+    scope = data.graph(scenario_graph_iri(scenario))
+    # Derived coverage remains available when the scenario has no execution evidence.
+    scope.remove((None, HI.realizesTask, None))
+    task = f"urn:hi-app:scenario:{scenario}:task:{task_id}"
+    rows = [row for row in answers(data, "cq2", scenario) if evidence(row, "Task") == task]
+    assert len(rows) == 2
+    assert {row["values"]["member"] for row in rows} == members
+    assert {evidence(row, "Task requirement") for row in rows} == set(map(str, scope.objects(URIRef(task), HI.requiresCapability)))
+    assert all(evidence(row, "HI team") == f"urn:hi-app:scenario:{scenario}:team" for row in rows)
+    assert all("execution" not in row["values"] for row in rows)
+
+
+def test_cq2_requires_every_capability_within_the_same_team_and_graph(data):
     scope = data.graph(scenario_graph_iri("s1"))
     ai = URIRef("urn:hi-app:scenario:s1:agent:ai-assistant")
     task = "urn:hi-app:scenario:s1:task:data-collection"
-    self_reporting = next(scope.subjects(HI.hasCapabilityConcept, HINT.SelfReportingCapability))
+    sensing = next(scope.subjects(HI.hasCapabilityConcept, HINT.SensingCapability))
 
-    # One member can sense and the other can self-report. Scope cannot join them
-    # or borrow a capability assertion for the same IRI from another graph.
-    data.graph(scenario_graph_iri("s2")).add((ai, HI.hasCapability, self_reporting))
+    # A missing team's capability cannot be borrowed from another graph or
+    # from someone who is outside that team even within the selected graph.
+    scope.remove((ai, HI.hasCapability, sensing))
+    data.graph(scenario_graph_iri("s2")).add((ai, HI.hasCapability, sensing))
+    scope.add((URIRef("urn:test:outside-team-agent"), HI.hasCapability, sensing))
     assert task not in {evidence(row, "Task") for row in answers(data, "cq2", "s1", "s2")}
 
-    scope.add((ai, HI.hasCapability, self_reporting))
+    scope.add((ai, HI.hasCapability, sensing))
     (row,) = answers(data, "cq2", "s1", capability="SensingCapability")
     assert evidence(row, "Task") == task
     assert evidence(row, "Team member") == str(ai)
@@ -100,7 +119,8 @@ def test_cq2_matches_an_equivalent_owned_capability_to_the_separate_required_rec
     scope.add((ai, HI.hasCapability, owned))
     scope.add((owned, HI.hasCapabilityConcept, HINT.SelfReportingCapability))
 
-    (row,) = answers(data, "cq2", "s1", capability="SelfReportingCapability")
+    rows = answers(data, "cq2", "s1", capability="SelfReportingCapability")
+    (row,) = [row for row in rows if evidence(row, "Member capability") == str(owned)]
     assert evidence(row, "Team member") == str(ai)
     assert evidence(row, "Task") == task
     assert evidence(row, "Member capability") == str(owned)
@@ -117,7 +137,7 @@ def test_cq5_uses_explicit_execution_participants_and_filters_on_asserted_method
     assert not answers(data, "cq5", "s1", method="DataCollectionMethod")
 
 
-def test_cq8_uses_evaluation_metrics_and_keeps_stated_hypotheses_when_one_is_absent(data):
+def test_cq8_keeps_experiment_metrics_distinct_and_hypotheses_when_one_is_absent(data):
     scope = data.graph(scenario_graph_iri("s7"))
     experiment = next(scope.subjects(HI.hasExperimentConcept, HINT.VirtualRealityEffectivenessExperiment))
     scope.add((experiment, HI.hasMetricTested, HINT.CO2ReductionMetric))
@@ -125,9 +145,57 @@ def test_cq8_uses_evaluation_metrics_and_keeps_stated_hypotheses_when_one_is_abs
 
     rows = answers(data, "cq8", "s1", "s7", goal="EnhancedVisitorGoal")
     assert {row["graph_iri"] for row in rows} == {scenario_graph_iri("s7")}
-    assert len(rows) == 4
-    assert str(HINT.CO2ReductionMetric) not in {evidence(row, "Metric concept") for row in rows}
+    assert len(rows) == 9
+    (extra,) = [row for row in rows if evidence(row, "Metric concept") == str(HINT.CO2ReductionMetric)]
+    assert extra["values"]["metric_source"] == "Experiment"
+    assert evidence(extra, "Metric owner") == str(experiment)
+    assert evidence(extra, "Metric relationship") == str(HI.hasMetricTested)
     assert all(row["values"]["null_hypothesis"] is None and row["values"]["alternative_hypothesis"] for row in rows)
+
+
+@pytest.mark.parametrize("scenario", ["s2", "s5"])
+def test_cq8_retrieves_every_recorded_experiment_and_each_metric_relationship(data, scenario):
+    scope = data.graph(scenario_graph_iri(scenario))
+    rows = answers(data, "cq8", scenario)
+    recorded = {
+        (str(experiment), str(owner), str(predicate), str(metric))
+        for evaluation, experiment in scope.subject_objects(HI.hasExperiment)
+        for owner, predicate in ((evaluation, HI.hasMetricConcept), (experiment, HI.hasMetricTested))
+        for metric in scope.objects(owner, predicate)
+    }
+    assert {
+        (evidence(row, "Experiment"), evidence(row, "Metric owner"),
+         evidence(row, "Metric relationship"), evidence(row, "Metric concept"))
+        for row in rows
+    } == recorded
+    assert {row["values"]["metric_source"] for row in rows} == {"Evaluation", "Experiment"}
+    assert len(rows) == len(recorded)
+
+
+def test_cq8_accepts_either_goal_path_and_excludes_unlinked_evaluations(data):
+    scope = data.graph(scenario_graph_iri("s2"))
+    goal = next(scope.objects(None, HI.hasGoal))
+    expected = {evidence(row, "Experiment") for row in answers(data, "cq8", "s2")}
+    scope.remove((goal, HI.requiresTask, None))
+    assert {evidence(row, "Experiment") for row in answers(data, "cq8", "s2")} == expected
+    scope.remove((None, HI.towardsGoal, goal))
+    assert not answers(data, "cq8", "s2")
+    # The required-task path is independently sufficient without towardsGoal.
+    execution = URIRef("urn:hi-app:scenario:s2:execution:unlock-cabinet")
+    scope.add((goal, HI.requiresTask, next(scope.objects(execution, HI.realizesTask))))
+    assert {evidence(row, "Experiment") for row in answers(data, "cq8", "s2")} == {
+        "urn:hi-app:scenario:s2:experiment:fine-manipulation",
+    }
+
+
+def test_cq8_retains_experiments_when_metric_information_is_missing(data):
+    scope = data.graph(scenario_graph_iri("s5"))
+    scope.remove((None, HI.hasMetricConcept, None))
+    scope.remove((None, HI.hasMetricTested, None))
+    rows = answers(data, "cq8", "s5")
+    assert len(rows) == 2
+    assert all(row["values"]["metric"] is None and row["values"]["metric_source"] is None for row in rows)
+    assert all(row["values"]["null_hypothesis"] and row["values"]["alternative_hypothesis"] for row in rows)
 
 
 def test_cq11_does_not_treat_operates_in_context_as_asserted_influence(data):

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { apiUrl, fetchTeam, issuePath, requestInterpretation, requestPreview, saveScenario } from './api.js';
+import { apiUrl, fetchExplorerCatalog, fetchTeam, issuePath, requestExplorerQuery, requestInterpretation, requestPreview, saveScenario } from './api.js';
 
 it('uses a relative API route when the deployed bundle requests it', () => {
   vi.stubEnv('VITE_API_URL', '/api');
@@ -15,6 +15,37 @@ const preview = {
 /** @param {number} status @param {unknown} body */
 const reply = (status, body) =>
   vi.fn(async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status }));
+
+describe('Explorer result messages', () => {
+  const source = {
+    id: 'reference:s2', scenario_id: 's2', name: 'Reference manipulation scenario', description: null,
+    publication_status: 'reference', graph_iri: 'urn:hi:reference:s2',
+  };
+  const catalog = { shared_source: 'reference', scenarios: [source], questions: [] };
+  const answer = { sources: [source], columns: [], rows: [], truncated: false };
+  const request = /** @type {const} */ ({ question_id: 'cq5', scope: 'shared' });
+
+  it('accepts optional warnings and messages tied to queried sources', async () => {
+    const warnings = ['The configured approved corpus is unavailable.'];
+    const notices = [{ code: 'missing_links', source_id: source.id, message: 'Interactions lack execution links.' }];
+    expect(await fetchExplorerCatalog({ fetch: reply(200, { ...catalog, warnings }) })).toMatchObject({
+      kind: 'ok', data: { warnings },
+    });
+    expect(await requestExplorerQuery(request, { fetch: reply(200, { ...answer, notices }) })).toMatchObject({
+      kind: 'ok', data: { notices },
+    });
+  });
+
+  it('rejects malformed warnings and notices attributed to an unqueried source', async () => {
+    expect(await fetchExplorerCatalog({ fetch: reply(200, { ...catalog, warnings: [42] }) })).toMatchObject({
+      kind: 'unexpected',
+    });
+    const notices = [{ code: 'missing_links', source_id: 'other-researcher', message: 'Outside selected scope.' }];
+    expect(await requestExplorerQuery(request, { fetch: reply(200, { ...answer, notices }) })).toMatchObject({
+      kind: 'unexpected',
+    });
+  });
+});
 
 describe('requestInterpretation', () => {
   const output = {

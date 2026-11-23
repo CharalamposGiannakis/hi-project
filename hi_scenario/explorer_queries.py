@@ -61,14 +61,14 @@ _QUERIES = {
     ),
     "cq2": _Query(
         label="CQ2 · Tasks supported by capabilities",
-        description="Which tasks have all their recorded capability requirements covered by a team member?",
+        description="Which tasks have all their recorded capability requirements covered across the HI team, and which members supply them? Coverage is derived from recorded capabilities. Actual task performance requires execution records.",
         columns=(
             ("member", "Team member", "COALESCE(?member_name, STR(?member_iri))"),
             ("task", "Task", "COALESCE(?task_name, ?task_concept_label, STR(?task_iri))"),
             ("capability", "Supporting capability", "COALESCE(?capability_concept_label, STR(?capability_concept_iri))"),
             ("task_definition", "Task definition", "?task_concept_definition"),
         ),
-        evidence=(("use_case_iri", "Use case"), ("member_iri", "Team member"), ("task_iri", "Task"),
+        evidence=(("use_case_iri", "Use case"), ("team_iri", "HI team"), ("member_iri", "Team member"), ("task_iri", "Task"),
                   ("capability_iri", "Member capability"), ("required_capability_iri", "Task requirement"),
                   ("task_concept_iri", "Task concept"), ("capability_concept_iri", "Capability concept")),
         facts=f"""
@@ -81,7 +81,7 @@ _QUERIES = {
                 ?task_iri hi:requiresCapability ?uncovered_capability .
                 FILTER NOT EXISTS {{
                     ?uncovered_capability hi:hasCapabilityConcept ?required_concept .
-                    ?member_iri hi:hasCapability/hi:hasCapabilityConcept ?required_concept .
+                    ?team_iri hi:hasMember/hi:hasCapability/hi:hasCapabilityConcept ?required_concept .
                 }}
             }}
             OPTIONAL {{ ?member_iri rdfs:label ?member_name . }}
@@ -96,7 +96,7 @@ _QUERIES = {
     ),
     "cq5": _Query(
         label="CQ5 · Interactions during task execution",
-        description="Which participants, intents, and modalities are recorded for interactions during task executions?",
+        description="Which participants, intents, and modalities are recorded for interactions explicitly linked to executions of goal-required tasks? Interactions without those links do not appear.",
         columns=(
             ("task", "Required task", "COALESCE(?task_name, ?task_concept_label, STR(?task_iri))"),
             ("participant", "Participant", "COALESCE(?participant_name, STR(?participant_iri))"),
@@ -139,23 +139,30 @@ _QUERIES = {
     ),
     "cq8": _Query(
         label="CQ8 · Experiments, metrics, and hypotheses",
-        description="Which experiments and evaluation metrics are linked to a goal’s required tasks, and what hypotheses are stated?",
+        description="Which experiments and metrics are linked to executions of required tasks or executions recorded as contributing to the goal? Metric sources distinguish evaluation records from experiment records.",
         columns=(
             ("goal", "Team goal", "COALESCE(?goal_name, ?goal_concept_label, STR(?goal_iri))"),
             ("experiment", "Experiment", "COALESCE(?experiment_concept_label, STR(?experiment_concept_iri), STR(?experiment_iri))"),
-            ("metric", "Evaluation metric", "COALESCE(?metric_label, STR(?metric_iri))"),
+            ("metric", "Metric", "COALESCE(?metric_label, STR(?metric_iri))"),
+            ("metric_source", "Metric source", "?metric_source_text"),
             ("null_hypothesis", "Null hypothesis", "?null_hypothesis_text"),
             ("alternative_hypothesis", "Alternative hypothesis", "?alternative_hypothesis_text"),
         ),
         evidence=(("use_case_iri", "Use case"), ("goal_iri", "Goal"), ("evaluation_iri", "Evaluation"),
                   ("experiment_iri", "Experiment"), ("experiment_concept_iri", "Experiment concept"),
-                  ("metric_iri", "Metric concept")),
+                  ("metric_iri", "Metric concept"), ("metric_owner_iri", "Metric owner"),
+                  ("metric_predicate_iri", "Metric relationship")),
         facts=f"""
             ?team_iri hi:hasGoal ?goal_iri .
             ?evaluation_iri hi:hasExperiment ?experiment_iri .
             FILTER EXISTS {{
-                ?goal_iri hi:requiresTask ?task .
-                ?execution hi:realizesTask ?task ; hi:evaluatedBy ?evaluation_iri .
+                ?execution hi:evaluatedBy ?evaluation_iri .
+                {{
+                    ?goal_iri hi:requiresTask ?task .
+                    ?execution hi:realizesTask ?task .
+                }}
+                UNION
+                {{ ?execution hi:towardsGoal ?goal_iri . }}
             }}
             OPTIONAL {{ ?goal_iri rdfs:label ?goal_name . }}
             OPTIONAL {{ ?experiment_iri hi:hasNullHypothesis ?null_hypothesis_text . }}
@@ -169,7 +176,19 @@ _QUERIES = {
                 {_reference_text('experiment_concept')}
             }}
             OPTIONAL {{
-                ?evaluation_iri hi:hasMetricConcept ?metric_iri .
+                {{
+                    ?evaluation_iri hi:hasMetricConcept ?metric_iri .
+                    BIND(?evaluation_iri AS ?metric_owner_iri)
+                    BIND(hi:hasMetricConcept AS ?metric_predicate_iri)
+                    BIND("Evaluation" AS ?metric_source_text)
+                }}
+                UNION
+                {{
+                    ?experiment_iri hi:hasMetricTested ?metric_iri .
+                    BIND(?experiment_iri AS ?metric_owner_iri)
+                    BIND(hi:hasMetricTested AS ?metric_predicate_iri)
+                    BIND("Experiment" AS ?metric_source_text)
+                }}
                 {_reference_text('metric')}
             }}
         """,

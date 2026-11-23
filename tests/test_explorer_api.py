@@ -134,6 +134,7 @@ def test_reference_catalog_and_cq1_read_public_examples_without_publishing(explo
     assert response.status_code == 200, response.text
     catalog = response.json()
     assert catalog["shared_source"] == "reference"
+    assert catalog["warnings"] == []
     assert {item["scenario_id"] for item in catalog["scenarios"]} == {f"s{number}" for number in range(1, 8)}
     assert {item["id"] for item in catalog["questions"]} == {"cq1", "cq2", "cq5", "cq8", "cq11"}
 
@@ -154,6 +155,7 @@ def test_combined_scope_keeps_a_private_draft_separate_even_with_a_matching_id(e
     assert response.status_code == 200, response.text
     catalog = response.json()
     assert catalog["shared_source"] == "approved"
+    assert catalog["warnings"] == []
     assert [item["scenario_id"] for item in catalog["scenarios"]] == [APPROVED_ID]
 
     private_member = 'Zoë "Draft member"\nNo publication'
@@ -197,7 +199,38 @@ def test_save_cannot_fill_an_empty_approved_graph(explorer, monkeypatch):
     assert response.status_code == 409
     assert response.json()["code"] == "scenario_id_reserved"
     assert not list(store.committed.graph(URIRef(graphdb.scenario_graph_iri(reserved))))
-    assert client.get("/explorer/catalog").json()["shared_source"] == "reference"
+    catalog = client.get("/explorer/catalog").json()
+    assert catalog["shared_source"] == "reference"
+    assert len(catalog["warnings"]) == 1
+    assert "resolve to no available scenario graphs" in catalog["warnings"][0]
+    result = _query(client, question_id="cq1", scope="shared", shared_scenario_id="s1")
+    assert result["notices"] == [{
+        "code": "approved_graphs_unavailable", "source_id": None, "message": catalog["warnings"][0],
+    }]
+
+
+@pytest.mark.parametrize(("scenario_id", "count"), [("s2", 1), ("s3", 2)])
+def test_cq5_reports_interactions_without_inventing_execution_links(explorer, scenario_id, count):
+    client, store = explorer
+    result = _query(client, question_id="cq5", scope="shared", shared_scenario_id=scenario_id)
+    assert result["rows"] == []
+    (notice,) = result["notices"]
+    assert notice["source_id"] == f"reference:{scenario_id}"
+    assert notice["code"] == "interactions_without_execution_links"
+    assert notice["message"].startswith(f"{count} recorded interaction")
+    assert "no recorded link to a task execution" in notice["message"]
+    assert not store.transactions
+
+
+def test_cq5_missing_link_notice_is_scoped_alongside_existing_results(explorer, monkeypatch):
+    client, store = explorer
+    monkeypatch.setenv("GRAPHDB_APPROVED_SCENARIO_IDS", APPROVED_ID)
+    scenario = json.loads((ROOT / "examples" / "s2.json").read_bytes())
+    result = _query(client, question_id="cq5", scope="combined", scenario=scenario)
+    assert result["rows"]
+    assert {row["source_id"] for row in result["rows"]} == {f"approved:{APPROVED_ID}"}
+    assert [notice["source_id"] for notice in result["notices"]] == ["provisional:s2"]
+    assert not store.transactions
 
 
 def test_incomplete_draft_is_rejected_before_opening_a_transaction(explorer):
@@ -210,24 +243,30 @@ def test_incomplete_draft_is_rejected_before_opening_a_transaction(explorer):
 
 
 @pytest.mark.skipif(os.getenv("HI_GRAPHDB_LIVE") != "1", reason="Set HI_GRAPHDB_LIVE=1 for the local GraphDB check")
-@pytest.mark.parametrize(("question_id", "rows_per_source"), [("cq1", 2), ("cq2", 2), ("cq5", 2), ("cq8", 3), ("cq11", 3)])
-def test_live_explorer_queries_both_named_graphs_and_rolls_back(monkeypatch, question_id, rows_per_source):
+@pytest.mark.parametrize(("scenario_id", "question_id", "rows_per_source"), [
+    ("s1", "cq1", 2), ("s1", "cq2", 4), ("s1", "cq5", 2), ("s1", "cq8", 6), ("s1", "cq11", 3),
+    ("s7", "cq2", 8), ("s2", "cq8", 10), ("s5", "cq8", 4), ("s2", "cq5", 0), ("s3", "cq5", 0),
+])
+def test_live_explorer_queries_both_named_graphs_and_rolls_back(monkeypatch, scenario_id, question_id, rows_per_source):
     settings = graphdb.GraphDBSettings.from_env()
     assert settings.url.host in {"127.0.0.1", "localhost", "[::1]"}, "Use an existing loopback GraphDB repository."
     monkeypatch.delenv("GRAPHDB_APPROVED_SCENARIO_IDS", raising=False)
 
     private_member = "Explorer live draft member"
+    scenario = json.loads((ROOT / "examples" / f"{scenario_id}.json").read_bytes())
+    scenario["agents"][0]["name"] = private_member
     with TestClient(api.app) as client:
         result = _query(
-            client, question_id=question_id, scope="combined", scenario=_example("s1", private_member), shared_scenario_id="s1",
+            client, question_id=question_id, scope="combined", scenario=scenario, shared_scenario_id=scenario_id,
         )
 
     assert {source["publication_status"] for source in result["sources"]} == {"provisional", "reference"}
-    assert {source["id"] for source in result["sources"]} == {"provisional:s1", "reference:s1"}
-    assert Counter(row["source_id"] for row in result["rows"]) == {
-        "provisional:s1": rows_per_source, "reference:s1": rows_per_source,
-    }
+    assert {source["id"] for source in result["sources"]} == {f"provisional:{scenario_id}", f"reference:{scenario_id}"}
+    expected = {f"provisional:{scenario_id}": rows_per_source, f"reference:{scenario_id}": rows_per_source}
+    assert Counter(row["source_id"] for row in result["rows"]) == (expected if rows_per_source else {})
     assert result["truncated"] is False
+    if question_id == "cq5" and scenario_id in {"s2", "s3"}:
+        assert {notice["source_id"] for notice in result["notices"]} == {f"provisional:{scenario_id}", f"reference:{scenario_id}"}
     if question_id == "cq1":
         assert {row["source_id"] for row in _rows_with(result, private_member)} == {"provisional:s1"}
         assert {row["source_id"] for row in _rows_with(result, "Human user")} == {"reference:s1"}

@@ -62,6 +62,7 @@ class ExplorerCatalog(BaseModel):
     shared_source: SharedSource
     scenarios: list[ScenarioSource]
     questions: list[QuestionOption]
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ExplorerRow(BaseModel):
@@ -70,11 +71,18 @@ class ExplorerRow(BaseModel):
     evidence: list[dict[str, str]]
 
 
+class ExplorerNotice(BaseModel):
+    code: str
+    message: str
+    source_id: str | None = None
+
+
 class ExplorerResult(BaseModel):
     sources: list[ScenarioSource]
     columns: list[dict[str, str]]
     rows: list[ExplorerRow]
     truncated: bool
+    notices: list[ExplorerNotice] = Field(default_factory=list)
 
 
 def validate_parameters(request: ExplorerRequest) -> None:
@@ -159,22 +167,70 @@ def _approved_sources(store: GraphDBStore) -> list[ScenarioSource]:
     ]
 
 
-def shared_sources(store: GraphDBStore) -> tuple[SharedSource, list[ScenarioSource]]:
+def shared_sources(store: GraphDBStore) -> tuple[SharedSource, list[ScenarioSource], list[str]]:
     approved = _approved_sources(store)
     if approved:
-        return "approved", approved
+        return "approved", approved, []
+    warnings = []
+    if configured_approved_graphs():
+        warnings.append(
+            "Configured approved scenario IDs resolve to no available scenario graphs. "
+            "Experimental reference scenarios are being shown. "
+            "The operator should verify the configuration and scientific approval."
+        )
     return "reference", [
         _local_source(scenario, "reference", f"urn:hi-app:explorer:reference:{scenario.id}")
         for scenario in _reference_scenarios().values()
-    ]
+    ], warnings
 
 
 def catalog(store: GraphDBStore) -> ExplorerCatalog:
-    shared_source, scenarios = shared_sources(store)
+    shared_source, scenarios, warnings = shared_sources(store)
     return ExplorerCatalog(
-        shared_source=shared_source, scenarios=scenarios,
+        shared_source=shared_source, scenarios=scenarios, warnings=warnings,
         questions=[QuestionOption(**question) for question in EXPLORER_QUESTIONS.values()],
     )
+
+
+def _unlinked_interaction_notices(
+    store: GraphDBStore, sources: list[ScenarioSource], staged: dict[str, Graph],
+) -> list[ExplorerNotice]:
+    # Query the selected graphs only. Missing links are reported without creating them.
+    scopes = "\nUNION\n".join(f"""{{
+        GRAPH <{source.graph_iri}> {{
+            ?interaction a hi:Interaction .
+            FILTER NOT EXISTS {{ ?execution hi:hasInteractionEpisode ?interaction }}
+        }}
+        BIND(<{source.graph_iri}> AS ?graph)
+    }}""" for source in sources)
+    result = store.explore(f"""
+        PREFIX hi: <https://w3id.org/hi-ontology#>
+        SELECT ?graph (COUNT(DISTINCT ?interaction) AS ?count)
+        WHERE {{ {scopes} }}
+        GROUP BY ?graph
+        ORDER BY ?graph
+    """, staged)
+    source_ids = {source.graph_iri: source.id for source in sources}
+    notices = []
+    try:
+        bindings = result["results"]["bindings"]
+        if not isinstance(bindings, list):
+            raise ValueError("Expected SPARQL bindings")
+        for row in bindings:
+            source_id = source_ids[_value(row, "graph", uri=True, required=True)]
+            count = int(_value(row, "count", required=True))
+            if count < 1:
+                raise ValueError("Expected a positive interaction count")
+            notices.append(ExplorerNotice(
+                code="interactions_without_execution_links", source_id=source_id,
+                message=(
+                    f"{count} recorded interaction{'s have' if count != 1 else ' has'} no recorded link "
+                    "to a task execution. CQ5 requires execution–interaction links for goal-required tasks."
+                ),
+            ))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _invalid_response() from exc
+    return notices
 
 
 def answer(
@@ -183,12 +239,14 @@ def answer(
     nonce = uuid4().hex
     staged: dict[str, Graph] = {}
     sources = []
+    notices = []
     if request.scenario is not None and draft_graph is not None:
         iri = f"urn:hi-app:explorer:draft:{nonce}"
         sources.append(_local_source(request.scenario, "provisional", iri))
         staged[iri] = draft_graph
     if request.scope != "draft":
-        kind, shared = shared_sources(store)
+        kind, shared, warnings = shared_sources(store)
+        notices.extend(ExplorerNotice(code="approved_graphs_unavailable", message=warning) for warning in warnings)
         if request.shared_scenario_id is not None:
             shared = [source for source in shared if source.scenario_id == request.shared_scenario_id]
             if not shared:
@@ -208,7 +266,9 @@ def answer(
             row["source_id"] = source_ids[row.pop("graph_iri")]
     except (KeyError, TypeError, ValueError) as exc:
         raise _invalid_response() from exc
+    if request.question_id == "cq5":
+        notices.extend(_unlinked_interaction_notices(store, sources, staged))
     return ExplorerResult(
         sources=sources, columns=EXPLORER_QUESTIONS[request.question_id]["columns"],
-        rows=[ExplorerRow(**row) for row in rows], truncated=truncated,
+        rows=[ExplorerRow(**row) for row in rows], truncated=truncated, notices=notices,
     )

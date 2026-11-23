@@ -15,9 +15,9 @@
   // Draft queries are useful even when GraphDB cannot provide the shared catalog.
   const fallbackQuestions = /** @type {import('./api.js').ExplorerQuestion[]} */ ([
     { id: 'cq1', label: 'CQ1 · Team members and roles', description: '', parameters: [] },
-    { id: 'cq2', label: 'CQ2 · Tasks supported by capabilities', description: '', parameters: [] },
-    { id: 'cq5', label: 'CQ5 · Interactions during task execution', description: '', parameters: [] },
-    { id: 'cq8', label: 'CQ8 · Experiments, metrics, and hypotheses', description: '', parameters: [] },
+    { id: 'cq2', label: 'CQ2 · Tasks supported by capabilities', description: 'Which tasks have their recorded capability requirements covered by members of the same HI team? Coverage is derived from capabilities and does not establish task execution.', parameters: [] },
+    { id: 'cq5', label: 'CQ5 · Interactions during task execution', description: 'CQ5 requires recorded links between interactions and executions of goal-required tasks.', parameters: [] },
+    { id: 'cq8', label: 'CQ8 · Experiments, metrics, and hypotheses', description: 'Which experiments and metrics are linked through executions that contribute to the goal or realize its required tasks?', parameters: [] },
     { id: 'cq11', label: 'CQ11 · Contextual phenomena', description: '', parameters: [] },
   ]);
   const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional draft' };
@@ -115,6 +115,10 @@
       <p class="hint">{draft ? `${draft.use_case.name || 'Untitled scenario'} · Provisional draft` : 'Start or open a structured scenario in the Scenario Builder to query your draft.'}</p>
     {/if}
 
+    {#each shared?.warnings ?? [] as warning}
+      <p class="hint" role="status">{warning}</p>
+    {/each}
+
     {#if loadingCatalog}
       <p class="status" role="status">Loading shared scenarios…</p>
     {:else if catalog && catalog.kind !== 'ok'}
@@ -172,9 +176,15 @@
     {:else if outcome?.kind === 'ok'}
       {@const answer = outcome.data}
       <p class="status" role="status">
-        {answer.rows.length ? `${answer.rows.length} ${answer.rows.length === 1 ? 'result' : 'results'}.` : 'No evidence was found for this question in the selected scenarios.'}
+        {answer.rows.length ? `${answer.rows.length} ${answer.rows.length === 1 ? 'result' : 'results'}.`
+          : questionId === 'cq5' ? 'No matching execution–interaction links were found. CQ5 requires recorded links between interactions and executions of goal-required tasks. Check the selected filters and recorded relationships.'
+          : 'No evidence was found for this question in the selected scenarios.'}
         {#if answer.truncated}The result limit was reached. Select a scenario or a filter to narrow the query.{/if}
       </p>
+      {#each answer.notices ?? [] as notice}
+        {@const source = answer.sources.find(({ id }) => id === notice.source_id)}
+        <p class="hint" role="status">{#if source}<strong>{source.name}</strong> · {statuses[source.publication_status]} · {/if}{notice.message}</p>
+      {/each}
       {#if answer.sources.length}
         <details open={answer.rows.length === 0}>
           <summary>Queried scenarios ({answer.sources.length})</summary>

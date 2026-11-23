@@ -181,6 +181,12 @@ The research material defines twelve Competency Questions (CQs). They describe w
 
 The Knowledge Explorer adapts CQ1 (team composition), CQ2 (recorded capabilities and task requirements), CQ5 (execution-linked interactions), CQ8 (execution-linked evaluations and experiments), and CQ11 (contextual phenomena) from the research notebook. The Explorer follows recorded RDF links and preserves each scenario as a separate source.
 
+CQ2 derives coverage when members of the same team collectively supply every recorded `requiresCapability` requirement, matching exact HINT capability concepts. Rows identify the contributing members and both the requirement and owned capability records. This covers S1 data collection and S7 multimodal input interpretation without assigning task execution. The ontology declares `requiresCapability` as the inverse of `allowsTask`, although their descriptions express necessity and enablement respectively. Its `isEligibleForTask` chain uses a single `hasCapability`/`allowsTask` path. Ilaria needs to confirm whether all such links express jointly necessary requirements and whether this differs from intended eligibility. The query uses the recorded requirements as a conjunction pending that decision.
+
+CQ8 includes evaluated executions linked to the goal by either `towardsGoal` or realization of a task listed in `requiresTask`. This recovers all five S2 experiments, including the three whose execution tasks are outside its required-task list, and retains both S5 experiments. The generator already adds `towardsGoal` to every canonical execution. Each metric row identifies its Evaluation/`hasMetricConcept` or Experiment/`hasMetricTested` source, owner, and predicate. Equal metric concepts on the two relationships remain separate assertions.
+
+CQ5 requires recorded execution–interaction links for goal-required tasks. S2 and S3 have interactions without execution links, so their empty CQ5 answers include a notice about those missing links. Researcher review is needed to establish the relationships.
+
 The remaining questions have different requirements:
 
 | Questions | Current situation |
