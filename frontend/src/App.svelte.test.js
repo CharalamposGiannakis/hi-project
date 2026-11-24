@@ -98,6 +98,12 @@ describe('Application navigation', () => {
     expect(document.getElementById('builder-view')?.hidden).toBe(true);
     expect(document.getElementById('explorer-view')?.hidden).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
+    const home = document.getElementById('home-view');
+    expect([...home?.querySelectorAll('section[aria-labelledby]') ?? []]
+      .map((section) => section.querySelector('h2')?.textContent)).toEqual([
+      'Scenario Builder', 'Scientific Knowledge Management', 'Knowledge Explorer',
+    ]);
+    expect(home?.querySelectorAll('button, a')).toHaveLength(0);
 
     click('Scientific Knowledge Management');
     expect(document.getElementById('management-view')?.hidden).toBe(false);
@@ -113,6 +119,28 @@ describe('Application navigation', () => {
     expect(String(fetch.mock.calls[0]?.[0])).toContain('/explorer/catalog');
     expect(choices[3].getAttribute('aria-current')).toBe('page');
     expect(choices[2].hasAttribute('aria-current')).toBe(false);
+  });
+
+  it('collapses navigation with an accessible control and keeps it available to reopen', () => {
+    render('home');
+    const navigation = document.getElementById('application-navigation');
+    const sidebar = navigation?.closest('aside');
+    const toggle = document.querySelector('button[aria-controls="application-navigation"]');
+    expect(toggle?.textContent?.trim()).toBe('Hide navigation');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(sidebar?.hidden).toBe(false);
+    expect(sidebar?.contains(toggle)).toBe(false);
+
+    click('Hide navigation');
+    expect(toggle?.textContent?.trim()).toBe('Show navigation');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(sidebar?.hidden).toBe(true);
+    expect(document.getElementById('home-view')?.hidden).toBe(false);
+
+    click('Show navigation');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(sidebar?.hidden).toBe(false);
+    expect(document.getElementById('application-navigation')).toBe(navigation);
   });
 
   it('preserves descriptions, structured edits, disclosure state, and successful validation through Home and Pillar 2', async () => {
@@ -134,6 +162,12 @@ describe('Application navigation', () => {
     const nameInput = useCaseName();
     const tasksSection = section('tasks');
     expect(tasksSection.open).toBe(true);
+
+    click('Hide navigation');
+    expect(useCaseName()).toBe(nameInput);
+    expect(draft()).toEqual(savedDraft);
+    expect(validationStatus()).toBe('Valid');
+    click('Show navigation');
 
     click('Home');
     expect(document.getElementById('home-view')?.hidden).toBe(false);
@@ -806,7 +840,11 @@ describe('Knowledge Explorer', () => {
     expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Add to Knowledge Explorer →')).toBe(false);
     click('Load S1 example');
     const first = candidate();
+    click('Hide navigation');
     await validateAndAdd();
+    expect(document.querySelector('button[aria-controls="application-navigation"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.getElementById('application-navigation')?.closest('aside')?.hidden).toBe(true);
+    click('Show navigation');
     await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
     expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(1);
     expect(explorer()?.textContent).toContain('Builder · Personal assistant');
@@ -1031,6 +1069,10 @@ describe('Knowledge Explorer', () => {
     expect(explorer()?.textContent).toContain('Only the first 200 rows are shown, so some selected scenarios may not appear.');
 
     const selectedSession = explorer()?.querySelector('input[aria-label^="Include "]');
+    click('Hide navigation');
+    expect(explorer()?.querySelector('tbody tr')).toBe(rows?.[0]);
+    expect(rows?.[0]?.querySelector('details')?.open).toBe(true);
+    click('Show navigation');
     click('Home');
     click('Scientific Knowledge Management');
     click('Knowledge Explorer');

@@ -37,6 +37,7 @@
   let emptyEditor = $state(JSON.stringify(initialScenario));
   let loadedCandidate = $state(false);
   let view = $state(/** @type {import('./lib/workspace-pages.js').ViewId} */ ('home'));
+  let navigationOpen = $state(true);
   let currentPage = $derived(workspacePages.find((page) => page.id === view) ?? workspacePages[0]);
   let sessionScenarios = $state(/** @type {import('./lib/api.js').SessionUpload[]} */ ([]));
   let lastAddedSessionId = $state('');
@@ -396,11 +397,11 @@
   <title>{currentPage.label} · HI Research Workspace</title>
 </svelte:head>
 
-<div class="application-shell">
-<aside class="application-sidebar" aria-label="Research workspace">
+<div class="application-shell" class:navigation-collapsed={!navigationOpen}>
+<a class="skip-link" href={'#' + view + '-heading'}>Skip to content</a>
+<aside class="application-sidebar" aria-label="Research workspace" hidden={!navigationOpen}>
   <p class="application-name">HI Research Workspace</p>
-  <a class="skip-link" href={'#' + view + '-heading'}>Skip to content</a>
-  <nav class="application-navigation" aria-label="Application navigation">
+  <nav id="application-navigation" class="application-navigation" aria-label="Application navigation">
     {#each workspacePages as page (page.id)}
       <button type="button" aria-controls={page.id + '-view'} aria-current={view === page.id ? 'page' : undefined}
         onclick={() => navigate(page.id)}>{page.label}</button>
@@ -410,7 +411,11 @@
 
 <div class="application-workspace">
 <header class="workspace-header">
-  <h1 id={view + '-heading'} tabindex="-1">{currentPage.heading}</h1>
+  <div class="workspace-heading">
+    <h1 id={view + '-heading'} tabindex="-1">{currentPage.heading}</h1>
+    <button type="button" aria-controls="application-navigation" aria-expanded={navigationOpen}
+      onclick={() => (navigationOpen = !navigationOpen)}>{navigationOpen ? 'Hide navigation' : 'Show navigation'}</button>
+  </div>
   {#if view === 'builder'}
     <p class="lead">Describe a Hybrid Intelligence scenario, refine its HINT concepts, and validate the resulting RDF.</p>
     <div class="toolbar">
@@ -423,7 +428,7 @@
 </header>
 
 <main id="home-view" class="information-view" hidden={view !== 'home'} aria-labelledby="home-heading">
-  <Home onNavigate={navigate} />
+  <Home />
 </main>
 
 <main id="management-view" class="information-view" hidden={view !== 'management'} aria-labelledby="management-heading">

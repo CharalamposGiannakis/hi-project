@@ -6,7 +6,7 @@ The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated resear
 
 ## Researcher workflow
 
-Home is the default landing page. Use the persistent application sidebar to open the Scenario Builder, Scientific Knowledge Management, or Knowledge Explorer. Scientific Knowledge Management currently shows a planned-feature placeholder. Switching views preserves the open Builder and Explorer session state.
+Home is the default landing page. Use the application sidebar to open the Scenario Builder, Scientific Knowledge Management, or Knowledge Explorer. Hide or show navigation from the page heading to make more room for your work. The Builder places validation and JSON beside the editor when the available workspace is wide enough, and below it on smaller screens. Scientific Knowledge Management currently shows a planned-feature placeholder. Switching views preserves the open Builder and Explorer session state.
 
 1. In **Describe with AI**, choose **Write full description** to type or paste a scenario, or use **Previous** and **Next** to answer the optional guided questions. Use **Add additional notes** for supplementary information. **View full description** and the JSON preview show the text from all three inputs.
 2. Choose **Convert to JSON using AI** to send your description to VU Nebula. Review the proposed facts and HINT mappings in the Structured Editor. **Scenario JSON** holds interpretation findings about missing or unsupported information. Review the source evidence before accepting any proposed scientific fact.

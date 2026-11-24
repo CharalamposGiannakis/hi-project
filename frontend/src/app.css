@@ -11,6 +11,7 @@
 
 body { margin: 0; }
 .application-shell { display: grid; grid-template-columns: 15rem minmax(0, 1fr); min-height: 100dvh; }
+.application-shell.navigation-collapsed { grid-template-columns: minmax(0, 1fr); }
 .application-sidebar {
   box-sizing: border-box;
   position: sticky;
@@ -23,10 +24,13 @@ body { margin: 0; }
   background: #fff;
 }
 .application-name { margin: 0 0 1.5rem; font-weight: 650; }
+.application-sidebar[hidden] { display: none; }
 .application-navigation { display: grid; gap: 0.4rem; }
 .application-navigation button { width: 100%; padding: 0.65rem 0.75rem; text-align: left; line-height: 1.4; color: inherit; border-color: transparent; }
 .application-navigation [aria-current='page'] { border-color: var(--accent); background: #eef3f8; color: var(--accent); font-weight: 600; }
-.application-workspace { min-width: 0; container-type: inline-size; }
+.application-workspace { min-width: 0; container: workspace / inline-size; }
+.workspace-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem 1rem; margin-bottom: 0.25rem; }
+.workspace-heading h1 { margin: 0; }
 .skip-link { position: absolute; top: 0.25rem; left: 1rem; z-index: 10; padding: 0.3rem; background: #fff; transform: translateY(-200%); }
 .skip-link:focus { transform: translateY(0); }
 .planned-pillar { max-width: 48rem; padding: 1rem 1.25rem; background: #fff; border: 1px solid var(--border); border-radius: 6px; }
@@ -65,11 +69,7 @@ header > .toolbar { margin-bottom: 1rem; }
 }
 .sidebar > aside { grid-area: actions; min-width: 0; }
 .json-panel { grid-area: json; min-width: 0; }
-@media (max-width: 1000px) {
-  main { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'sidebar'; }
-  .sidebar { position: static; max-height: none; overflow: visible; }
-}
-@container (max-width: 1000px) {
+@container workspace (max-width: 56rem) {
   #builder-view { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'editor' 'sidebar'; }
   .sidebar { position: static; max-height: none; overflow: visible; }
 }
