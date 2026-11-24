@@ -119,6 +119,7 @@ describe('cross-scenario concept exploration', () => {
     expect(renderedRows[2].textContent).toContain('Recorded only in shared');
     expect(document.body.textContent).toContain('recorded vocabulary overlap');
     expect(document.body.textContent).toContain('The result limit was reached');
+    expect(document.body.textContent).toContain('Only the first 200 rows are shown, so some selected scenarios may not appear.');
   });
 
   it('cancels a pending comparison when its draft changes and discards the late result', async () => {

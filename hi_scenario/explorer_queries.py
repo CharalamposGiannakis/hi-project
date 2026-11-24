@@ -160,7 +160,7 @@ _QUERIES = {
     ),
     "cq6": _Query(
         label="CQ6 · Goals and tasks associated with a method",
-        description="Follow recorded method, task, and goal links on executions. These associations do not establish that the method achieves the goal.",
+        description="Follow recorded method, task, and goal links on executions. The canonical RDF generator assigns towardsGoal links to executions as an application representation convention. These links provide no proof that a method achieves the goal.",
         columns=(
             ("method", "Method", "COALESCE(?method_label, STR(?method_iri))"),
             ("goal", "Goal", "COALESCE(?goal_name, ?goal_concept_label, STR(?goal_iri))"),
@@ -283,7 +283,7 @@ _QUERIES = {
     ),
     "cq9": _Query(
         label="CQ9 · Contextual constraints and recorded influence",
-        description="Find use cases associated with contextual constraints and show any recorded context-to-team influence link. Its presence does not establish a causal effect.",
+        description="Find use cases associated with contextual constraints and show any recorded context-to-team influence link. The canonical RDF generator automatically adds hasInfluenceOn when a scenario contains a context as an application representation convention. Independent evidence is required to establish scientific influence or a causal effect.",
         columns=(
             ("constraint", "Contextual constraint", "COALESCE(?constraint_label, STR(?constraint_iri))"),
             ("use_case", "Use case", "COALESCE(?use_case_name, STR(?use_case_iri))"),
@@ -312,7 +312,7 @@ _QUERIES = {
     ),
     "cq10": _Query(
         label="CQ10 · Constraints shared across distinct use cases",
-        description="Find exact recorded constraint concepts associated with at least two distinct use cases. Members are shown through team membership, with team and context attachments distinguished.",
+        description="Find exact recorded constraint concepts associated with at least two distinct use-case identifiers. Distinctness is determined by identifiers without comparing scenario content. Different identifiers may represent identical scientific content. Members are shown through team membership, with team and context attachments distinguished.",
         columns=(
             ("constraint", "Shared constraint", "COALESCE(?constraint_label, STR(?constraint_iri))"),
             ("attachment", "Recorded attachment", "?attachment_text"),

@@ -872,6 +872,7 @@ describe('Knowledge Explorer', () => {
     expect(rows?.[0]?.querySelector('details')?.open).toBe(true);
     expect(rows?.[0]?.querySelector('code')?.textContent).toBe('urn:hi:task:own');
     expect(explorer()?.textContent).toContain('The result limit was reached.');
+    expect(explorer()?.textContent).toContain('Only the first 200 rows are shown, so some selected scenarios may not appear.');
 
     document.getElementById('explorer-source-approved')?.click();
     flushSync();

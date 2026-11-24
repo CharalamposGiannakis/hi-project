@@ -39,10 +39,10 @@
     { id: 'cq11', label: 'CQ11 · Contextual phenomena', description: '', parameters: [] },
     { id: 'cq3', label: 'CQ3 · Candidate team compositions', description: '', parameters: [] },
     { id: 'cq4', label: 'CQ4 · Inferred relationships', description: '', parameters: [] },
-    { id: 'cq6', label: 'CQ6 · Methods, goals, and tasks', description: 'Recorded method executions associate goals and tasks.', parameters: [{ id: 'method', label: 'Method', category: 'Method' }] },
+    { id: 'cq6', label: 'CQ6 · Methods, goals, and tasks', description: 'The canonical RDF generator assigns towardsGoal links to executions as an application representation convention. Scientific evidence is needed to establish that a method achieves a goal.', parameters: [{ id: 'method', label: 'Method', category: 'Method' }] },
     { id: 'cq7', label: 'CQ7 · Metrics and assessed tasks', description: 'Tasks linked to recorded metric evaluations.', parameters: [{ id: 'metric', label: 'Metric', category: 'Metric' }] },
-    { id: 'cq9', label: 'CQ9 · Contextual constraints', description: 'Context constraints and recorded influence relationships.', parameters: [{ id: 'constraint', label: 'Constraint', category: 'Constraint' }] },
-    { id: 'cq10', label: 'CQ10 · Shared constraints', description: 'Constraints recorded across at least two distinct use cases.', parameters: [] },
+    { id: 'cq9', label: 'CQ9 · Contextual constraints', description: 'The canonical RDF generator automatically adds hasInfluenceOn whenever a scenario contains a context. These links express an application representation convention. Scientific influence requires independent evidence.', parameters: [{ id: 'constraint', label: 'Constraint', category: 'Constraint' }] },
+    { id: 'cq10', label: 'CQ10 · Shared constraints', description: 'Find constraints across at least two distinct use-case identifiers. Scenarios with different identifiers may represent identical scientific content.', parameters: [] },
     { id: 'cq12', label: 'CQ12 · Compliance with contextual constraints', description: '', parameters: [] },
   ]).sort((first, second) => Number(first.id.slice(2)) - Number(second.id.slice(2)));
   const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional draft' };
@@ -228,7 +228,7 @@
         {answer.rows.length ? `${answer.rows.length} ${answer.rows.length === 1 ? 'result' : 'results'}.`
           : questionId === 'cq5' ? 'No matching execution–interaction links were found. CQ5 requires recorded links between interactions and executions of goal-required tasks. Check the selected filters and recorded relationships.'
           : 'No evidence was found for this question in the selected scenarios.'}
-        {#if answer.truncated}The result limit was reached. Select a scenario or a filter to narrow the query.{/if}
+        {#if answer.truncated}The result limit was reached. Only the first 200 rows are shown, so some selected scenarios may not appear. Select a scenario or a filter to narrow the query.{/if}
       </p>
       {#each answer.notices ?? [] as notice}
         {@const source = answer.sources.find(({ id }) => id === notice.source_id)}

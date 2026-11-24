@@ -189,7 +189,7 @@
       {@const columns = answer.columns.filter((column) => compare || column.id !== 'overlap')}
       <p class="status" role="status">
         {answer.rows.length ? `${answer.rows.length} recorded concept relationships.` : 'No matching concepts were recorded in the selected scenarios.'}
-        {#if answer.truncated}The result limit was reached. Select a scenario, concept, or concept type to narrow the results.{/if}
+        {#if answer.truncated}The result limit was reached. Only the first 200 rows are shown, so some selected scenarios may not appear. Select a scenario, concept, or concept type to narrow the results.{/if}
       </p>
       {#if compare}<p class="hint">“Only” means the concept is recorded in one selected scenario. Missing records leave the other scenario’s knowledge unresolved.</p>{/if}
       {#each answer.notices ?? [] as notice}
