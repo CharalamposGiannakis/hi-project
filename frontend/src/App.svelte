@@ -13,6 +13,8 @@
   import RdfPreview from './lib/RdfPreview.svelte';
   import ScenarioWizard from './lib/ScenarioWizard.svelte';
   import KnowledgeExplorer from './lib/KnowledgeExplorer.svelte';
+  import Home from './lib/Home.svelte';
+  import { workspacePages } from './lib/workspace-pages.js';
   import {
     emptyScenario,
     findConcept,
@@ -34,7 +36,9 @@
   let scenario = $state(initialScenario);
   let emptyEditor = $state(JSON.stringify(initialScenario));
   let loadedCandidate = $state(false);
-  let view = $state(/** @type {'builder' | 'explorer'} */ ('builder'));
+  let view = $state(/** @type {import('./lib/workspace-pages.js').ViewId} */ ('home'));
+  let navigationOpen = $state(true);
+  let currentPage = $derived(workspacePages.find((page) => page.id === view) ?? workspacePages[0]);
   let sessionScenarios = $state(/** @type {import('./lib/api.js').SessionUpload[]} */ ([]));
   let lastAddedSessionId = $state('');
   let mode = $state(/** @type {'describe' | 'structured'} */ ('describe'));
@@ -128,6 +132,13 @@
     revealRequest += 1;
   }
 
+  /** @param {import('./lib/workspace-pages.js').ViewId} nextView */
+  async function navigate(nextView) {
+    view = nextView;
+    await tick();
+    if (view === nextView) document.getElementById(nextView + '-heading')?.focus();
+  }
+
   /** @param {object} validated */
   function addToExplorer(validated) {
     const snapshot = JSON.parse(JSON.stringify(validated));
@@ -139,7 +150,7 @@
       selected: true,
     }];
     lastAddedSessionId = id;
-    view = 'explorer';
+    void navigate('explorer');
   }
 
   /** @param {import('./lib/api.js').InputIssue[]} errors @param {object} target */
@@ -382,12 +393,29 @@
   }
 </script>
 
-<header>
-  <h1>{view === 'builder' ? 'HI Scenario Builder' : 'HI Knowledge Explorer'}</h1>
-  <nav class="toolbar workspace-navigation" aria-label="Research workspace">
-    <button type="button" aria-controls="builder-view" aria-pressed={view === 'builder'} onclick={() => (view = 'builder')}>Scenario Builder</button>
-    <button type="button" aria-controls="explorer-view" aria-pressed={view === 'explorer'} onclick={() => (view = 'explorer')}>Knowledge Explorer</button>
+<svelte:head>
+  <title>{currentPage.label} · HI Research Workspace</title>
+</svelte:head>
+
+<div class="application-shell" class:navigation-collapsed={!navigationOpen}>
+<a class="skip-link" href={'#' + view + '-heading'}>Skip to content</a>
+<aside class="application-sidebar" aria-label="Research workspace" hidden={!navigationOpen}>
+  <p class="application-name">HI Research Workspace</p>
+  <nav id="application-navigation" class="application-navigation" aria-label="Application navigation">
+    {#each workspacePages as page (page.id)}
+      <button type="button" aria-controls={page.id + '-view'} aria-current={view === page.id ? 'page' : undefined}
+        onclick={() => navigate(page.id)}>{page.label}</button>
+    {/each}
   </nav>
+</aside>
+
+<div class="application-workspace">
+<header class="workspace-header">
+  <div class="workspace-heading">
+    <h1 id={view + '-heading'} tabindex="-1">{currentPage.heading}</h1>
+    <button type="button" aria-controls="application-navigation" aria-expanded={navigationOpen}
+      onclick={() => (navigationOpen = !navigationOpen)}>{navigationOpen ? 'Hide navigation' : 'Show navigation'}</button>
+  </div>
   {#if view === 'builder'}
     <p class="lead">Describe a Hybrid Intelligence scenario, refine its HINT concepts, and validate the resulting RDF.</p>
     <div class="toolbar">
@@ -398,6 +426,17 @@
     {#if loadError}<pre class="error" role="alert">{loadError}</pre>{/if}
   {/if}
 </header>
+
+<main id="home-view" class="information-view" hidden={view !== 'home'} aria-labelledby="home-heading">
+  <Home />
+</main>
+
+<main id="management-view" class="information-view" hidden={view !== 'management'} aria-labelledby="management-heading">
+  <section class="planned-pillar">
+    <p class="pillar-status">{workspacePages.find((page) => page.id === 'management')?.status}</p>
+    <p>{workspacePages.find((page) => page.id === 'management')?.description}</p>
+  </section>
+</main>
 
 <main id="builder-view" hidden={view !== 'builder'}>
   <div class="scenario-editor">
@@ -673,3 +712,5 @@
 <main id="explorer-view" class="explorer-view" hidden={view !== 'explorer'}>
   <KnowledgeExplorer active={view === 'explorer'} bind:uploads={sessionScenarios} focusSourceId={lastAddedSessionId} />
 </main>
+</div>
+</div>

@@ -17,9 +17,11 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-function render() {
+/** @param {'home' | 'builder'} [initialView] */
+function render(initialView = 'builder') {
   app = mount(App, { target: document.body });
   flushSync();
+  if (initialView === 'builder') click('Scenario Builder');
 }
 const sections = () => [...document.querySelectorAll('details.editor-section')].map((element) => /** @type {HTMLDetailsElement} */ (element));
 /** @param {string} id */
@@ -77,6 +79,109 @@ async function settleDisclosure() {
   await new Promise((resolve) => setTimeout(resolve, 20));
   flushSync();
 }
+
+describe('Application navigation', () => {
+  it('lands on Home with four persistent navigation choices and loads shared knowledge only when opened', async () => {
+    const fetch = vi.fn(async (/** @type {string} */ _url) => new Response(JSON.stringify({
+      shared_source: 'reference', scenarios: [], questions: [],
+    })));
+    vi.stubGlobal('fetch', fetch);
+    render('home');
+    const navigation = document.querySelector('nav[aria-label="Application navigation"]');
+    const choices = [...(navigation?.querySelectorAll('button') ?? [])];
+    expect(choices.map((choice) => choice.textContent?.trim())).toEqual([
+      'Home', 'Scenario Builder', 'Scientific Knowledge Management', 'Knowledge Explorer',
+    ]);
+    expect(choices.filter((choice) => choice.getAttribute('aria-current') === 'page'))
+      .toEqual([choices[0]]);
+    expect(document.getElementById('home-view')?.hidden).toBe(false);
+    expect(document.getElementById('builder-view')?.hidden).toBe(true);
+    expect(document.getElementById('explorer-view')?.hidden).toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    const home = document.getElementById('home-view');
+    expect([...home?.querySelectorAll('section[aria-labelledby]') ?? []]
+      .map((section) => section.querySelector('h2')?.textContent)).toEqual([
+      'Scenario Builder', 'Scientific Knowledge Management', 'Knowledge Explorer',
+    ]);
+    expect(home?.querySelectorAll('button, a')).toHaveLength(0);
+
+    click('Scientific Knowledge Management');
+    expect(document.getElementById('management-view')?.hidden).toBe(false);
+    expect(document.getElementById('management-view')?.textContent).toMatch(/planned/i);
+    expect(choices[2].getAttribute('aria-current')).toBe('page');
+    expect(document.querySelector('header nav')).toBeNull();
+    await until(() => expect(document.activeElement?.tagName).toBe('H1'));
+    expect(fetch).not.toHaveBeenCalled();
+
+    click('Knowledge Explorer');
+    expect(document.querySelector('nav[aria-label="Application navigation"]')).toBe(navigation);
+    await until(() => expect(fetch).toHaveBeenCalledTimes(1));
+    expect(String(fetch.mock.calls[0]?.[0])).toContain('/explorer/catalog');
+    expect(choices[3].getAttribute('aria-current')).toBe('page');
+    expect(choices[2].hasAttribute('aria-current')).toBe(false);
+  });
+
+  it('collapses navigation with an accessible control and keeps it available to reopen', () => {
+    render('home');
+    const navigation = document.getElementById('application-navigation');
+    const sidebar = navigation?.closest('aside');
+    const toggle = document.querySelector('button[aria-controls="application-navigation"]');
+    expect(toggle?.textContent?.trim()).toBe('Hide navigation');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(sidebar?.hidden).toBe(false);
+    expect(sidebar?.contains(toggle)).toBe(false);
+
+    click('Hide navigation');
+    expect(toggle?.textContent?.trim()).toBe('Show navigation');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(sidebar?.hidden).toBe(true);
+    expect(document.getElementById('home-view')?.hidden).toBe(false);
+
+    click('Show navigation');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(sidebar?.hidden).toBe(false);
+    expect(document.getElementById('application-navigation')).toBe(navigation);
+  });
+
+  it('preserves descriptions, structured edits, disclosure state, and successful validation through Home and Pillar 2', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      rdf: '', triple_count: 127, validation: { conforms: true, report: 'Conforms' },
+    }))));
+    render();
+    click('Load S1 example');
+    click('Describe with AI');
+    click('Write full description');
+    enter(fullDescriptionInput(), 'Researcher source text retained while navigating.');
+    click('Structured Editor');
+    enter(useCaseName(), 'Retained scenario name');
+    section('tasks').querySelector('summary')?.click();
+    await settleDisclosure();
+    click('Validate Scenario');
+    await until(() => expect(validationStatus()).toBe('Valid'));
+    const savedDraft = draft();
+    const nameInput = useCaseName();
+    const tasksSection = section('tasks');
+    expect(tasksSection.open).toBe(true);
+
+    click('Hide navigation');
+    expect(useCaseName()).toBe(nameInput);
+    expect(draft()).toEqual(savedDraft);
+    expect(validationStatus()).toBe('Valid');
+    click('Show navigation');
+
+    click('Home');
+    expect(document.getElementById('home-view')?.hidden).toBe(false);
+    click('Scientific Knowledge Management');
+    click('Scenario Builder');
+    expect(useCaseName()).toBe(nameInput);
+    expect(useCaseName().value).toBe('Retained scenario name');
+    expect(section('tasks')).toBe(tasksSection);
+    expect(tasksSection.open).toBe(true);
+    expect(draft()).toEqual(savedDraft);
+    expect(draft().source_description.full_description).toBe('Researcher source text retained while navigating.');
+    expect(validationStatus()).toBe('Valid');
+  });
+});
 
 describe('Scenario Builder navigation', () => {
   it('starts compact, exposes native disclosure state, and expands/collapses every section', async () => {
@@ -735,7 +840,11 @@ describe('Knowledge Explorer', () => {
     expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Add to Knowledge Explorer →')).toBe(false);
     click('Load S1 example');
     const first = candidate();
+    click('Hide navigation');
     await validateAndAdd();
+    expect(document.querySelector('button[aria-controls="application-navigation"]')?.getAttribute('aria-expanded')).toBe('false');
+    expect(document.getElementById('application-navigation')?.closest('aside')?.hidden).toBe(true);
+    click('Show navigation');
     await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
     expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(1);
     expect(explorer()?.textContent).toContain('Builder · Personal assistant');
@@ -958,6 +1067,23 @@ describe('Knowledge Explorer', () => {
     expect(rows?.[0]?.querySelector('code')?.textContent).toBe('urn:hi:task:own');
     expect(explorer()?.textContent).toContain('The result limit was reached.');
     expect(explorer()?.textContent).toContain('Only the first 200 rows are shown, so some selected scenarios may not appear.');
+
+    const selectedSession = explorer()?.querySelector('input[aria-label^="Include "]');
+    click('Hide navigation');
+    expect(explorer()?.querySelector('tbody tr')).toBe(rows?.[0]);
+    expect(rows?.[0]?.querySelector('details')?.open).toBe(true);
+    click('Show navigation');
+    click('Home');
+    click('Scientific Knowledge Management');
+    click('Knowledge Explorer');
+    expect(/** @type {HTMLSelectElement} */ (document.getElementById('explorer-question')).value).toBe('cq2');
+    expect(/** @type {HTMLSelectElement} */ (document.getElementById('explorer-parameter-capability')).value).toBe('SensingCapability');
+    expect(/** @type {HTMLSelectElement} */ (document.getElementById('explorer-scenario')).value).toBe(reference.scenario_id);
+    expect(/** @type {HTMLInputElement} */ (document.getElementById('explorer-source-combined')).checked).toBe(true);
+    expect(explorer()?.querySelector('input[aria-label^="Include "]')).toBe(selectedSession);
+    expect(/** @type {HTMLInputElement} */ (selectedSession).checked).toBe(true);
+    expect(explorer()?.querySelector('tbody tr')).toBe(rows?.[0]);
+    expect(rows?.[0]?.querySelector('details')?.open).toBe(true);
 
     document.getElementById('explorer-source-approved')?.click();
     flushSync();
