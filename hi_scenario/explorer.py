@@ -19,8 +19,16 @@ from .vocabulary import concepts
 
 Scope = Literal["draft", "shared", "combined"]
 SharedSource = Literal["approved", "reference"]
-QuestionId = Literal["cq1", "cq2", "cq5", "cq8", "cq11"]
+QuestionId = Literal["cq1", "cq2", "cq3", "cq4", "cq5", "cq6", "cq7", "cq8", "cq9", "cq10", "cq11", "cq12"]
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+
+class UploadedScenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: Identifier
+    file_name: str = Field(min_length=1)
+    scenario: Scenario
 
 
 class ScopeRequest(BaseModel):
@@ -29,15 +37,19 @@ class ScopeRequest(BaseModel):
     scope: Scope
     scenario: Scenario | None = None
     shared_scenario_id: Identifier | None = None
+    uploads: list[UploadedScenario] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_scope(self) -> Self:
-        if self.scope == "shared" and self.scenario is not None:
-            raise ValueError("Only include a current scenario when querying it.")
-        if self.scope != "shared" and self.scenario is None:
-            raise ValueError("A current scenario is required for this scope.")
+        local = self.scenario is not None or bool(self.uploads)
+        if self.scope == "shared" and local:
+            raise ValueError("Choose a local or combined scope to include provisional scenarios.")
+        if self.scope != "shared" and not local:
+            raise ValueError("A current scenario or an uploaded scenario is required for this scope.")
         if self.scope == "draft" and self.shared_scenario_id is not None:
             raise ValueError("A shared scenario requires a shared or combined scope.")
+        if len({upload.id for upload in self.uploads}) != len(self.uploads):
+            raise ValueError("Each uploaded file must have a distinct upload identifier.")
         return self
 
 
@@ -50,10 +62,17 @@ class ConceptExplorationRequest(ScopeRequest):
     category: Literal["Capability", "Constraint", "Method", "Metric"] | None = None
     concept: Concept | None = None
     compare: bool = False
+    comparison_source_ids: tuple[str, str] | None = None
 
     @model_validator(mode="after")
     def check_comparison(self) -> Self:
-        if self.compare and (self.scope != "combined" or self.shared_scenario_id is None):
+        if self.comparison_source_ids is not None and not self.compare:
+            raise ValueError("Comparison sources require comparison mode.")
+        if self.comparison_source_ids is not None and len(set(self.comparison_source_ids)) != 2:
+            raise ValueError("Choose two distinct sources for comparison.")
+        if self.compare and self.comparison_source_ids is None and (
+            self.scope != "combined" or self.shared_scenario_id is None
+        ):
             raise ValueError("Choose your current scenario and one shared scenario for comparison.")
         if self.concept is not None and self.category is None:
             raise ValueError("Choose a category when filtering by a HINT concept.")
@@ -67,6 +86,7 @@ class ScenarioSource(BaseModel):
     description: str | None
     publication_status: Literal["approved", "reference", "provisional"]
     graph_iri: str
+    file_name: str | None = None
 
 
 class QuestionOption(BaseModel):
@@ -74,6 +94,9 @@ class QuestionOption(BaseModel):
     label: str
     description: str
     parameters: list[dict[str, str]]
+    question: str | None = None
+    status: Literal["available", "scientific_review_pending"] = "available"
+    pending_reason: str | None = None
 
 
 class ExplorerCatalog(BaseModel):
@@ -104,7 +127,10 @@ class ExplorerResult(BaseModel):
 
 
 def validate_parameters(request: ExplorerRequest) -> None:
-    allowed = {item["id"]: item["category"] for item in EXPLORER_QUESTIONS[request.question_id]["parameters"]}
+    question = EXPLORER_QUESTIONS[request.question_id]
+    if question.get("status") == "scientific_review_pending":
+        raise GraphDBError(422, "invalid_request", "Scientific review pending. " + question["pending_reason"])
+    allowed = {item["id"]: item["category"] for item in question["parameters"]}
     for name, value in request.parameters.items():
         if name not in allowed or not any(concept["id"] == value for concept in concepts(allowed[name])):
             raise GraphDBError(422, "invalid_request", "Choose a supported HINT concept for this question.")
@@ -253,6 +279,7 @@ def _unlinked_interaction_notices(
 
 def _query_sources(
     store: GraphDBStore, request: ScopeRequest, draft_graph: Graph | None,
+    uploaded_graphs: dict[str, Graph] | None = None,
 ) -> tuple[list[ScenarioSource], dict[str, Graph], list[ExplorerNotice]]:
     nonce = uuid4().hex
     staged: dict[str, Graph] = {}
@@ -262,6 +289,14 @@ def _query_sources(
         iri = f"urn:hi-app:explorer:draft:{nonce}"
         sources.append(_local_source(request.scenario, "provisional", iri))
         staged[iri] = draft_graph
+    for upload in request.uploads:
+        iri = f"urn:hi-app:explorer:upload:{nonce}:{upload.id}"
+        source = _local_source(upload.scenario, "provisional", iri).model_copy(update={
+            "id": f"upload:{upload.id}", "name": f"{upload.scenario.use_case.name} · {upload.file_name}",
+            "file_name": upload.file_name,
+        })
+        sources.append(source)
+        staged[iri] = (uploaded_graphs or {})[upload.id]
     if request.scope != "draft":
         kind, shared, warnings = shared_sources(store)
         notices.extend(ExplorerNotice(code="approved_graphs_unavailable", message=warning) for warning in warnings)
@@ -280,8 +315,9 @@ def _query_sources(
 
 def answer(
     store: GraphDBStore, request: ExplorerRequest, draft_graph: Graph | None,
+    uploaded_graphs: dict[str, Graph] | None = None,
 ) -> ExplorerResult:
-    sources, staged, notices = _query_sources(store, request, draft_graph)
+    sources, staged, notices = _query_sources(store, request, draft_graph, uploaded_graphs)
     source_ids = {source.graph_iri: source.id for source in sources}
     query = build_explorer_query(request.question_id, list(source_ids), request.parameters)
     try:
@@ -300,15 +336,27 @@ def answer(
 
 def explore_concepts(
     store: GraphDBStore, request: ConceptExplorationRequest, draft_graph: Graph | None,
+    uploaded_graphs: dict[str, Graph] | None = None,
 ) -> ExplorerResult:
     if request.concept is not None and not any(
         concept["id"] == request.concept for concept in concepts(request.category)
     ):
         raise GraphDBError(422, "invalid_request", "Choose a supported HINT concept for this category.")
-    sources, staged, notices = _query_sources(store, request, draft_graph)
+    sources, staged, notices = _query_sources(store, request, draft_graph, uploaded_graphs)
+    if request.compare:
+        if request.comparison_source_ids is not None:
+            by_id = {source.id: source for source in sources}
+            try:
+                sources = [by_id[source_id] for source_id in request.comparison_source_ids]
+            except KeyError as exc:
+                raise GraphDBError(422, "invalid_request", "Choose comparison sources included in this request.") from exc
+        if len(sources) != 2 or not any(source.publication_status == "provisional" for source in sources):
+            raise GraphDBError(422, "invalid_request", "Choose two sources including a provisional scenario.")
+        staged = {source.graph_iri: staged[source.graph_iri] for source in sources if source.graph_iri in staged}
     source_ids = {source.graph_iri: source.id for source in sources}
     comparison = (sources[0].graph_iri, sources[1].graph_iri) if request.compare else None
-    query = build_concept_query(list(source_ids), request.category, request.concept, comparison)
+    comparison_labels = ("first scenario", "second scenario") if request.comparison_source_ids else ("draft", "shared")
+    query = build_concept_query(list(source_ids), request.category, request.concept, comparison, comparison_labels)
     try:
         rows, truncated = parse_concept_rows(store.explore(query, staged), list(source_ids))
         for row in rows:

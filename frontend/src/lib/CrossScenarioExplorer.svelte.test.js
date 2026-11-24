@@ -161,4 +161,61 @@ describe('cross-scenario concept exploration', () => {
     expect(button().disabled).toBe(true);
     expect(document.body.textContent).toContain('Start or open a structured scenario');
   });
+
+  it('queries two selected uploads without including the Builder draft', async () => {
+    const fetch = reply({ sources: [], columns: [], rows: [], truncated: false });
+    vi.stubGlobal('fetch', fetch);
+    const uploads = [
+      { id: 'first', file_name: 'first.json', scenario: draft, selected: true },
+      { id: 'second', file_name: 'second.json', scenario: draft, selected: true },
+      { id: 'excluded', file_name: 'excluded.json', scenario: draft, selected: false },
+    ];
+    render({ uploads });
+    select('concept-scope', 'draft');
+    document.getElementById('concept-include-current')?.click();
+    flushSync();
+    run();
+    await until(() => expect(document.body.textContent).toContain('No matching concepts'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
+      scope: 'draft', compare: false, category: 'Capability',
+      uploads: uploads.slice(0, 2).map(({ selected: _selected, ...entry }) => entry),
+    });
+  });
+
+  it('compares uploaded scenarios with explicit first and second provenance', async () => {
+    const fetch = reply({ sources: [], columns: [], rows: [], truncated: false });
+    vi.stubGlobal('fetch', fetch);
+    const uploads = [
+      { id: 'first', file_name: 'first.json', scenario: draft, selected: true },
+      { id: 'second', file_name: 'second.json', scenario: draft, selected: true },
+    ];
+    render({ compare: true, uploads, draft: null, shared: null, catalogFailed: true });
+    select('concept-scenario', 'upload:second');
+    expect(button().disabled).toBe(false);
+    run();
+    await until(() => expect(document.body.textContent).toContain('No matching concepts'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
+      scope: 'draft', compare: true, category: null,
+      uploads: uploads.map(({ selected: _selected, ...entry }) => entry),
+      comparison_source_ids: ['upload:first', 'upload:second'],
+    });
+    expect(document.body.textContent).toContain('First scenario');
+    expect(document.body.textContent).toContain('Second scenario');
+  });
+
+  it('compares an upload with shared knowledge while leaving the Builder draft out', async () => {
+    const fetch = reply({ sources: [], columns: [], rows: [], truncated: false });
+    vi.stubGlobal('fetch', fetch);
+    const upload = { id: 'first', file_name: 'first.json', scenario: draft, selected: true };
+    render({ compare: true, uploads: [upload] });
+    select('comparison-first', 'upload:first');
+    select('concept-scenario', 's5');
+    run();
+    await until(() => expect(document.body.textContent).toContain('No matching concepts'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
+      scope: 'combined', compare: true, category: null, shared_scenario_id: 's5',
+      uploads: [{ id: upload.id, file_name: upload.file_name, scenario: upload.scenario }],
+      comparison_source_ids: ['upload:first', 'reference:s5'],
+    });
+  });
 });

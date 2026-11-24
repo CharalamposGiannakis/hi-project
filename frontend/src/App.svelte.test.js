@@ -714,6 +714,35 @@ describe('Knowledge Explorer', () => {
     ],
   };
 
+  it('preserves session uploads and the edited Builder when navigating between workspaces', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (/** @type {string} */ url) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? catalog
+        : { rdf: '', triple_count: 1, validation: { conforms: true, report: 'Conforms' } },
+    ))));
+    render();
+    click('Load S1 example');
+    useCaseName().value = 'Researcher edited scenario';
+    useCaseName().dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const before = draft();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
+    const input = /** @type {HTMLInputElement} */ (document.getElementById('explorer-upload-files'));
+    Object.defineProperty(input, 'files', { value: [
+      { name: 'first.json', text: async () => JSON.stringify(s5) },
+      { name: 'second.json', text: async () => JSON.stringify(s7) },
+    ], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(2));
+    click('Scenario Builder');
+    expect(useCaseName().value).toBe('Researcher edited scenario');
+    expect(draft()).toEqual(before);
+    click('Knowledge Explorer');
+    expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(2);
+    expect(explorer()?.textContent).toContain('first.json');
+    expect(explorer()?.textContent).toContain('second.json');
+  });
+
   it.each([false, true])('explains missing CQ5 links with source provenance when other results exist (%s)', async (hasRows) => {
     const notice = {
       code: 'interaction_execution_links_missing', source_id: reference.id,
@@ -871,7 +900,7 @@ describe('Knowledge Explorer', () => {
     await importJson(s7);
     click('Knowledge Explorer');
     await until(() => expect(explorer()?.textContent).toContain('Shared scenarios could not be loaded.'));
-    expect(explorer()?.querySelectorAll('#explorer-question option')).toHaveLength(5);
+    expect(explorer()?.querySelectorAll('#explorer-question option')).toHaveLength(12);
     click('Run query');
     expect(explorer()?.textContent).toContain('Running query…');
     expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({ question_id: 'cq1', scope: 'draft', scenario: s7 });

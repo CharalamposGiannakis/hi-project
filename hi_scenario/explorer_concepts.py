@@ -84,6 +84,7 @@ def _assertion_pattern(assertion: _Assertion, entity: str = "?entity_iri") -> st
 def build_concept_query(
     graph_iris: list[str], category: str | None, concept: str | None,
     comparison_graphs: tuple[str, str] | None = None,
+    comparison_labels: tuple[str, str] = ("draft", "shared"),
 ) -> str:
     """Query recorded assertions, with comparison evaluated before row limiting."""
     if not graph_iris:
@@ -107,7 +108,7 @@ def build_concept_query(
                     "{ " + _assertion_pattern(item, "?comparison_entity") + " }"
                     for item in _ASSERTIONS if item.category == assertion.category
                 )
-                only = "Recorded only in draft" if graph == draft else "Recorded only in shared"
+                only = "Recorded only in " + (comparison_labels[0] if graph == draft else comparison_labels[1])
                 overlap = f"""BIND(IF(EXISTS {{ GRAPH {_iri(other)} {{ {other_patterns} }} }},
                     "Recorded in both", "{only}") AS ?overlap)"""
             relations = f"""OPTIONAL {{

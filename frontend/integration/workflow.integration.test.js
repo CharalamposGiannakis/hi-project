@@ -114,6 +114,60 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', () => {
+  it('queries two uploaded scenarios with the Builder draft and shared knowledge and compares uploads', async () => {
+    const options = { baseUrl: api };
+    const uploads = [
+      { id: 'first-file', file_name: 'first.json', scenario: scenario('s1', (data) => { data.agents[0].name = 'First uploaded member'; }) },
+      { id: 'second-file', file_name: 'second.json', scenario: scenario('s1', (data) => { data.agents[0].name = 'Second uploaded member'; }) },
+    ];
+    for (const upload of uploads) {
+      expect(await requestPreview(upload.scenario, options)).toMatchObject({ kind: 'ok' });
+    }
+    const catalog = await fetchExplorerCatalog(options);
+    if (catalog.kind !== 'ok') throw new Error(JSON.stringify(catalog));
+    expect(catalog.data.questions.map((question) => question.id))
+      .toEqual(Array.from({ length: 12 }, (_, index) => `cq${index + 1}`));
+    expect(catalog.data.questions.filter((question) => question.status === 'scientific_review_pending').map((question) => question.id))
+      .toEqual(['cq3', 'cq4', 'cq12']);
+
+    const answer = await requestExplorerQuery({
+      question_id: 'cq1', scope: 'combined', uploads, shared_scenario_id: 's1',
+      scenario: scenario('s1', (data) => { data.agents[0].name = 'Current Builder member'; }),
+    }, options);
+    if (answer.kind !== 'ok') throw new Error(JSON.stringify(answer));
+    expect(new Set(answer.data.sources.map((source) => source.id)))
+      .toEqual(new Set(['upload:first-file', 'upload:second-file', 'provisional:s1', 'reference:s1']));
+    expect(new Set(answer.data.sources.map((source) => source.graph_iri)).size).toBe(4);
+    for (const [member, sourceId] of [
+      ['First uploaded member', 'upload:first-file'], ['Second uploaded member', 'upload:second-file'],
+      ['Current Builder member', 'provisional:s1'], ['Human user', 'reference:s1'],
+    ]) {
+      expect(answer.data.rows).toEqual(expect.arrayContaining([
+        expect.objectContaining({ source_id: sourceId, values: expect.objectContaining({ member }) }),
+      ]));
+    }
+
+    const searched = await requestConceptExploration({
+      scope: 'draft', uploads, category: 'Constraint', concept: 'PrivacyConstraint',
+    }, options);
+    if (searched.kind !== 'ok') throw new Error(JSON.stringify(searched));
+    expect(new Set(searched.data.rows.map((row) => row.source_id))).toEqual(new Set(['upload:first-file', 'upload:second-file']));
+    const comparison = await requestConceptExploration({
+      scope: 'combined', uploads: [uploads[0]], shared_scenario_id: 's5', compare: true,
+      comparison_source_ids: ['upload:first-file', 'reference:s5'],
+    }, options);
+    if (comparison.kind !== 'ok') throw new Error(JSON.stringify(comparison));
+    expect(new Set(comparison.data.sources.map((source) => source.id))).toEqual(new Set(['upload:first-file', 'reference:s5']));
+    expect(new Set(comparison.data.rows.map((row) => row.values.overlap))).toEqual(new Set([
+      'Recorded in both', 'Recorded only in first scenario', 'Recorded only in second scenario',
+    ]));
+    for (const response of [answer.data, searched.data, comparison.data]) {
+      for (const source of response.sources) {
+        expect(await select(`SELECT ?s WHERE { GRAPH <${source.graph_iri}> { ?s ?p ?o } } LIMIT 1`)).toEqual([]);
+      }
+    }
+  }, 30_000);
+
   it('finds shared concepts and compares a current scenario with S5 without publishing', async () => {
     const options = { baseUrl: api };
     const found = await requestConceptExploration({

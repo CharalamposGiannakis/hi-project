@@ -239,32 +239,49 @@ def explorer_catalog() -> explorer.ExplorerCatalog:
         return explorer.catalog(store)
 
 
+def _explorer_graphs(request: explorer.ScopeRequest) -> tuple[Graph | None, dict[str, Graph]] | JSONResponse:
+    graph = None
+    if request.scenario is not None:
+        prepared = _validated_graph(request.scenario)
+        if isinstance(prepared, JSONResponse):
+            return prepared
+        graph, _ = prepared
+    uploaded_graphs = {}
+    for index, upload in enumerate(request.uploads):
+        prepared = _validated_graph(upload.scenario)
+        if isinstance(prepared, JSONResponse):
+            error = SubmissionError.model_validate_json(prepared.body)
+            location = ["uploads", index, "scenario"]
+            error.issues = [
+                issue.model_copy(update={"location": location + issue.location}) for issue in error.issues
+            ] or [InputIssue(location=location, message=error.message, type=error.code)]
+            return _error(prepared.status_code, error)
+        uploaded_graphs[upload.id] = prepared[0]
+    return graph, uploaded_graphs
+
+
 @app.post(
     "/explorer/query", response_model=explorer.ExplorerResult,
     summary="Run a predefined competency question in selected named graphs",
 )
 def query_explorer(request: explorer.ExplorerRequest) -> explorer.ExplorerResult | JSONResponse:
     explorer.validate_parameters(request)
-    graph = None
-    if request.scenario is not None:
-        prepared = _validated_graph(request.scenario)
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        graph, _ = prepared
+    prepared = _explorer_graphs(request)
+    if isinstance(prepared, JSONResponse):
+        return prepared
+    graph, uploaded_graphs = prepared
     with connect_graphdb() as store:
-        return explorer.answer(store, request, graph)
+        return explorer.answer(store, request, graph, uploaded_graphs)
 
 
 @app.post(
     "/explorer/concepts", response_model=explorer.ExplorerResult,
-    summary="Find recorded HINT concepts and compare a draft with a shared scenario",
+    summary="Find recorded HINT concepts and compare selected scenarios",
 )
 def query_concepts(request: explorer.ConceptExplorationRequest) -> explorer.ExplorerResult | JSONResponse:
-    graph = None
-    if request.scenario is not None:
-        prepared = _validated_graph(request.scenario)
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        graph, _ = prepared
+    prepared = _explorer_graphs(request)
+    if isinstance(prepared, JSONResponse):
+        return prepared
+    graph, uploaded_graphs = prepared
     with connect_graphdb() as store:
-        return explorer.explore_concepts(store, request, graph)
+        return explorer.explore_concepts(store, request, graph, uploaded_graphs)
