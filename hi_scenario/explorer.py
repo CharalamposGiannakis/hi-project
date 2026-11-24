@@ -9,6 +9,7 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from rdflib import Graph
 
+from .explorer_concepts import CONCEPT_COLUMNS, build_concept_query, parse_concept_rows
 from .explorer_queries import EXPLORER_QUESTIONS, build_explorer_query, parse_explorer_rows
 from .graphdb import GraphDBError, GraphDBStore, _invalid_response, _text, _value, scenario_graph_iri
 from .model import Concept, Identifier, Scenario
@@ -16,29 +17,61 @@ from .rdf import to_rdf
 from .vocabulary import concepts
 
 
-Scope = Literal["draft", "shared", "combined"]
+Scope = Literal["session", "shared", "combined"]
 SharedSource = Literal["approved", "reference"]
-QuestionId = Literal["cq1", "cq2", "cq5", "cq8", "cq11"]
+QuestionId = Literal["cq1", "cq2", "cq3", "cq4", "cq5", "cq6", "cq7", "cq8", "cq9", "cq10", "cq11", "cq12"]
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
-class ExplorerRequest(BaseModel):
+class UploadedScenario(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    question_id: QuestionId
+    id: Identifier
+    file_name: str = Field(min_length=1)
+    scenario: Scenario
+
+
+class ScopeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scope: Scope
-    scenario: Scenario | None = None
     shared_scenario_id: Identifier | None = None
-    parameters: dict[str, Concept] = Field(default_factory=dict)
+    uploads: list[UploadedScenario] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_scope(self) -> Self:
-        if self.scope == "shared" and self.scenario is not None:
-            raise ValueError("Only include a current scenario when querying it.")
-        if self.scope != "shared" and self.scenario is None:
-            raise ValueError("A current scenario is required for this scope.")
-        if self.scope == "draft" and self.shared_scenario_id is not None:
+        if self.scope == "shared" and self.uploads:
+            raise ValueError("Choose a session or combined scope to include provisional scenarios.")
+        if self.scope != "shared" and not self.uploads:
+            raise ValueError("A validated session scenario is required for this scope.")
+        if self.scope == "session" and self.shared_scenario_id is not None:
             raise ValueError("A shared scenario requires a shared or combined scope.")
+        if len({upload.id for upload in self.uploads}) != len(self.uploads):
+            raise ValueError("Each uploaded file must have a distinct upload identifier.")
+        return self
+
+
+class ExplorerRequest(ScopeRequest):
+    question_id: QuestionId
+    parameters: dict[str, Concept] = Field(default_factory=dict)
+
+
+class ConceptExplorationRequest(ScopeRequest):
+    category: Literal["Capability", "Constraint", "Method", "Metric"] | None = None
+    concept: Concept | None = None
+    compare: bool = False
+    comparison_source_ids: tuple[str, str] | None = None
+
+    @model_validator(mode="after")
+    def check_comparison(self) -> Self:
+        if self.comparison_source_ids is not None and not self.compare:
+            raise ValueError("Comparison sources require comparison mode.")
+        if self.comparison_source_ids is not None and len(set(self.comparison_source_ids)) != 2:
+            raise ValueError("Choose two distinct sources for comparison.")
+        if self.compare and self.comparison_source_ids is None:
+            raise ValueError("Choose two scenario sources for comparison.")
+        if self.concept is not None and self.category is None:
+            raise ValueError("Choose a category when filtering by a HINT concept.")
         return self
 
 
@@ -49,6 +82,7 @@ class ScenarioSource(BaseModel):
     description: str | None
     publication_status: Literal["approved", "reference", "provisional"]
     graph_iri: str
+    file_name: str | None = None
 
 
 class QuestionOption(BaseModel):
@@ -56,6 +90,9 @@ class QuestionOption(BaseModel):
     label: str
     description: str
     parameters: list[dict[str, str]]
+    question: str | None = None
+    status: Literal["available", "scientific_review_pending"] = "available"
+    pending_reason: str | None = None
 
 
 class ExplorerCatalog(BaseModel):
@@ -86,7 +123,10 @@ class ExplorerResult(BaseModel):
 
 
 def validate_parameters(request: ExplorerRequest) -> None:
-    allowed = {item["id"]: item["category"] for item in EXPLORER_QUESTIONS[request.question_id]["parameters"]}
+    question = EXPLORER_QUESTIONS[request.question_id]
+    if question.get("status") == "scientific_review_pending":
+        raise GraphDBError(422, "invalid_request", "Scientific review pending. " + question["pending_reason"])
+    allowed = {item["id"]: item["category"] for item in question["parameters"]}
     for name, value in request.parameters.items():
         if name not in allowed or not any(concept["id"] == value for concept in concepts(allowed[name])):
             raise GraphDBError(422, "invalid_request", "Choose a supported HINT concept for this question.")
@@ -233,18 +273,22 @@ def _unlinked_interaction_notices(
     return notices
 
 
-def answer(
-    store: GraphDBStore, request: ExplorerRequest, draft_graph: Graph | None,
-) -> ExplorerResult:
+def _query_sources(
+    store: GraphDBStore, request: ScopeRequest, uploaded_graphs: dict[str, Graph],
+) -> tuple[list[ScenarioSource], dict[str, Graph], list[ExplorerNotice]]:
     nonce = uuid4().hex
     staged: dict[str, Graph] = {}
     sources = []
     notices = []
-    if request.scenario is not None and draft_graph is not None:
-        iri = f"urn:hi-app:explorer:draft:{nonce}"
-        sources.append(_local_source(request.scenario, "provisional", iri))
-        staged[iri] = draft_graph
-    if request.scope != "draft":
+    for upload in request.uploads:
+        iri = f"urn:hi-app:explorer:upload:{nonce}:{upload.id}"
+        source = _local_source(upload.scenario, "provisional", iri).model_copy(update={
+            "id": f"upload:{upload.id}", "name": f"{upload.scenario.use_case.name} · {upload.file_name}",
+            "file_name": upload.file_name,
+        })
+        sources.append(source)
+        staged[iri] = uploaded_graphs[upload.id]
+    if request.scope != "session":
         kind, shared, warnings = shared_sources(store)
         notices.extend(ExplorerNotice(code="approved_graphs_unavailable", message=warning) for warning in warnings)
         if request.shared_scenario_id is not None:
@@ -257,7 +301,13 @@ def answer(
                 source = source.model_copy(update={"graph_iri": iri})
                 staged[iri] = to_rdf(_reference_scenarios()[source.scenario_id])
             sources.append(source)
+    return sources, staged, notices
 
+
+def answer(
+    store: GraphDBStore, request: ExplorerRequest, uploaded_graphs: dict[str, Graph],
+) -> ExplorerResult:
+    sources, staged, notices = _query_sources(store, request, uploaded_graphs)
     source_ids = {source.graph_iri: source.id for source in sources}
     query = build_explorer_query(request.question_id, list(source_ids), request.parameters)
     try:
@@ -271,4 +321,39 @@ def answer(
     return ExplorerResult(
         sources=sources, columns=EXPLORER_QUESTIONS[request.question_id]["columns"],
         rows=[ExplorerRow(**row) for row in rows], truncated=truncated, notices=notices,
+    )
+
+
+def explore_concepts(
+    store: GraphDBStore, request: ConceptExplorationRequest, uploaded_graphs: dict[str, Graph],
+) -> ExplorerResult:
+    if request.concept is not None and not any(
+        concept["id"] == request.concept for concept in concepts(request.category)
+    ):
+        raise GraphDBError(422, "invalid_request", "Choose a supported HINT concept for this category.")
+    sources, staged, notices = _query_sources(store, request, uploaded_graphs)
+    if request.compare:
+        if request.comparison_source_ids is not None:
+            by_id = {source.id: source for source in sources}
+            try:
+                sources = [by_id[source_id] for source_id in request.comparison_source_ids]
+            except KeyError as exc:
+                raise GraphDBError(422, "invalid_request", "Choose comparison sources included in this request.") from exc
+        if len(sources) != 2 or not any(source.publication_status == "provisional" for source in sources):
+            raise GraphDBError(422, "invalid_request", "Choose two sources including a provisional scenario.")
+        staged = {source.graph_iri: staged[source.graph_iri] for source in sources if source.graph_iri in staged}
+    source_ids = {source.graph_iri: source.id for source in sources}
+    comparison = (sources[0].graph_iri, sources[1].graph_iri) if request.compare else None
+    query = build_concept_query(
+        list(source_ids), request.category, request.concept, comparison, ("first scenario", "second scenario"),
+    )
+    try:
+        rows, truncated = parse_concept_rows(store.explore(query, staged), list(source_ids))
+        for row in rows:
+            row["source_id"] = source_ids[row.pop("graph_iri")]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _invalid_response() from exc
+    return ExplorerResult(
+        sources=sources, columns=CONCEPT_COLUMNS, rows=[ExplorerRow(**row) for row in rows],
+        truncated=truncated, notices=notices,
     )

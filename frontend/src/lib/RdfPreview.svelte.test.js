@@ -31,6 +31,8 @@ function render(overrides = {}) {
 }
 
 const button = () => /** @type {HTMLButtonElement} */ (document.querySelector('button.primary'));
+const addButton = () => [...document.querySelectorAll('button')]
+  .find((control) => control.textContent === 'Add to Knowledge Explorer →');
 const status = () => document.querySelector('[data-validation-status]')?.textContent;
 const text = () => document.body.textContent ?? '';
 
@@ -51,6 +53,69 @@ function pendingFetch() {
 }
 
 describe('RdfPreview', () => {
+  it('adds an independent snapshot of the exact payload that passed validation', async () => {
+    const { fetch, respond } = pendingFetch();
+    const onAddToExplorer = vi.fn();
+    const contract = { id: 's1', agents: [{ name: 'Original member' }] };
+    render({ target: { contract }, fetch, onAddToExplorer });
+    expect(addButton()).toBeUndefined();
+    button().click();
+    flushSync();
+    expect(addButton()).toBeUndefined();
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/scenarios/preview'),
+      expect.objectContaining({ body: JSON.stringify(contract) }));
+    respond(new Response(JSON.stringify(ok)));
+    await waitForStatus('Valid');
+    expect(onAddToExplorer).not.toHaveBeenCalled();
+
+    addButton()?.click();
+    const first = onAddToExplorer.mock.calls[0][0];
+    expect(first).toEqual(contract);
+    expect(first).not.toBe(contract);
+    expect(first.agents).not.toBe(contract.agents);
+    first.agents[0].name = 'Changed returned copy';
+    addButton()?.click();
+    expect(onAddToExplorer.mock.calls[1][0].agents[0].name).toBe('Original member');
+    expect(contract.agents[0].name).toBe('Original member');
+  });
+
+  it('blocks adding stale, incomplete, and rejected scenarios until current validation succeeds', async () => {
+    const onAddToExplorer = vi.fn();
+    const fetch = vi.fn(async () => new Response(JSON.stringify(ok)));
+    const props = render({ fetch, onAddToExplorer });
+    button().click();
+    await waitForStatus('Valid');
+    expect(addButton()).toBeDefined();
+    props.target = { contract: { id: 's1', edited: true } };
+    flushSync();
+    expect(addButton()).toBeUndefined();
+    props.issueCount = 1;
+    button().click();
+    flushSync();
+    expect(status()).toBe('Needs corrections');
+    expect(addButton()).toBeUndefined();
+
+    props.issueCount = 0;
+    props.fetch = vi.fn(async () => new Response(JSON.stringify(shaclError), { status: 422 }));
+    button().click();
+    await waitForStatus('Needs corrections');
+    expect(addButton()).toBeUndefined();
+    expect(onAddToExplorer).not.toHaveBeenCalled();
+  });
+
+  it('does not offer an in-flight successful result for an edited scenario', async () => {
+    const { fetch, respond } = pendingFetch();
+    const onAddToExplorer = vi.fn();
+    const props = render({ fetch, onAddToExplorer });
+    button().click();
+    flushSync();
+    props.target = { contract: { id: 'new-revision' } };
+    respond(new Response(JSON.stringify(ok)));
+    await waitForStatus('Not validated');
+    expect(addButton()).toBeUndefined();
+    expect(onAddToExplorer).not.toHaveBeenCalled();
+  });
+
   it('does not contact the backend while the form is incomplete', () => {
     const fetch = vi.fn();
     const onIncomplete = vi.fn();

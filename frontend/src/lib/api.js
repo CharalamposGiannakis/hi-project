@@ -30,16 +30,23 @@ import { concepts } from './scenario.js';
  * @typedef {{ kind: 'ok', preview: ScenarioPreview } | Failure} PreviewResult
  * @typedef {{ kind: 'ok', saved: SavedScenario } | Failure} SaveResult
  * @typedef {{ kind: 'ok', team: TeamComposition } | Failure} TeamResult
- * @typedef {'cq1' | 'cq2' | 'cq5' | 'cq8' | 'cq11'} ExplorerQuestionId
- * @typedef {'draft' | 'shared' | 'combined'} ExplorerScope
+ * @typedef {'cq1' | 'cq2' | 'cq3' | 'cq4' | 'cq5' | 'cq6' | 'cq7' | 'cq8' | 'cq9' | 'cq10' | 'cq11' | 'cq12'} ExplorerQuestionId
+ * @typedef {'session' | 'shared' | 'combined'} ExplorerScope
  * @typedef {'approved' | 'reference' | 'provisional'} PublicationStatus
  * @typedef {{ id: string, scenario_id: string, name: string, description: string | null,
- *   publication_status: PublicationStatus, graph_iri: string }} ExplorerSource
+ *   publication_status: PublicationStatus, graph_iri: string, file_name?: string | null }} ExplorerSource
  * @typedef {{ id: string, label: string, category: import('./scenario.js').Category }} ExplorerParameter
- * @typedef {{ id: ExplorerQuestionId, label: string, description: string, parameters: ExplorerParameter[] }} ExplorerQuestion
+ * @typedef {{ id: ExplorerQuestionId, label: string, description: string, parameters: ExplorerParameter[],
+ *   question?: string, status?: 'available' | 'scientific_review_pending', pending_reason?: string | null }} ExplorerQuestion
  * @typedef {{ shared_source: 'approved' | 'reference', scenarios: ExplorerSource[], questions: ExplorerQuestion[], warnings?: string[] }} ExplorerCatalog
- * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, scenario?: object,
+ * @typedef {{ id: string, file_name: string, scenario: object }} UploadedScenario
+ * @typedef {UploadedScenario & { selected: boolean }} SessionUpload
+ * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, uploads?: UploadedScenario[],
  *   shared_scenario_id?: string, parameters?: Record<string, string> }} ExplorerRequest
+ * @typedef {'Capability' | 'Constraint' | 'Method' | 'Metric'} ExplorationCategory
+ * @typedef {{ scope: ExplorerScope, shared_scenario_id?: string,
+ *   category?: ExplorationCategory | null, concept?: string | null, compare?: boolean,
+ *   uploads?: UploadedScenario[], comparison_source_ids?: [string, string] }} ConceptExplorationRequest
  * @typedef {{ id: string, label: string }} ExplorerColumn
  * @typedef {{ label: string, iri: string }} ExplorerEvidence
  * @typedef {{ source_id: string, values: Record<string, string | null>, evidence: ExplorerEvidence[] }} ExplorerRow
@@ -118,14 +125,18 @@ function isTeam(body) {
 function isExplorerSource(source) {
   return isString(source?.id) && isString(source.scenario_id) && isString(source.name)
     && isOptionalString(source.description) && isString(source.graph_iri)
+    && (source.file_name === undefined || isOptionalString(source.file_name))
     && ['approved', 'reference', 'provisional'].includes(source.publication_status);
 }
 
 /** @param {any} question @returns {question is ExplorerQuestion} */
 function isExplorerQuestion(question) {
   const { id, label, description, parameters } = question ?? {};
-  return ['cq1', 'cq2', 'cq5', 'cq8', 'cq11'].includes(id)
+  return isString(id) && /^cq([1-9]|1[0-2])$/.test(id)
     && isString(label) && isString(description) && Array.isArray(parameters)
+    && (question.question === undefined || isString(question.question))
+    && (question.status === undefined || ['available', 'scientific_review_pending'].includes(question.status))
+    && (question.pending_reason === undefined || isOptionalString(question.pending_reason))
     && parameters.every((parameter) => isString(parameter?.id) && isString(parameter.label)
       && typeof parameter.category === 'string' && Object.hasOwn(concepts, parameter.category));
 }
@@ -264,4 +275,9 @@ export function fetchExplorerCatalog(options = {}) {
 /** @param {ExplorerRequest} request @param {Options} [options] */
 export function requestExplorerQuery(request, options = {}) {
   return call('POST', '/explorer/query', request, isExplorerResults, options);
+}
+
+/** @param {ConceptExplorationRequest} request @param {Options} [options] */
+export function requestConceptExploration(request, options = {}) {
+  return call('POST', '/explorer/concepts', request, isExplorerResults, options);
 }

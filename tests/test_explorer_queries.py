@@ -6,7 +6,7 @@ import pytest
 from rdflib import Dataset, Literal, URIRef
 from rdflib.namespace import RDFS, SKOS
 
-from hi_scenario.explorer_queries import ROW_LIMIT, build_explorer_query, parse_explorer_rows
+from hi_scenario.explorer_queries import EXPLORER_QUESTIONS, ROW_LIMIT, build_explorer_query, parse_explorer_rows
 from hi_scenario.graphdb import HINT_GRAPH, ONTOLOGY_GRAPH, scenario_graph_iri
 from hi_scenario.model import Scenario
 from hi_scenario.rdf import HI, HINT, ONTOLOGY_DIR, to_rdf
@@ -44,7 +44,11 @@ def evidence(row, label):
     ("cq1", (2, 2, 3, 2, 2, 2, 2)),
     ("cq2", (4, 11, 6, 6, 6, 6, 8)),
     ("cq5", (2, 0, 0, 2, 4, 4, 4)),
+    ("cq6", (3, 3, 2, 6, 5, 6, 7)),
+    ("cq7", (6, 10, 30, 36, 10, 48, 56)),
     ("cq8", (6, 10, 6, 6, 4, 8, 8)),
+    ("cq9", (3, 2, 3, 3, 3, 3, 3)),
+    ("cq10", (20, 12, 21, 20, 20, 12, 36)),
     ("cq11", (3, 2, 2, 2, 2, 2, 2)),
 ])
 def test_queries_keep_results_in_their_named_graph_on_the_canonical_corpus(data, question, expected):
@@ -215,6 +219,113 @@ def test_query_requires_explicit_safe_scope_and_parameters():
         build_explorer_query("cq1", ["urn:test:bad scope"], {})
     with pytest.raises(ValueError):
         build_explorer_query("cq2", ["urn:test:scope"], {"capability": "Bad Capability"})
+
+
+def test_catalog_preserves_original_numbering_questions_and_pending_status():
+    assert list(EXPLORER_QUESTIONS) == [f"cq{number}" for number in range(1, 13)]
+    assert EXPLORER_QUESTIONS["cq6"]["question"] == "Given a method, which goals and tasks can be achieved with it?"
+    assert EXPLORER_QUESTIONS["cq3"]["question"] == "What candidate team compositions satisfy all capability requirements for achieving a specific goal?"
+    for question_id, question in EXPLORER_QUESTIONS.items():
+        assert question["question"].endswith("?")
+        if question_id in {"cq3", "cq4", "cq12"}:
+            assert question["status"] == "scientific_review_pending"
+            assert question["pending_reason"] and not question["columns"] and not question["parameters"]
+            with pytest.raises(ValueError, match="Scientific review pending"):
+                build_explorer_query(question_id, ["urn:test:scope"], {})
+        else:
+            assert question["status"] == "available"
+            assert question["pending_reason"] is None
+
+
+def test_cq6_requires_recorded_execution_method_task_and_goal_links(data):
+    rows = answers(data, "cq6", "s1", method="PostHocExplanationMethod")
+    assert len(rows) == 1
+    assert rows[0]["values"]["task"] == "Provide explanations to maintain trust and engagement"
+    assert evidence(rows[0], "Method concept") == str(HINT.PostHocExplanationMethod)
+    graph = data.graph(scenario_graph_iri("s1"))
+    execution = URIRef(evidence(rows[0], "Task execution"))
+    graph.remove((execution, HI.towardsGoal, None))
+    # A task being required for the goal does not replace its execution's goal link.
+    assert not answers(data, "cq6", "s1", method="PostHocExplanationMethod")
+
+
+@pytest.mark.parametrize("scenario", [f"s{number}" for number in range(1, 8)])
+def test_cq7_preserves_both_recorded_metric_paths_to_assessed_tasks(data, scenario):
+    graph = data.graph(scenario_graph_iri(scenario))
+    expected = set()
+    for execution, evaluation in graph.subject_objects(HI.evaluatedBy):
+        task = next(graph.objects(execution, HI.realizesTask))
+        owners = [(evaluation, HI.hasMetricConcept)]
+        owners.extend((experiment, HI.hasMetricTested) for experiment in graph.objects(evaluation, HI.hasExperiment))
+        for owner, predicate in owners:
+            for metric in graph.objects(owner, predicate):
+                expected.add((str(execution), str(task), str(owner), str(predicate), str(metric)))
+    rows = answers(data, "cq7", scenario)
+    assert {
+        tuple(evidence(row, label) for label in (
+            "Task execution", "Task", "Metric owner", "Metric relationship", "Metric concept",
+        ))
+        for row in rows
+    } == expected
+    assert {row["values"]["metric_source"] for row in rows} == {"Evaluation", "Experiment"}
+
+
+def test_cq7_metric_selector_and_missing_evaluation_links_do_not_invent_assessment(data):
+    rows = answers(data, "cq7", "s3", metric="FairOutcomeMetric")
+    assert rows and all(evidence(row, "Metric concept") == str(HINT.FairOutcomeMetric) for row in rows)
+    graph = data.graph(scenario_graph_iri("s3"))
+    graph.remove((None, HI.evaluatedBy, None))
+    assert not answers(data, "cq7", "s3", metric="FairOutcomeMetric")
+
+
+def test_cq9_reports_context_association_when_influence_is_not_recorded(data):
+    rows = answers(data, "cq9", "s1", "s4", "s5", "s7", constraint="PrivacyConstraint")
+    assert {row["graph_iri"] for row in rows} == {scenario_graph_iri(f"s{number}") for number in (1, 4, 5, 7)}
+    graph = data.graph(scenario_graph_iri("s1"))
+    graph.remove((None, HI.hasInfluenceOn, None))
+    (row,) = answers(data, "cq9", "s1", constraint="PrivacyConstraint")
+    assert row["values"]["influence"] == "Not recorded"
+    assert all(item["label"] != "Recorded influence target" for item in row["evidence"])
+    graph.remove((None, HI.operatesInContext, None))
+    # A similarly identified assertion in another named graph cannot supply the missing link.
+    data.default_graph.add((URIRef("urn:hi-app:scenario:s1:context"), HI.hasInfluenceOn, URIRef("urn:hi-app:scenario:s1:team")))
+    assert not answers(data, "cq9", "s1", constraint="PrivacyConstraint")
+
+
+def test_cq9_does_not_treat_a_team_constraint_as_a_contextual_assertion(data):
+    graph = data.graph(scenario_graph_iri("s7"))
+    graph.remove((URIRef("urn:hi-app:scenario:s7:context"), HI.hasConstraintConcept, HINT.PrivacyConstraint))
+    assert (URIRef("urn:hi-app:scenario:s7:team"), HI.hasConstraintConcept, HINT.PrivacyConstraint) in graph
+    assert not answers(data, "cq9", "s7", constraint="PrivacyConstraint")
+
+
+def test_cq10_requires_two_distinct_use_case_identities_and_keeps_attachments(data):
+    assert not answers(data, "cq10", "s1", constraint="PrivacyConstraint")
+    rows = answers(data, "cq10", "s1", "s7", constraint="PrivacyConstraint")
+    assert rows
+    assert {row["values"]["attachment"] for row in rows} == {"Team constraint", "Context constraint"}
+    assert all(evidence(row, "Use case") != evidence(row, "Other use case") for row in rows)
+    assert {row["graph_iri"] for row in rows} == {scenario_graph_iri("s1"), scenario_graph_iri("s7")}
+    assert all(evidence(row, "Other scenario graph") in {scenario_graph_iri("s1"), scenario_graph_iri("s7")} for row in rows)
+    assert all("Team member" in {item["label"] for item in row["evidence"]} for row in rows)
+
+
+def test_cq10_repeated_copies_of_one_use_case_do_not_count_as_shared(data):
+    original = scenario_graph_iri("s1")
+    copy = "urn:test:uploaded-copy"
+    copied = data.graph(copy)
+    copied += data.graph(original)
+    scopes = [original, copy]
+    query = build_explorer_query("cq10", scopes, {"constraint": "PrivacyConstraint"})
+    rows, truncated = parse_explorer_rows("cq10", json.loads(data.query(query).serialize(format="json")), scopes)
+    assert not rows and not truncated
+
+
+def test_cq10_cannot_borrow_a_constraint_attachment_from_an_unselected_graph(data):
+    graph = data.graph(scenario_graph_iri("s7"))
+    graph.remove((None, HI.hasConstraintConcept, HINT.PrivacyConstraint))
+    data.default_graph.add((URIRef("urn:hi-app:scenario:s7:context"), HI.hasConstraintConcept, HINT.PrivacyConstraint))
+    assert not answers(data, "cq10", "s1", "s7", constraint="PrivacyConstraint")
 
 
 def test_parser_checks_scope_and_binding_types_and_reports_truncation():

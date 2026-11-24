@@ -3,54 +3,93 @@
   import { fetchExplorerCatalog, requestExplorerQuery } from './api.js';
   import { concepts } from './scenario.js';
   import { vocabularyLabel } from './vocabulary-labels.js';
+  import CrossScenarioExplorer from './CrossScenarioExplorer.svelte';
+  import ScenarioUploads from './ScenarioUploads.svelte';
 
   /** @typedef {import('./api.js').ExplorerQuestionId} QuestionId */
   /** @typedef {import('./api.js').ExplorerScope} Scope */
   /** @typedef {import('./api.js').ExplorerRequest} Query */
-  /** @typedef {ReturnType<typeof import('./scenario.js').toContract>} Draft */
   /** @typedef {Awaited<ReturnType<typeof requestExplorerQuery>>} Outcome */
-  /** @type {{ active: boolean, draft: Draft | null }} */
-  let { active, draft } = $props();
+  /** @type {{ active: boolean, uploads?: import('./api.js').SessionUpload[], focusSourceId?: string }} */
+  let { active, uploads = $bindable([]), focusSourceId = '' } = $props();
 
-  // Draft queries are useful even when GraphDB cannot provide the shared catalog.
+  // Session scenarios remain queryable when the shared catalog is unavailable.
+  const originalQuestions = {
+    cq1: "Given a use case, how is the hybrid intelligence team composed, and what roles do its agents assume?",
+    cq2: "Given an agent's capabilities, which tasks can it perform, and in which use cases can it participate?",
+    cq3: "What candidate team compositions satisfy all capability requirements for achieving a specific goal?",
+    cq4: "How can we infer team eligibility, task assignment, or contextual influences?",
+    cq5: "What types of interactions occur between agents during the execution of a specific task?",
+    cq6: "Given a method, which goals and tasks can be achieved with it?",
+    cq7: "Given an evaluation metric, which task can be assessed with it?",
+    cq8: "Given a goal, which experiments test which metrics, and what hypotheses do these experiments address?",
+    cq9: "Given a contextual constraint, which use cases are associated with it, and how does it affect the team?",
+    cq10: "Which constraints are shared across different use cases and agents?",
+    cq11: "Given a use case, which contextual phenomena are associated with it?",
+    cq12: "Under what conditions does an agent's behaviour comply with or violate a contextual constraint associated with a use case?",
+  };
+  const pendingIds = ['cq3', 'cq4', 'cq12'];
+  const pendingReason = 'Reliable answers require further scientific clarification or ontology development.';
   const fallbackQuestions = /** @type {import('./api.js').ExplorerQuestion[]} */ ([
     { id: 'cq1', label: 'CQ1 · Team members and roles', description: '', parameters: [] },
     { id: 'cq2', label: 'CQ2 · Tasks supported by capabilities', description: 'Which tasks have their recorded capability requirements covered by members of the same HI team? Coverage is derived from capabilities and does not establish task execution.', parameters: [] },
     { id: 'cq5', label: 'CQ5 · Interactions during task execution', description: 'CQ5 requires recorded links between interactions and executions of goal-required tasks.', parameters: [] },
     { id: 'cq8', label: 'CQ8 · Experiments, metrics, and hypotheses', description: 'Which experiments and metrics are linked through executions that contribute to the goal or realize its required tasks?', parameters: [] },
     { id: 'cq11', label: 'CQ11 · Contextual phenomena', description: '', parameters: [] },
-  ]);
-  const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional draft' };
+    { id: 'cq3', label: 'CQ3 · Candidate team compositions', description: '', parameters: [] },
+    { id: 'cq4', label: 'CQ4 · Inferred relationships', description: '', parameters: [] },
+    { id: 'cq6', label: 'CQ6 · Methods, goals, and tasks', description: 'The canonical RDF generator assigns towardsGoal links to executions as an application representation convention. Scientific evidence is needed to establish that a method achieves a goal.', parameters: [{ id: 'method', label: 'Method', category: 'Method' }] },
+    { id: 'cq7', label: 'CQ7 · Metrics and assessed tasks', description: 'Tasks linked to recorded metric evaluations.', parameters: [{ id: 'metric', label: 'Metric', category: 'Metric' }] },
+    { id: 'cq9', label: 'CQ9 · Contextual constraints', description: 'The canonical RDF generator automatically adds hasInfluenceOn whenever a scenario contains a context. These links express an application representation convention. Scientific influence requires independent evidence.', parameters: [{ id: 'constraint', label: 'Constraint', category: 'Constraint' }] },
+    { id: 'cq10', label: 'CQ10 · Shared constraints', description: 'Find constraints across at least two distinct use-case identifiers. Scenarios with different identifiers may represent identical scientific content.', parameters: [] },
+    { id: 'cq12', label: 'CQ12 · Compliance with contextual constraints', description: '', parameters: [] },
+  ]).sort((first, second) => Number(first.id.slice(2)) - Number(second.id.slice(2)));
+  const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional session scenario' };
 
-  let scope = $state(/** @type {Scope} */ ('draft'));
+  /** @param {import('./api.js').ExplorerSource} source */
+  const sourceStatus = (source) => statuses[source.publication_status];
+
+  let scope = $state(/** @type {Scope} */ ('session'));
+  let mode = $state(/** @type {'questions' | 'find' | 'compare'} */ ('questions'));
   let questionId = $state(/** @type {QuestionId} */ ('cq1'));
   let sharedScenarioId = $state('');
+  let selectedUploads = $derived(uploads.filter((upload) => upload.selected).map(({ selected: _selected, ...upload }) => upload));
   let parameters = $state(/** @type {Record<string, string>} */ ({}));
   let catalog = $state.raw(/** @type {Awaited<ReturnType<typeof fetchExplorerCatalog>> | null} */ (null));
   let loadingCatalog = $state(false);
   const catalogController = new AbortController();
   let pending = $state.raw(/** @type {{ query: Query, controller: AbortController } | null} */ (null));
   let result = $state.raw(/** @type {{ query: Query, outcome: Outcome } | null} */ (null));
+  let lastFocusedSourceId = '';
 
   let shared = $derived(catalog?.kind === 'ok' ? catalog.data : null);
   let sharedLabel = $derived(shared?.shared_source === 'approved' ? 'Approved scenarios'
     : shared?.shared_source === 'reference' ? 'Experimental reference scenarios' : 'Shared scenarios');
   let questions = $derived(shared?.questions.length ? shared.questions : fallbackQuestions);
   let question = $derived(questions.find(({ id }) => id === questionId) ?? questions[0]);
+  let scientificPending = $derived(question.status === 'scientific_review_pending' || pendingIds.includes(question.id));
   let selectedScenario = $derived(shared?.scenarios.find((source) => source.scenario_id === sharedScenarioId));
-  let includesDraft = $derived(scope !== 'shared');
-  let includesShared = $derived(scope !== 'draft');
+  let includesSession = $derived(scope !== 'shared');
+  let includesShared = $derived(scope !== 'session');
   let query = $derived(/** @type {Query} */ ({
     question_id: questionId, scope,
-    ...(includesDraft && draft ? { scenario: draft } : {}),
+    ...(includesSession && selectedUploads.length ? { uploads: selectedUploads } : {}),
     ...(includesShared && selectedScenario ? { shared_scenario_id: selectedScenario.scenario_id } : {}),
     ...(Object.keys(parameters).length ? { parameters: { ...parameters } } : {}),
   }));
-  let canRun = $derived((!includesDraft || draft !== null) && (!includesShared || Boolean(shared?.scenarios.length)));
+  let canRun = $derived(!scientificPending && (!includesSession || selectedUploads.length > 0)
+    && (!includesShared || Boolean(shared?.scenarios.length)));
   let outcome = $derived(result?.query === query ? result.outcome : null);
 
   $effect(() => {
     if (active && !catalog && !loadingCatalog) void loadCatalog();
+  });
+  $effect(() => {
+    if (active && focusSourceId && focusSourceId !== lastFocusedSourceId) {
+      mode = 'questions';
+      scope = 'session';
+      lastFocusedSourceId = focusSourceId;
+    }
   });
   $effect(() => {
     if (pending && pending.query !== query) {
@@ -101,18 +140,27 @@
   }
 </script>
 
+<ScenarioUploads bind:uploads />
+
+<nav class="toolbar" aria-label="Knowledge Explorer tools">
+  <button type="button" aria-pressed={mode === 'questions'} onclick={() => (mode = 'questions')}>Competency questions</button>
+  <button type="button" aria-pressed={mode === 'find'} onclick={() => (mode = 'find')}>Find concepts</button>
+  <button type="button" aria-pressed={mode === 'compare'} onclick={() => (mode = 'compare')}>Compare scenarios</button>
+</nav>
+
+<div hidden={mode !== 'questions'}>
 <section class="explorer-panel" aria-labelledby="explorer-controls-heading">
   <h2 id="explorer-controls-heading">Query scenarios</h2>
   <form onsubmit={(event) => { event.preventDefault(); void run(); }}>
     <fieldset class="source-options">
       <legend>Query source</legend>
-      <label class="inline"><input type="radio" id="explorer-source-draft" bind:group={scope} value="draft" /> My current scenario</label>
+      <label class="inline"><input type="radio" id="explorer-source-session" bind:group={scope} value="session" /> Selected session scenarios</label>
       <label class="inline"><input type="radio" id="explorer-source-approved" bind:group={scope} value="shared" /> {sharedLabel}</label>
-      <label class="inline"><input type="radio" id="explorer-source-combined" bind:group={scope} value="combined" /> My current scenario and {sharedLabel.toLowerCase()}</label>
+      <label class="inline"><input type="radio" id="explorer-source-combined" bind:group={scope} value="combined" /> Selected session scenarios and {sharedLabel.toLowerCase()}</label>
     </fieldset>
 
-    {#if includesDraft}
-      <p class="hint">{draft ? `${draft.use_case.name || 'Untitled scenario'} · Provisional draft` : 'Start or open a structured scenario in the Scenario Builder to query your draft.'}</p>
+    {#if includesSession}
+      <p class="hint">{selectedUploads.length ? `${selectedUploads.length} selected provisional session scenarios will participate.` : 'Add a validated scenario from the Builder or upload JSON files, then select scenarios to query.'}</p>
     {/if}
 
     {#each shared?.warnings ?? [] as warning}
@@ -145,10 +193,12 @@
       <label for="explorer-question">Competency question</label>
       <select id="explorer-question" value={questionId} onchange={chooseQuestion}>
         {#each questions as option (option.id)}
-          <option value={option.id}>{option.label}</option>
+          <option value={option.id}>{option.label}{option.status === 'scientific_review_pending' || pendingIds.includes(option.id) ? ' · Scientific review pending' : ''}</option>
         {/each}
       </select>
+      <p>{question.question ?? originalQuestions[question.id]}</p>
       {#if question.description}<p class="hint">{question.description}</p>{/if}
+      {#if scientificPending}<p role="status"><strong>Scientific review pending</strong> — {question.pending_reason ?? pendingReason}</p>{/if}
     </div>
 
     {#each question.parameters as parameter (parameter.id)}
@@ -179,18 +229,18 @@
         {answer.rows.length ? `${answer.rows.length} ${answer.rows.length === 1 ? 'result' : 'results'}.`
           : questionId === 'cq5' ? 'No matching execution–interaction links were found. CQ5 requires recorded links between interactions and executions of goal-required tasks. Check the selected filters and recorded relationships.'
           : 'No evidence was found for this question in the selected scenarios.'}
-        {#if answer.truncated}The result limit was reached. Select a scenario or a filter to narrow the query.{/if}
+        {#if answer.truncated}The result limit was reached. Only the first 200 rows are shown, so some selected scenarios may not appear. Select a scenario or a filter to narrow the query.{/if}
       </p>
       {#each answer.notices ?? [] as notice}
         {@const source = answer.sources.find(({ id }) => id === notice.source_id)}
-        <p class="hint" role="status">{#if source}<strong>{source.name}</strong> · {statuses[source.publication_status]} · {/if}{notice.message}</p>
+        <p class="hint" role="status">{#if source}<strong>{source.name}</strong> · {sourceStatus(source)} · {/if}{notice.message}</p>
       {/each}
       {#if answer.sources.length}
         <details open={answer.rows.length === 0}>
           <summary>Queried scenarios ({answer.sources.length})</summary>
           <ul class="sources">
             {#each answer.sources as source (source.id)}
-              <li><strong>{source.name}</strong> · {statuses[source.publication_status]} <code>{source.graph_iri}</code></li>
+              <li><strong>{source.name}</strong> · {sourceStatus(source)} <code>{source.graph_iri}</code></li>
             {/each}
           </ul>
         </details>
@@ -210,7 +260,7 @@
               {#each answer.rows as row}
                 {@const source = answer.sources.find(({ id }) => id === row.source_id)}
                 <tr>
-                  <td><strong>{source?.name}</strong><div class="hint">{source ? statuses[source.publication_status] : ''}</div></td>
+                  <td><strong>{source?.name}</strong><div class="hint">{source ? sourceStatus(source) : ''}</div></td>
                   {#each answer.columns as column (column.id)}
                     <td>
                       {#if row.values[column.id] == null}<span class="hint">Not recorded</span>
@@ -237,12 +287,18 @@
       {/if}
     {:else if outcome}
       <p class="error" role="alert">{outcome.kind === 'rejected' ? outcome.error.message : 'The query could not be completed. Try again.'}</p>
-      {#if outcome.kind === 'rejected' && outcome.status === 422 && includesDraft}
-        <p class="hint">Use technical validation in the Scenario Builder to check the current draft.</p>
+      {#if outcome.kind === 'rejected' && outcome.status === 422 && includesSession}
+        <p class="hint">Check the selected session scenarios and their technical validation details.</p>
       {/if}
     {/if}
   </section>
 {/if}
+</div>
+
+<div hidden={mode === 'questions'}>
+  <CrossScenarioExplorer active={active && mode !== 'questions'} compare={mode === 'compare'}
+    {uploads} {shared} loading={loadingCatalog} catalogFailed={catalog !== null && catalog.kind !== 'ok'} onretry={loadCatalog} />
+</div>
 
 <style>
   .explorer-panel {

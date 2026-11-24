@@ -35,6 +35,8 @@
   let emptyEditor = $state(JSON.stringify(initialScenario));
   let loadedCandidate = $state(false);
   let view = $state(/** @type {'builder' | 'explorer'} */ ('builder'));
+  let sessionScenarios = $state(/** @type {import('./lib/api.js').SessionUpload[]} */ ([]));
+  let lastAddedSessionId = $state('');
   let mode = $state(/** @type {'describe' | 'structured'} */ ('describe'));
   let wizardKey = $state(0);
   let answers = $state(/** @type {import('./lib/interpretation.js').Answers} */ ({}));
@@ -124,6 +126,20 @@
   function revealErrors() {
     showErrors = true;
     revealRequest += 1;
+  }
+
+  /** @param {object} validated */
+  function addToExplorer(validated) {
+    const snapshot = JSON.parse(JSON.stringify(validated));
+    const id = 'session-' + crypto.randomUUID();
+    sessionScenarios = [...sessionScenarios, {
+      id,
+      file_name: `Builder · ${snapshot.use_case.name}`,
+      scenario: snapshot,
+      selected: true,
+    }];
+    lastAddedSessionId = id;
+    view = 'explorer';
   }
 
   /** @param {import('./lib/api.js').InputIssue[]} errors @param {object} target */
@@ -620,7 +636,7 @@
 
   <div class="sidebar">
     <aside aria-label="Scenario validation">
-      <RdfPreview target={validationTarget} issueCount={issues.length} onIncomplete={revealErrors} onValidationIssues={revealBackendErrors} />
+      <RdfPreview target={validationTarget} issueCount={issues.length} onIncomplete={revealErrors} onValidationIssues={revealBackendErrors} onAddToExplorer={addToExplorer} />
       {#if visibleIssues.length}
         <ul class="issues" aria-label="Fields needing attention">
           {#each visibleIssues as issue, i (i)}
@@ -655,5 +671,5 @@
 </main>
 
 <main id="explorer-view" class="explorer-view" hidden={view !== 'explorer'}>
-  <KnowledgeExplorer active={view === 'explorer'} draft={candidate} />
+  <KnowledgeExplorer active={view === 'explorer'} bind:uploads={sessionScenarios} focusSourceId={lastAddedSessionId} />
 </main>

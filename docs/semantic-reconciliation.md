@@ -179,7 +179,7 @@ Automated tests compare generated scenarios against the original research RDF an
 
 The research material defines twelve Competency Questions (CQs). They describe what researchers should be able to investigate using the knowledge graph.
 
-The Knowledge Explorer adapts CQ1 (team composition), CQ2 (recorded capabilities and task requirements), CQ5 (execution-linked interactions), CQ8 (execution-linked evaluations and experiments), and CQ11 (contextual phenomena) from the research notebook. The Explorer follows recorded RDF links and preserves each scenario as a separate source.
+The Knowledge Explorer lists all twelve original CQs and adapts nine as executable queries. It follows recorded RDF links and preserves each scenario as a separate source.
 
 CQ2 derives coverage when members of the same team collectively supply every recorded `requiresCapability` requirement, matching exact HINT capability concepts. Rows identify the contributing members and both the requirement and owned capability records. This covers S1 data collection and S7 multimodal input interpretation without assigning task execution. The ontology declares `requiresCapability` as the inverse of `allowsTask`, although their descriptions express necessity and enablement respectively. Its `isEligibleForTask` chain uses a single `hasCapability`/`allowsTask` path. Ilaria needs to confirm whether all such links express jointly necessary requirements and whether this differs from intended eligibility. The query uses the recorded requirements as a conjunction pending that decision.
 
@@ -187,18 +187,20 @@ CQ8 includes evaluated executions linked to the goal by either `towardsGoal` or 
 
 CQ5 requires recorded execution–interaction links for goal-required tasks. S2 and S3 have interactions without execution links, so their empty CQ5 answers include a notice about those missing links. Researcher review is needed to establish the relationships.
 
+CQ6 follows a method's recorded executions through `realizesTask` and `towardsGoal`. CQ7 follows both evaluation/`hasMetricConcept` and experiment/`hasMetricTested` records through evaluations and executions to tasks, retaining metric owners and predicates. These associations provide no measurement values or evidence of method effectiveness.
+
+CQ9 retains contextual constraint associations through the team's context or recorded context influence, and separately reports whether the context's `hasInfluenceOn` link to that team is present. The generator already emits that influence link as a convention. CQ10 matches exact team or contextual constraint concepts across at least two distinct use-case IRIs within the selected sources. Its associated agents are recorded team members. This does not establish an individual compliance or violation assertion.
+
 The remaining questions have different requirements:
 
 | Questions | Current situation |
 |---|---|
-| CQ3 | Concerns possible team compositions beyond the recorded capability matches reported by CQ2. |
-| CQ4 | Depends on inferred relationships that the current GraphDB configuration does not provide. |
-| CQ6–7 | Concern additional method, experiment, and metric relationships beyond CQ5 and CQ8. |
-| CQ9–10 | Concern constraints and similarities between scenarios and require further adaptation. |
-| CQ12 | Concerns compliance with contextual constraints, which the current model does not explicitly represent. |
+| CQ3 | Scientific review pending for candidate compositions, capability requirements, and eligibility. |
+| CQ4 | Scientific review pending for reliable inference of eligibility, assignment, and influence. |
+| CQ12 | Scientific review pending for behaviour, conditions, contextual compliance, and violations. |
 
 An independent offline comparison also found different results for CQ3, CQ7, CQ9, and CQ10 between the original research data and the reconstructed scenarios. These differences relate to representation choices already documented above.
 
 This comparison does not establish which results are scientifically correct.
 
-Further investigation of the competency questions belongs to [Issue #15](https://github.com/CharalamposGiannakis/hi-project/issues/15).
+The catalog and multi-scenario extension are tracked in [Issue #42](https://github.com/CharalamposGiannakis/hi-project/issues/42).

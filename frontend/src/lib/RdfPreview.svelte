@@ -7,12 +7,13 @@
    *   issueCount: number,
    *   onIncomplete: () => void,
    *   onValidationIssues?: (issues: import('./api.js').InputIssue[], target: object) => void,
+   *   onAddToExplorer?: (scenario: object) => void,
    *   fetch?: typeof globalThis.fetch,
    * }}
    */
-  let { target, issueCount, onIncomplete, onValidationIssues, fetch = undefined } = $props();
+  let { target, issueCount, onIncomplete, onValidationIssues, onAddToExplorer, fetch = undefined } = $props();
 
-  /** @typedef {{ target: object, outcome: import('./api.js').PreviewResult | { kind: 'incomplete' } }} Result */
+  /** @typedef {{ target: object, snapshot: object | null, outcome: import('./api.js').PreviewResult | { kind: 'incomplete' } }} Result */
   let result = $state.raw(/** @type {Result | null} */ (null));
   let loading = $state(false);
   let copied = $state('');
@@ -30,18 +31,25 @@
     const submitted = target;
     onValidationIssues?.([], submitted);
     if (issueCount > 0) {
-      result = { target: submitted, outcome: { kind: 'incomplete' } };
+      result = { target: submitted, snapshot: null, outcome: { kind: 'incomplete' } };
       onIncomplete();
       return;
     }
     result = null;
     loading = true;
-    const outcome = await requestPreview(submitted.contract, fetch ? { fetch } : {});
-    result = { target: submitted, outcome };
+    const snapshot = JSON.parse(JSON.stringify(submitted.contract));
+    const outcome = await requestPreview(snapshot, fetch ? { fetch } : {});
+    result = { target: submitted, snapshot, outcome };
     if (submitted === target && outcome.kind === 'rejected' && outcome.status === 422) {
       onValidationIssues?.(outcome.error.issues, submitted);
     }
     loading = false;
+  }
+
+  function addToExplorer() {
+    if (!loading && current?.kind === 'ok' && result?.snapshot) {
+      onAddToExplorer?.(JSON.parse(JSON.stringify(result.snapshot)));
+    }
   }
 
   /** @param {string} rdf */
@@ -83,6 +91,11 @@
     {:else if current?.kind === 'ok'}
       {@const preview = current.preview}
       <p class="hint">Conforms to the HI SHACL shapes. Generated {preview.triple_count} {preview.triple_count === 1 ? 'triple' : 'triples'}.</p>
+      {#if onAddToExplorer && !loading}
+        <div class="toolbar">
+          <button type="button" onclick={addToExplorer}>Add to Knowledge Explorer →</button>
+        </div>
+      {/if}
       <details>
         <summary>RDF preview</summary>
         <div class="toolbar">

@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
+import s2 from '../../examples/s2.json';
 import s5 from '../../examples/s5.json';
 import s7 from '../../examples/s7.json';
 import { requestScenarioJson } from './lib/json-viewer-channel.js';
@@ -714,6 +715,114 @@ describe('Knowledge Explorer', () => {
     ],
   };
 
+  const preview = { rdf: '', triple_count: 1, validation: { conforms: true, report: 'Conforms' } };
+  async function validateAndAdd() {
+    click('Validate Scenario');
+    await until(() => expect(validationStatus()).toBe('Valid'));
+    click('Add to Knowledge Explorer →');
+    expect(document.getElementById('builder-view')?.hidden).toBe(true);
+    expect(explorer()?.hidden).toBe(false);
+  }
+
+  it('accumulates validated S1 and S2 snapshots and queries them together independently of later edits', async () => {
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? catalog : url.endsWith('/scenarios/preview') ? preview
+        : { sources: [], columns: [], rows: [], truncated: false },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    vi.stubGlobal('confirm', () => true);
+    render();
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Add to Knowledge Explorer →')).toBe(false);
+    click('Load S1 example');
+    const first = candidate();
+    await validateAndAdd();
+    await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
+    expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(1);
+    expect(explorer()?.textContent).toContain('Builder · Personal assistant');
+    document.getElementById('explorer-source-approved')?.click();
+    flushSync();
+    click('Compare scenarios');
+
+    click('Scenario Builder');
+    enter(useCaseName(), 'Unvalidated S1 edit');
+    expect(validationStatus()).toBe('Not validated');
+    expect([...document.querySelectorAll('button')].some((button) => button.textContent === 'Add to Knowledge Explorer →')).toBe(false);
+    await importJson(s2);
+    const second = candidate();
+    await validateAndAdd();
+    expect(/** @type {HTMLInputElement} */ (document.getElementById('explorer-source-session')).checked).toBe(true);
+    expect(document.getElementById('explorer-question')?.closest('[hidden]')).toBeNull();
+    expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(2);
+    expect([...(explorer()?.querySelectorAll('input[aria-label^="Include "]') ?? [])]
+      .every((input) => /** @type {HTMLInputElement} */ (input).checked)).toBe(true);
+    click('Run query');
+    await until(() => expect(String(fetch.mock.calls.at(-1)?.[0])).toContain('/explorer/query'));
+    const submitted = JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body));
+    expect(submitted.scope).toBe('session');
+    expect(submitted.uploads.map((/** @type {any} */ entry) => entry.scenario)).toEqual([first, second]);
+    expect(new Set(submitted.uploads.map((/** @type {any} */ entry) => entry.id)).size).toBe(2);
+    expect(submitted).not.toHaveProperty('scenario');
+
+    click('Scenario Builder');
+    enter(useCaseName(), 'Modified S2 after adding');
+    expect(validationStatus()).toBe('Not validated');
+    click('Knowledge Explorer');
+    click('Run query');
+    await until(() => expect(String(fetch.mock.calls.at(-1)?.[0])).toContain('/explorer/query'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body)).uploads).toEqual(submitted.uploads);
+    click('Scenario Builder');
+    expect(useCaseName().value).toBe('Modified S2 after adding');
+  });
+
+  it('retains distinct source identities when the same validated scenario is added twice', async () => {
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? catalog : url.endsWith('/scenarios/preview') ? preview
+        : { sources: [], columns: [], rows: [], truncated: false },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    click('Load S1 example');
+    await validateAndAdd();
+    click('Scenario Builder');
+    click('Add to Knowledge Explorer →');
+    await until(() => expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(2));
+    click('Run query');
+    await until(() => expect(String(fetch.mock.calls.at(-1)?.[0])).toContain('/explorer/query'));
+    const payload = JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body));
+    expect(payload.uploads).toHaveLength(2);
+    expect(payload.uploads[0].scenario.id).toBe(payload.uploads[1].scenario.id);
+    expect(payload.uploads[0].id).not.toBe(payload.uploads[1].id);
+  });
+
+  it('preserves session uploads and the edited Builder when navigating between workspaces', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (/** @type {string} */ url) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? catalog
+        : { rdf: '', triple_count: 1, validation: { conforms: true, report: 'Conforms' } },
+    ))));
+    render();
+    click('Load S1 example');
+    useCaseName().value = 'Researcher edited scenario';
+    useCaseName().dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    const before = draft();
+    click('Knowledge Explorer');
+    await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
+    const input = /** @type {HTMLInputElement} */ (document.getElementById('explorer-upload-files'));
+    Object.defineProperty(input, 'files', { value: [
+      { name: 'first.json', text: async () => JSON.stringify(s5) },
+      { name: 'second.json', text: async () => JSON.stringify(s7) },
+    ], configurable: true });
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await until(() => expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(2));
+    click('Scenario Builder');
+    expect(useCaseName().value).toBe('Researcher edited scenario');
+    expect(draft()).toEqual(before);
+    click('Knowledge Explorer');
+    expect(explorer()?.querySelectorAll('input[aria-label^="Include "]')).toHaveLength(2);
+    expect(explorer()?.textContent).toContain('first.json');
+    expect(explorer()?.textContent).toContain('second.json');
+  });
+
   it.each([false, true])('explains missing CQ5 links with source provenance when other results exist (%s)', async (hasRows) => {
     const notice = {
       code: 'interaction_execution_links_missing', source_id: reference.id,
@@ -755,9 +864,56 @@ describe('Knowledge Explorer', () => {
     expect(explorer()?.textContent).toContain('Experimental reference scenarios');
   });
 
+  it('opens concept search and session comparison from the Explorer while preserving Builder edits', async () => {
+    const shared = { ...reference, id: 'reference:s5', scenario_id: 's5', name: 'Recorded S5 diagnosis' };
+    const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify(
+      url.endsWith('/explorer/catalog') ? { ...catalog, scenarios: [shared] } : url.endsWith('/scenarios/preview') ? preview : {
+        sources: [shared], columns: [{ id: 'concept', label: 'HINT concept' }, { id: 'overlap', label: 'Vocabulary overlap' }],
+        rows: [{ source_id: shared.id, values: { concept: 'Diagnosis Accuracy Metric', overlap: 'Recorded in both' },
+          evidence: [{ label: 'Metric', iri: 'https://w3id.org/hi-thesaurus/DiagnosisAccuracyMetric' }] }],
+        truncated: false,
+      },
+    )));
+    vi.stubGlobal('fetch', fetch);
+    render();
+    await importJson(s5);
+    enter(useCaseName(), 'My diagnosis comparison draft');
+    const edited = draft();
+    await validateAndAdd();
+    await until(() => expect(explorer()?.textContent).toContain(shared.name));
+    click('Find concepts');
+    selectValue('concept-value', 'KnowledgeGraphQueryingCapability');
+    document.getElementById('concept-run')?.click();
+    flushSync();
+    await until(() => expect(explorer()?.textContent).toContain('1 recorded concept relationships.'));
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({
+      scope: 'shared', compare: false, category: 'Capability', concept: 'KnowledgeGraphQueryingCapability',
+    });
+
+    click('Compare scenarios');
+    selectValue('concept-scenario', 's5');
+    document.getElementById('concept-run')?.click();
+    flushSync();
+    await until(() => expect(document.getElementById('concept-results-heading')).not.toBeNull());
+    await until(() => expect(fetch).toHaveBeenCalledTimes(4));
+    const comparison = JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body));
+    expect(comparison).toMatchObject({
+      scope: 'combined', compare: true, category: null, shared_scenario_id: 's5',
+      uploads: [{ scenario: edited.scenario }],
+    });
+    expect(comparison.comparison_source_ids).toEqual(['upload:' + comparison.uploads[0].id, shared.id]);
+    expect(comparison).not.toHaveProperty('scenario');
+    click('Competency questions');
+    expect(document.getElementById('explorer-question')?.closest('[hidden]')).toBeNull();
+    click('Scenario Builder');
+    expect(useCaseName().value).toBe('My diagnosis comparison draft');
+    expect(draft()).toEqual(edited);
+  });
+
   it('combines explicitly selected sources, renders row evidence, and preserves Builder edits', async () => {
     const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ request) => {
       if (url.endsWith('/explorer/catalog')) return new Response(JSON.stringify(catalog));
+      if (url.endsWith('/scenarios/preview')) return new Response(JSON.stringify(preview));
       const payload = JSON.parse(String(request.body));
       return new Response(JSON.stringify(payload.question_id === 'cq11' ? {
         sources: [reference], columns: [{ id: 'context', label: 'Context' }], rows: [], truncated: false,
@@ -774,7 +930,7 @@ describe('Knowledge Explorer', () => {
     const edited = draft();
     expect(fetch).not.toHaveBeenCalled();
 
-    click('Knowledge Explorer');
+    await validateAndAdd();
     expect(document.getElementById('builder-view')?.hidden).toBe(true);
     expect(explorer()?.hidden).toBe(false);
     await until(() => expect(explorer()?.textContent).toContain('Experimental reference scenarios'));
@@ -789,18 +945,19 @@ describe('Knowledge Explorer', () => {
     expect(fetch).toHaveBeenLastCalledWith(expect.stringContaining('/explorer/query'), expect.objectContaining({
       method: 'POST', body: expect.any(String),
     }));
-    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({
-      question_id: 'cq2', scope: 'combined', scenario: edited.scenario, shared_scenario_id: 's7', parameters: { capability: 'SensingCapability' },
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toMatchObject({
+      question_id: 'cq2', scope: 'combined', uploads: [{ scenario: edited.scenario }], shared_scenario_id: 's7', parameters: { capability: 'SensingCapability' },
     });
     const rows = explorer()?.querySelectorAll('tbody tr');
     expect(rows).toHaveLength(2);
-    expect(rows?.[0].textContent).toContain('Provisional draft');
+    expect(rows?.[0].textContent).toContain('Provisional session scenario');
     expect(rows?.[0].textContent).toContain('Not recorded');
     expect(rows?.[1].textContent).toContain('Experimental reference');
     rows?.[0]?.querySelector('summary')?.click();
     expect(rows?.[0]?.querySelector('details')?.open).toBe(true);
     expect(rows?.[0]?.querySelector('code')?.textContent).toBe('urn:hi:task:own');
     expect(explorer()?.textContent).toContain('The result limit was reached.');
+    expect(explorer()?.textContent).toContain('Only the first 200 rows are shown, so some selected scenarios may not appear.');
 
     document.getElementById('explorer-source-approved')?.click();
     flushSync();
@@ -814,39 +971,42 @@ describe('Knowledge Explorer', () => {
     expect(explorer()?.hidden).toBe(true);
     expect(useCaseName().value).toBe(current.name);
     expect(draft()).toEqual(edited);
-    expect(validationStatus()).toBe('Not validated');
+    expect(validationStatus()).toBe('Valid');
   });
 
-  it('keeps draft queries usable when the shared catalog fails and discards results after a draft edit', async () => {
+  it('keeps validated session queries usable when the shared catalog fails and preserves them through Builder edits', async () => {
     /** @type {(response: Response) => void} */
     let respond = () => {};
     const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _request) => {
       if (url.endsWith('/explorer/catalog')) return new Response('{}', { status: 503 });
+      if (url.endsWith('/scenarios/preview')) return new Response(JSON.stringify(preview));
       return new Promise((resolve) => { respond = resolve; });
     });
     vi.stubGlobal('fetch', fetch);
     render();
     await importJson(s7);
-    click('Knowledge Explorer');
+    await validateAndAdd();
     await until(() => expect(explorer()?.textContent).toContain('Shared scenarios could not be loaded.'));
-    expect(explorer()?.querySelectorAll('#explorer-question option')).toHaveLength(5);
+    expect(explorer()?.querySelectorAll('#explorer-question option')).toHaveLength(12);
     click('Run query');
     expect(explorer()?.textContent).toContain('Running query…');
-    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toEqual({ question_id: 'cq1', scope: 'draft', scenario: s7 });
+    expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1].body))).toMatchObject({
+      question_id: 'cq1', scope: 'session', uploads: [{ scenario: candidate() }],
+    });
 
     click('Scenario Builder');
     enter(useCaseName(), 'New museum draft');
-    expect(fetch.mock.calls.at(-1)?.[1].signal?.aborted).toBe(true);
+    expect(fetch.mock.calls.at(-1)?.[1].signal?.aborted).toBe(false);
     click('Knowledge Explorer');
-    expect(explorer()?.textContent).not.toContain('Running query…');
+    expect(explorer()?.textContent).toContain('Running query…');
     const lateResponse = new Response(JSON.stringify({
       sources: [current], columns: [{ id: 'task', label: 'Task' }], truncated: false,
-      rows: [{ source_id: current.id, values: { task: 'Stale evidence result' }, evidence: [] }],
+      rows: [{ source_id: current.id, values: { task: 'Validated snapshot evidence' }, evidence: [] }],
     }));
     const read = vi.spyOn(lateResponse, 'json');
     respond(lateResponse);
     await until(() => expect(read).toHaveBeenCalled());
-    expect(explorer()?.textContent).not.toContain('Stale evidence result');
+    await until(() => expect(explorer()?.textContent).toContain('Validated snapshot evidence'));
     expect(fetch.mock.calls.filter(([url]) => url.endsWith('/explorer/catalog'))).toHaveLength(1);
   });
 
