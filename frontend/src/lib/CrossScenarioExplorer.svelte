@@ -6,63 +6,57 @@
 
   /** @typedef {import('./api.js').ConceptExplorationRequest} Query */
   /** @typedef {import('./api.js').ExplorationCategory} Category */
-  /** @typedef {ReturnType<typeof import('./scenario.js').toContract>} Draft */
   /** @typedef {Awaited<ReturnType<typeof requestConceptExploration>>} Outcome */
-  /** @type {{ active: boolean, compare: boolean, draft: Draft | null,
+  /** @type {{ active: boolean, compare: boolean,
    * uploads?: import('./api.js').SessionUpload[],
    * shared: import('./api.js').ExplorerCatalog | null, loading: boolean, catalogFailed: boolean,
    * onretry: () => Promise<void> }} */
-  let { active, compare, draft, uploads = [], shared, loading, catalogFailed, onretry } = $props();
+  let { active, compare, uploads = [], shared, loading, catalogFailed, onretry } = $props();
 
   const categories = /** @type {{ id: Category, label: string }[]} */ ([
     { id: 'Capability', label: 'Capabilities' }, { id: 'Constraint', label: 'Constraints' },
     { id: 'Method', label: 'Methods' }, { id: 'Metric', label: 'Evaluation metrics' },
   ]);
-  const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional draft' };
+  const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional session scenario' };
   /** @param {import('./api.js').ExplorerSource} source */
-  const sourceStatus = (source) => source.publication_status === 'provisional' && source.file_name
-    ? 'Provisional upload' : statuses[source.publication_status];
+  const sourceStatus = (source) => statuses[source.publication_status];
   let scope = $state(/** @type {import('./api.js').ExplorerScope} */ ('shared'));
   let searchCategory = $state(/** @type {Category} */ ('Capability'));
   let comparisonCategory = $state(/** @type {Category | ''} */ (''));
   let concept = $state('');
   let sharedScenarioId = $state('');
-  let includeCurrent = $state(true);
   let firstSourceId = $state('');
   let selected = $derived(shared?.scenarios.find((source) => source.scenario_id === sharedScenarioId));
   let selectedUploads = $derived(uploads.filter((upload) => upload.selected).map(({ selected: _selected, ...upload }) => upload));
-  let localSources = $derived([
-    ...(draft ? [{ id: `provisional:${draft.id}`, name: `${draft.use_case.name || 'Current Builder scenario'} · Provisional draft` }] : []),
-    ...selectedUploads.map((upload) => ({ id: `upload:${upload.id}`, name: `${upload.file_name} · Provisional upload` })),
-  ]);
+  let localSources = $derived(selectedUploads.map((upload) => ({
+    id: `upload:${upload.id}`, name: `${upload.file_name} · Provisional session scenario`,
+  })));
   let firstSource = $derived(localSources.find((source) => source.id === (firstSourceId || localSources[0]?.id)));
   let secondLocal = $derived(localSources.find((source) => source.id === sharedScenarioId));
   let comparisonIds = $derived([firstSource?.id, secondLocal?.id ?? selected?.id]);
   let comparisonUploads = $derived(selectedUploads.filter((upload) => comparisonIds.includes(`upload:${upload.id}`)));
-  let comparisonDraft = $derived(Boolean(draft && comparisonIds.includes(`provisional:${draft.id}`)));
   let queryUploads = $derived(compare ? comparisonUploads : scope !== 'shared' ? selectedUploads : []);
   let pending = $state.raw(/** @type {{ query: Query, controller: AbortController } | null} */ (null));
   let result = $state.raw(/** @type {{ query: Query, outcome: Outcome } | null} */ (null));
 
   let sharedLabel = $derived(shared?.shared_source === 'approved' ? 'Approved scenarios'
     : shared?.shared_source === 'reference' ? 'Experimental reference scenarios' : 'Shared scenarios');
-  let includesDraft = $derived(compare ? comparisonDraft : scope !== 'shared');
-  let includesShared = $derived(compare ? Boolean(selected) : scope !== 'draft');
+  let includesSession = $derived(compare || scope !== 'shared');
+  let includesShared = $derived(compare ? Boolean(selected) : scope !== 'session');
   let category = $derived(compare ? comparisonCategory : searchCategory);
   let query = $derived(/** @type {Query} */ ({
-    scope: compare ? (selected ? 'combined' : 'draft') : scope,
+    scope: compare ? (selected ? 'combined' : 'session') : scope,
     compare,
     category: category || null,
-    ...(includesDraft && draft && (compare || includeCurrent) ? { scenario: draft } : {}),
     ...(queryUploads.length ? { uploads: queryUploads } : {}),
     ...(includesShared && selected ? { shared_scenario_id: selected.scenario_id } : {}),
     ...(!compare && concept ? { concept } : {}),
-    ...(compare && comparisonUploads.length && firstSource && (secondLocal || selected)
+    ...(compare && firstSource && (secondLocal || selected)
       ? { comparison_source_ids: /** @type {[string, string]} */ ([firstSource.id, secondLocal?.id ?? selected?.id]) } : {}),
   }));
   let canRun = $derived(compare
     ? Boolean(firstSource && (secondLocal || selected) && firstSource.id !== (secondLocal?.id ?? selected?.id))
-    : (scope === 'shared' || (includeCurrent && draft !== null) || selectedUploads.length > 0)
+    : (scope === 'shared' || selectedUploads.length > 0)
       && (!includesShared || Boolean(shared?.scenarios.length)));
   let outcome = $derived(result?.query === query ? result.outcome : null);
 
@@ -107,8 +101,8 @@
         <label for="concept-scope">Query source</label>
         <select id="concept-scope" bind:value={scope}>
           <option value="shared">{sharedLabel}</option>
-          <option value="draft">My current scenario and selected uploads</option>
-          <option value="combined">My current scenario, selected uploads, and {sharedLabel.toLowerCase()}</option>
+          <option value="session">Selected session scenarios</option>
+          <option value="combined">Selected session scenarios and {sharedLabel.toLowerCase()}</option>
         </select>
       </div>
     {/if}
@@ -120,14 +114,9 @@
           {#each localSources as source (source.id)}<option value={source.id}>{source.name}</option>{/each}
         </select>
       </div>
-      {#if !localSources.length}<p class="hint">Start or open a structured scenario in the Scenario Builder, or upload a valid scenario.</p>{/if}
+      {#if !localSources.length}<p class="hint">Add a validated scenario from the Builder or upload JSON files, then select a session scenario.</p>{/if}
     {/if}
-    {#if includesDraft}
-      {#if !compare}<label class="inline"><input id="concept-include-current" type="checkbox" bind:checked={includeCurrent} /> Include current Builder scenario</label>{/if}
-      <p class="hint">{draft ? `${draft.use_case.name || 'Untitled scenario'} · Provisional draft`
-        : 'Start or open a structured scenario in the Scenario Builder to include your draft.'}</p>
-    {/if}
-    {#if !compare && scope !== 'shared' && selectedUploads.length}<p class="hint">{selectedUploads.length} selected provisional uploads will participate.</p>{/if}
+    {#if !compare && includesSession}<p class="hint">{selectedUploads.length ? `${selectedUploads.length} selected provisional session scenarios will participate.` : 'Add a validated scenario from the Builder or upload JSON files, then select scenarios to search.'}</p>{/if}
     {#each shared?.warnings ?? [] as warning}
       <p class="hint" role="status">{warning}</p>
     {/each}
@@ -231,8 +220,8 @@
       {/if}
     {:else if outcome}
       <p class="error" role="alert">{outcome.kind === 'rejected' ? outcome.error.message : 'The query could not be completed. Try again.'}</p>
-      {#if outcome.kind === 'rejected' && outcome.status === 422 && includesDraft}
-        <p class="hint">Use technical validation in the Scenario Builder to check the current draft.</p>
+      {#if outcome.kind === 'rejected' && outcome.status === 422 && includesSession}
+        <p class="hint">Check the selected session scenarios and their technical validation details.</p>
       {/if}
     {/if}
   </section>

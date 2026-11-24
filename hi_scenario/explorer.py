@@ -17,7 +17,7 @@ from .rdf import to_rdf
 from .vocabulary import concepts
 
 
-Scope = Literal["draft", "shared", "combined"]
+Scope = Literal["session", "shared", "combined"]
 SharedSource = Literal["approved", "reference"]
 QuestionId = Literal["cq1", "cq2", "cq3", "cq4", "cq5", "cq6", "cq7", "cq8", "cq9", "cq10", "cq11", "cq12"]
 _EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
@@ -35,18 +35,16 @@ class ScopeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scope: Scope
-    scenario: Scenario | None = None
     shared_scenario_id: Identifier | None = None
     uploads: list[UploadedScenario] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def check_scope(self) -> Self:
-        local = self.scenario is not None or bool(self.uploads)
-        if self.scope == "shared" and local:
-            raise ValueError("Choose a local or combined scope to include provisional scenarios.")
-        if self.scope != "shared" and not local:
-            raise ValueError("A current scenario or an uploaded scenario is required for this scope.")
-        if self.scope == "draft" and self.shared_scenario_id is not None:
+        if self.scope == "shared" and self.uploads:
+            raise ValueError("Choose a session or combined scope to include provisional scenarios.")
+        if self.scope != "shared" and not self.uploads:
+            raise ValueError("A validated session scenario is required for this scope.")
+        if self.scope == "session" and self.shared_scenario_id is not None:
             raise ValueError("A shared scenario requires a shared or combined scope.")
         if len({upload.id for upload in self.uploads}) != len(self.uploads):
             raise ValueError("Each uploaded file must have a distinct upload identifier.")
@@ -70,10 +68,8 @@ class ConceptExplorationRequest(ScopeRequest):
             raise ValueError("Comparison sources require comparison mode.")
         if self.comparison_source_ids is not None and len(set(self.comparison_source_ids)) != 2:
             raise ValueError("Choose two distinct sources for comparison.")
-        if self.compare and self.comparison_source_ids is None and (
-            self.scope != "combined" or self.shared_scenario_id is None
-        ):
-            raise ValueError("Choose your current scenario and one shared scenario for comparison.")
+        if self.compare and self.comparison_source_ids is None:
+            raise ValueError("Choose two scenario sources for comparison.")
         if self.concept is not None and self.category is None:
             raise ValueError("Choose a category when filtering by a HINT concept.")
         return self
@@ -278,17 +274,12 @@ def _unlinked_interaction_notices(
 
 
 def _query_sources(
-    store: GraphDBStore, request: ScopeRequest, draft_graph: Graph | None,
-    uploaded_graphs: dict[str, Graph] | None = None,
+    store: GraphDBStore, request: ScopeRequest, uploaded_graphs: dict[str, Graph],
 ) -> tuple[list[ScenarioSource], dict[str, Graph], list[ExplorerNotice]]:
     nonce = uuid4().hex
     staged: dict[str, Graph] = {}
     sources = []
     notices = []
-    if request.scenario is not None and draft_graph is not None:
-        iri = f"urn:hi-app:explorer:draft:{nonce}"
-        sources.append(_local_source(request.scenario, "provisional", iri))
-        staged[iri] = draft_graph
     for upload in request.uploads:
         iri = f"urn:hi-app:explorer:upload:{nonce}:{upload.id}"
         source = _local_source(upload.scenario, "provisional", iri).model_copy(update={
@@ -296,8 +287,8 @@ def _query_sources(
             "file_name": upload.file_name,
         })
         sources.append(source)
-        staged[iri] = (uploaded_graphs or {})[upload.id]
-    if request.scope != "draft":
+        staged[iri] = uploaded_graphs[upload.id]
+    if request.scope != "session":
         kind, shared, warnings = shared_sources(store)
         notices.extend(ExplorerNotice(code="approved_graphs_unavailable", message=warning) for warning in warnings)
         if request.shared_scenario_id is not None:
@@ -314,10 +305,9 @@ def _query_sources(
 
 
 def answer(
-    store: GraphDBStore, request: ExplorerRequest, draft_graph: Graph | None,
-    uploaded_graphs: dict[str, Graph] | None = None,
+    store: GraphDBStore, request: ExplorerRequest, uploaded_graphs: dict[str, Graph],
 ) -> ExplorerResult:
-    sources, staged, notices = _query_sources(store, request, draft_graph, uploaded_graphs)
+    sources, staged, notices = _query_sources(store, request, uploaded_graphs)
     source_ids = {source.graph_iri: source.id for source in sources}
     query = build_explorer_query(request.question_id, list(source_ids), request.parameters)
     try:
@@ -335,14 +325,13 @@ def answer(
 
 
 def explore_concepts(
-    store: GraphDBStore, request: ConceptExplorationRequest, draft_graph: Graph | None,
-    uploaded_graphs: dict[str, Graph] | None = None,
+    store: GraphDBStore, request: ConceptExplorationRequest, uploaded_graphs: dict[str, Graph],
 ) -> ExplorerResult:
     if request.concept is not None and not any(
         concept["id"] == request.concept for concept in concepts(request.category)
     ):
         raise GraphDBError(422, "invalid_request", "Choose a supported HINT concept for this category.")
-    sources, staged, notices = _query_sources(store, request, draft_graph, uploaded_graphs)
+    sources, staged, notices = _query_sources(store, request, uploaded_graphs)
     if request.compare:
         if request.comparison_source_ids is not None:
             by_id = {source.id: source for source in sources}
@@ -355,8 +344,9 @@ def explore_concepts(
         staged = {source.graph_iri: staged[source.graph_iri] for source in sources if source.graph_iri in staged}
     source_ids = {source.graph_iri: source.id for source in sources}
     comparison = (sources[0].graph_iri, sources[1].graph_iri) if request.compare else None
-    comparison_labels = ("first scenario", "second scenario") if request.comparison_source_ids else ("draft", "shared")
-    query = build_concept_query(list(source_ids), request.category, request.concept, comparison, comparison_labels)
+    query = build_concept_query(
+        list(source_ids), request.category, request.concept, comparison, ("first scenario", "second scenario"),
+    )
     try:
         rows, truncated = parse_concept_rows(store.explore(query, staged), list(source_ids))
         for row in rows:

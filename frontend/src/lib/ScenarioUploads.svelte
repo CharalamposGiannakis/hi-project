@@ -67,7 +67,7 @@
 
 <section class="uploads" aria-labelledby="uploads-heading">
   <h2 id="uploads-heading">Experimental scenarios</h2>
-  <p class="hint">Upload canonical JSON or drafts exported from the Builder. Valid scenarios stay provisional in this browser session. Select the uploads to include in queries.</p>
+  <p class="hint">Add validated Builder scenarios or upload canonical JSON and draft exports. These scenarios stay provisional in this browser session. Select the scenarios to include in queries.</p>
   <label class="button file-button">Upload scenario files
     <input id="explorer-upload-files" type="file" accept=".json,application/json" multiple disabled={loading} onchange={addFiles} />
   </label>
@@ -84,7 +84,7 @@
       {#each uploads as upload (upload.id)}
         <li>
           <label class="inline"><input type="checkbox" bind:checked={upload.selected} aria-label="Include {upload.file_name}" />
-            {upload.file_name} · {scenarioSummary(upload)} · Provisional upload
+            {upload.file_name} · {scenarioSummary(upload)} · Provisional session scenario
           </label>
           <button class="link" type="button" aria-label="Remove {upload.file_name}" onclick={() => removeUpload(upload.id)}>Remove</button>
         </li>
@@ -94,8 +94,10 @@
 </section>
 
 <style>
-  .uploads { margin: 1rem 0; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
-  ul { padding-left: 1.25rem; }
-  li { margin-top: 0.5rem; }
+  .uploads { display: grid; gap: 0.75rem; margin: 1rem 0; padding: 1rem 1.25rem; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+  h2, .hint { margin: 0; }
+  .file-button { display: inline-flex; justify-self: start; align-items: center; }
+  ul { margin: 0; padding-left: 1.25rem; }
+  li { margin-top: 0.5rem; overflow-wrap: anywhere; }
   pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 </style>

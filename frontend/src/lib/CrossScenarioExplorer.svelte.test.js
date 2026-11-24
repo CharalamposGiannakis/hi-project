@@ -5,12 +5,13 @@ import CrossScenarioExplorer from './CrossScenarioExplorer.svelte';
 import { fromContract, toContract } from './scenario.js';
 import s5 from '../../../examples/s5.json';
 
-const draft = toContract(fromContract(s5));
+const snapshot = toContract(fromContract(s5));
+const session = { id: 'first', file_name: 'Builder · Diagnosis', scenario: snapshot, selected: true };
 const reference = {
   id: 'reference:s5', scenario_id: 's5', name: 'Shared medical diagnosis', description: 'A recorded comparison scenario.',
   publication_status: 'reference', graph_iri: 'urn:reference:s5',
 };
-const own = { ...reference, id: 'provisional:s5', name: 'My medical diagnosis', publication_status: 'provisional', graph_iri: 'urn:private:draft' };
+const own = { ...reference, id: 'upload:first', name: 'My medical diagnosis', publication_status: 'provisional', graph_iri: 'urn:private:session' };
 const catalog = { shared_source: 'reference', scenarios: [reference], questions: [], warnings: ['Verify approval of the configured corpus.'] };
 const columns = [
   { id: 'concept', label: 'HINT concept' }, { id: 'connection', label: 'Recorded relationship' },
@@ -21,7 +22,7 @@ const rows = [
     evidence: [{ label: 'Concept', iri: 'https://w3id.org/hi-thesaurus/KnowledgeGraphQueryingCapability' }] },
   { source_id: reference.id, values: { concept: 'Knowledge Graph Querying Capability', connection: 'Task requirement', related: 'Prepare diagnosis', overlap: 'Recorded in both' },
     evidence: [{ label: 'Task', iri: 'urn:reference:s5:task' }] },
-  { source_id: reference.id, values: { concept: 'Privacy Constraint', connection: 'Context constraint', related: null, overlap: 'Recorded only in shared' },
+  { source_id: reference.id, values: { concept: 'Privacy Constraint', connection: 'Context constraint', related: null, overlap: 'Recorded only in second scenario' },
     evidence: [{ label: 'Context', iri: 'urn:reference:s5:context' }] },
 ];
 
@@ -37,7 +38,7 @@ afterEach(async () => {
 /** @param {Partial<import('svelte').ComponentProps<typeof CrossScenarioExplorer>>} [overrides] */
 function render(overrides = {}) {
   const props = $state({
-    active: true, compare: false, draft, shared: /** @type {import('./api.js').ExplorerCatalog} */ (catalog),
+    active: true, compare: false, uploads: [session], shared: /** @type {import('./api.js').ExplorerCatalog} */ (catalog),
     loading: false, catalogFailed: false, onretry: async () => {}, ...overrides,
   });
   component = mount(CrossScenarioExplorer, { target: document.body, props });
@@ -108,21 +109,23 @@ describe('cross-scenario concept exploration', () => {
     run();
     await until(() => expect(document.querySelectorAll('tbody tr')).toHaveLength(3));
     expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
-      scope: 'combined', compare: true, category: null, scenario: draft, shared_scenario_id: 's5',
+      scope: 'combined', compare: true, category: null, shared_scenario_id: 's5',
+      uploads: [{ id: session.id, file_name: session.file_name, scenario: snapshot }],
+      comparison_source_ids: ['upload:first', 'reference:s5'],
     });
     const renderedRows = [...document.querySelectorAll('tbody tr')];
     expect(renderedRows[0].textContent).toContain('My medical diagnosis');
-    expect(renderedRows[0].textContent).toContain('Provisional draft');
+    expect(renderedRows[0].textContent).toContain('Provisional session scenario');
     expect(renderedRows[1].textContent).toContain('Shared medical diagnosis');
     expect(renderedRows[1].textContent).toContain('Experimental reference');
     expect(renderedRows[0].textContent).toContain('Recorded in both');
-    expect(renderedRows[2].textContent).toContain('Recorded only in shared');
+    expect(renderedRows[2].textContent).toContain('Recorded only in second scenario');
     expect(document.body.textContent).toContain('recorded vocabulary overlap');
     expect(document.body.textContent).toContain('The result limit was reached');
     expect(document.body.textContent).toContain('Only the first 200 rows are shown, so some selected scenarios may not appear.');
   });
 
-  it('cancels a pending comparison when its draft changes and discards the late result', async () => {
+  it('cancels a pending comparison when a selected session is removed and discards the late result', async () => {
     /** @type {(response: Response) => void} */
     let respond = () => {};
     const fetch = vi.fn((_url, _request) => new Promise((resolve) => { respond = resolve; }));
@@ -131,7 +134,7 @@ describe('cross-scenario concept exploration', () => {
     select('concept-scenario', 's5');
     run();
     expect(document.body.textContent).toContain('Comparing scenarios…');
-    props.draft = { ...draft, use_case: { ...draft.use_case, name: 'Changed draft' } };
+    props.uploads = [];
     flushSync();
     expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
     respond(new Response(JSON.stringify({ sources: [own, reference], columns, rows, truncated: false })));
@@ -139,46 +142,45 @@ describe('cross-scenario concept exploration', () => {
     expect(document.querySelector('tbody')).toBeNull();
   });
 
-  it('allows a draft search after a catalog failure and explains a validation rejection', async () => {
+  it('allows a session search after a catalog failure and explains a validation rejection', async () => {
     const fetch = vi.fn(async (/** @type {string} */ _url, /** @type {RequestInit} */ _request) => new Response(JSON.stringify({
-      code: 'invalid_request', message: 'The current scenario is incomplete.', issues: [], shacl_report: null,
+      code: 'invalid_request', message: 'A selected scenario is incomplete.', issues: [], shacl_report: null,
     }), { status: 422 }));
     vi.stubGlobal('fetch', fetch);
     render({ shared: null, catalogFailed: true });
     expect(button().disabled).toBe(true);
     expect(document.body.textContent).toContain('Shared scenarios could not be loaded');
-    select('concept-scope', 'draft');
+    select('concept-scope', 'session');
     run();
-    await until(() => expect(document.body.textContent).toContain('The current scenario is incomplete.'));
-    expect(document.body.textContent).toContain('Use technical validation');
+    await until(() => expect(document.body.textContent).toContain('A selected scenario is incomplete.'));
+    expect(document.body.textContent).toContain('technical validation details');
     expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
-      scope: 'draft', compare: false, category: 'Capability', scenario: draft,
+      scope: 'session', compare: false, category: 'Capability',
+      uploads: [{ id: session.id, file_name: session.file_name, scenario: snapshot }],
     });
   });
 
-  it('requires a Builder draft for comparison', () => {
-    render({ compare: true, draft: null });
+  it('requires a selected session scenario for comparison', () => {
+    render({ compare: true, uploads: [] });
     select('concept-scenario', 's5');
     expect(button().disabled).toBe(true);
-    expect(document.body.textContent).toContain('Start or open a structured scenario');
+    expect(document.body.textContent).toContain('Add a validated scenario from the Builder');
   });
 
-  it('queries two selected uploads without including the Builder draft', async () => {
+  it('queries two selected session scenarios and excludes unchecked scenarios', async () => {
     const fetch = reply({ sources: [], columns: [], rows: [], truncated: false });
     vi.stubGlobal('fetch', fetch);
     const uploads = [
-      { id: 'first', file_name: 'first.json', scenario: draft, selected: true },
-      { id: 'second', file_name: 'second.json', scenario: draft, selected: true },
-      { id: 'excluded', file_name: 'excluded.json', scenario: draft, selected: false },
+      { id: 'first', file_name: 'first.json', scenario: snapshot, selected: true },
+      { id: 'second', file_name: 'second.json', scenario: snapshot, selected: true },
+      { id: 'excluded', file_name: 'excluded.json', scenario: snapshot, selected: false },
     ];
     render({ uploads });
-    select('concept-scope', 'draft');
-    document.getElementById('concept-include-current')?.click();
-    flushSync();
+    select('concept-scope', 'session');
     run();
     await until(() => expect(document.body.textContent).toContain('No matching concepts'));
     expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
-      scope: 'draft', compare: false, category: 'Capability',
+      scope: 'session', compare: false, category: 'Capability',
       uploads: uploads.slice(0, 2).map(({ selected: _selected, ...entry }) => entry),
     });
   });
@@ -187,16 +189,16 @@ describe('cross-scenario concept exploration', () => {
     const fetch = reply({ sources: [], columns: [], rows: [], truncated: false });
     vi.stubGlobal('fetch', fetch);
     const uploads = [
-      { id: 'first', file_name: 'first.json', scenario: draft, selected: true },
-      { id: 'second', file_name: 'second.json', scenario: draft, selected: true },
+      { id: 'first', file_name: 'first.json', scenario: snapshot, selected: true },
+      { id: 'second', file_name: 'second.json', scenario: snapshot, selected: true },
     ];
-    render({ compare: true, uploads, draft: null, shared: null, catalogFailed: true });
+    render({ compare: true, uploads, shared: null, catalogFailed: true });
     select('concept-scenario', 'upload:second');
     expect(button().disabled).toBe(false);
     run();
     await until(() => expect(document.body.textContent).toContain('No matching concepts'));
     expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({
-      scope: 'draft', compare: true, category: null,
+      scope: 'session', compare: true, category: null,
       uploads: uploads.map(({ selected: _selected, ...entry }) => entry),
       comparison_source_ids: ['upload:first', 'upload:second'],
     });
@@ -204,10 +206,10 @@ describe('cross-scenario concept exploration', () => {
     expect(document.body.textContent).toContain('Second scenario');
   });
 
-  it('compares an upload with shared knowledge while leaving the Builder draft out', async () => {
+  it('compares a session scenario with shared knowledge', async () => {
     const fetch = reply({ sources: [], columns: [], rows: [], truncated: false });
     vi.stubGlobal('fetch', fetch);
-    const upload = { id: 'first', file_name: 'first.json', scenario: draft, selected: true };
+    const upload = { id: 'first', file_name: 'first.json', scenario: snapshot, selected: true };
     render({ compare: true, uploads: [upload] });
     select('comparison-first', 'upload:first');
     select('concept-scenario', 's5');

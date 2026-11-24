@@ -31,7 +31,7 @@ import { concepts } from './scenario.js';
  * @typedef {{ kind: 'ok', saved: SavedScenario } | Failure} SaveResult
  * @typedef {{ kind: 'ok', team: TeamComposition } | Failure} TeamResult
  * @typedef {'cq1' | 'cq2' | 'cq3' | 'cq4' | 'cq5' | 'cq6' | 'cq7' | 'cq8' | 'cq9' | 'cq10' | 'cq11' | 'cq12'} ExplorerQuestionId
- * @typedef {'draft' | 'shared' | 'combined'} ExplorerScope
+ * @typedef {'session' | 'shared' | 'combined'} ExplorerScope
  * @typedef {'approved' | 'reference' | 'provisional'} PublicationStatus
  * @typedef {{ id: string, scenario_id: string, name: string, description: string | null,
  *   publication_status: PublicationStatus, graph_iri: string, file_name?: string | null }} ExplorerSource
@@ -41,10 +41,10 @@ import { concepts } from './scenario.js';
  * @typedef {{ shared_source: 'approved' | 'reference', scenarios: ExplorerSource[], questions: ExplorerQuestion[], warnings?: string[] }} ExplorerCatalog
  * @typedef {{ id: string, file_name: string, scenario: object }} UploadedScenario
  * @typedef {UploadedScenario & { selected: boolean }} SessionUpload
- * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, scenario?: object, uploads?: UploadedScenario[],
+ * @typedef {{ question_id: ExplorerQuestionId, scope: ExplorerScope, uploads?: UploadedScenario[],
  *   shared_scenario_id?: string, parameters?: Record<string, string> }} ExplorerRequest
  * @typedef {'Capability' | 'Constraint' | 'Method' | 'Metric'} ExplorationCategory
- * @typedef {{ scope: ExplorerScope, scenario?: object, shared_scenario_id?: string,
+ * @typedef {{ scope: ExplorerScope, shared_scenario_id?: string,
  *   category?: ExplorationCategory | null, concept?: string | null, compare?: boolean,
  *   uploads?: UploadedScenario[], comparison_source_ids?: [string, string] }} ConceptExplorationRequest
  * @typedef {{ id: string, label: string }} ExplorerColumn

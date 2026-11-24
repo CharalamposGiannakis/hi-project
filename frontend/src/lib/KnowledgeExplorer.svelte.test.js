@@ -2,7 +2,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import KnowledgeExplorer from './KnowledgeExplorer.svelte';
-import { fromContract, toContract } from './scenario.js';
 import s1 from '../../../examples/s1.json';
 
 /** @type {Record<string, string>} */
@@ -22,7 +21,6 @@ const questions = Array.from({ length: 12 }, (_, index) => {
 });
 const source = { id: 'reference:s5', scenario_id: 's5', name: 'S5', description: null, publication_status: 'reference', graph_iri: 'urn:reference:s5' };
 const catalog = { shared_source: 'reference', scenarios: [source], questions };
-const current = toContract(fromContract(s1));
 /** @type {ReturnType<typeof mount> | undefined} */
 let component;
 afterEach(async () => {
@@ -31,9 +29,12 @@ afterEach(async () => {
   document.body.innerHTML = '';
   vi.unstubAllGlobals();
 });
-function render() {
-  component = mount(KnowledgeExplorer, { target: document.body, props: { active: true, draft: current } });
+/** @param {Partial<import('svelte').ComponentProps<typeof KnowledgeExplorer>>} [overrides] */
+function render(overrides = {}) {
+  const props = $state({ active: true, uploads: /** @type {import('./api.js').SessionUpload[]} */ ([]), focusSourceId: '', ...overrides });
+  component = mount(KnowledgeExplorer, { target: document.body, props });
   flushSync();
+  return props;
 }
 /** @param {string} id @param {string} value */
 function select(id, value) {
@@ -65,7 +66,49 @@ it('shows all twelve original-numbered questions and blocks pending questions be
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
-it('includes selected uploads with the Builder draft and shared scope and excludes unchecked files', async () => {
+it('requires selected session scenarios for local queries while shared knowledge stays available', async () => {
+  const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _options) => new Response(JSON.stringify(
+    url.endsWith('/explorer/catalog') ? catalog : { sources: [], columns: [], rows: [], truncated: false },
+  )));
+  vi.stubGlobal('fetch', fetch);
+  render();
+  await until(() => expect(document.body.textContent).toContain('Experimental reference scenarios'));
+  expect(/** @type {HTMLButtonElement} */ (document.getElementById('explorer-run')).disabled).toBe(true);
+  expect(document.body.textContent).toContain('Add a validated scenario from the Builder');
+  document.getElementById('explorer-source-approved')?.click();
+  flushSync();
+  document.getElementById('explorer-run')?.click();
+  await until(() => expect(fetch.mock.calls.some(([url]) => url.endsWith('/explorer/query'))).toBe(true));
+  expect(JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body))).toEqual({ question_id: 'cq1', scope: 'shared' });
+});
+
+it('focuses a newly added Builder snapshot without auto-querying or resetting ordinary navigation', async () => {
+  const fetch = vi.fn(async () => new Response(JSON.stringify(catalog)));
+  vi.stubGlobal('fetch', fetch);
+  const props = render({ uploads: [{ id: 'builder-one', file_name: 'Builder · S1', scenario: s1, selected: true }] });
+  await until(() => expect(document.body.textContent).toContain('Experimental reference scenarios'));
+  document.getElementById('explorer-source-approved')?.click();
+  const compare = [...document.querySelectorAll('button')].find((button) => button.textContent === 'Compare scenarios');
+  compare?.click();
+  flushSync();
+  expect(compare?.getAttribute('aria-pressed')).toBe('true');
+  props.active = false;
+  flushSync();
+  props.focusSourceId = 'builder-one';
+  props.active = true;
+  flushSync();
+  expect(compare?.getAttribute('aria-pressed')).toBe('false');
+  expect(/** @type {HTMLInputElement} */ (document.getElementById('explorer-source-session')).checked).toBe(true);
+  expect(fetch).toHaveBeenCalledTimes(1);
+  document.getElementById('explorer-source-approved')?.click();
+  props.active = false;
+  flushSync();
+  props.active = true;
+  flushSync();
+  expect(/** @type {HTMLInputElement} */ (document.getElementById('explorer-source-approved')).checked).toBe(true);
+});
+
+it('queries selected session scenarios with shared knowledge and excludes unchecked scenarios', async () => {
   const fetch = vi.fn(async (/** @type {string} */ url, /** @type {RequestInit} */ _options) => new Response(JSON.stringify(
     url.endsWith('/explorer/catalog') ? catalog
       : url.endsWith('/scenarios/preview') ? { rdf: '', triple_count: 1, validation: { conforms: true, report: 'Conforms' } }
@@ -86,7 +129,7 @@ it('includes selected uploads with the Builder draft and shared scope and exclud
   document.getElementById('explorer-run')?.click();
   await until(() => expect(fetch.mock.calls.some(([url]) => url.endsWith('/explorer/query'))).toBe(true));
   const sent = JSON.parse(String(fetch.mock.calls.find(([url]) => url.endsWith('/explorer/query'))?.[1]?.body));
-  expect(sent.scenario).toEqual(current);
+  expect(sent).not.toHaveProperty('scenario');
   expect(sent.scope).toBe('combined');
   expect(sent.uploads).toHaveLength(2);
   expect(sent.uploads[0].id).not.toBe(sent.uploads[1].id);
@@ -98,4 +141,6 @@ it('includes selected uploads with the Builder draft and shared scope and exclud
   const latest = JSON.parse(String(fetch.mock.calls.at(-1)?.[1]?.body));
   expect(latest.uploads).toHaveLength(1);
   expect(latest.uploads[0].file_name).toBe('second.json');
+  expect(document.getElementById('explorer-include-current')).toBeNull();
+  expect(document.body.textContent).not.toContain('Include current Builder scenario');
 });

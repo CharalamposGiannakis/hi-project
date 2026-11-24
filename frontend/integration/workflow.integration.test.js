@@ -114,11 +114,12 @@ function scenario(id, change) {
 }
 
 describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', () => {
-  it('queries two uploaded scenarios with the Builder draft and shared knowledge and compares uploads', async () => {
+  it('queries validated session snapshots with shared knowledge and compares session scenarios', async () => {
     const options = { baseUrl: api };
     const uploads = [
       { id: 'first-file', file_name: 'first.json', scenario: scenario('s1', (data) => { data.agents[0].name = 'First uploaded member'; }) },
       { id: 'second-file', file_name: 'second.json', scenario: scenario('s1', (data) => { data.agents[0].name = 'Second uploaded member'; }) },
+      { id: 'builder-snapshot', file_name: 'Builder · S1', scenario: scenario('s1', (data) => { data.agents[0].name = 'Validated Builder member'; }) },
     ];
     for (const upload of uploads) {
       expect(await requestPreview(upload.scenario, options)).toMatchObject({ kind: 'ok' });
@@ -132,15 +133,14 @@ describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', 
 
     const answer = await requestExplorerQuery({
       question_id: 'cq1', scope: 'combined', uploads, shared_scenario_id: 's1',
-      scenario: scenario('s1', (data) => { data.agents[0].name = 'Current Builder member'; }),
     }, options);
     if (answer.kind !== 'ok') throw new Error(JSON.stringify(answer));
     expect(new Set(answer.data.sources.map((source) => source.id)))
-      .toEqual(new Set(['upload:first-file', 'upload:second-file', 'provisional:s1', 'reference:s1']));
+      .toEqual(new Set(['upload:first-file', 'upload:second-file', 'upload:builder-snapshot', 'reference:s1']));
     expect(new Set(answer.data.sources.map((source) => source.graph_iri)).size).toBe(4);
     for (const [member, sourceId] of [
       ['First uploaded member', 'upload:first-file'], ['Second uploaded member', 'upload:second-file'],
-      ['Current Builder member', 'provisional:s1'], ['Human user', 'reference:s1'],
+      ['Validated Builder member', 'upload:builder-snapshot'], ['Human user', 'reference:s1'],
     ]) {
       expect(answer.data.rows).toEqual(expect.arrayContaining([
         expect.objectContaining({ source_id: sourceId, values: expect.objectContaining({ member }) }),
@@ -148,10 +148,10 @@ describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', 
     }
 
     const searched = await requestConceptExploration({
-      scope: 'draft', uploads, category: 'Constraint', concept: 'PrivacyConstraint',
+      scope: 'session', uploads, category: 'Constraint', concept: 'PrivacyConstraint',
     }, options);
     if (searched.kind !== 'ok') throw new Error(JSON.stringify(searched));
-    expect(new Set(searched.data.rows.map((row) => row.source_id))).toEqual(new Set(['upload:first-file', 'upload:second-file']));
+    expect(new Set(searched.data.rows.map((row) => row.source_id))).toEqual(new Set(['upload:first-file', 'upload:second-file', 'upload:builder-snapshot']));
     const comparison = await requestConceptExploration({
       scope: 'combined', uploads: [uploads[0]], shared_scenario_id: 's5', compare: true,
       comparison_source_ids: ['upload:first-file', 'reference:s5'],
@@ -168,7 +168,7 @@ describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', 
     }
   }, 30_000);
 
-  it('finds shared concepts and compares a current scenario with S5 without publishing', async () => {
+  it('finds shared concepts and compares an added snapshot with S5 without publishing', async () => {
     const options = { baseUrl: api };
     const found = await requestConceptExploration({
       scope: 'shared', category: 'Capability', concept: 'KnowledgeGraphQueryingCapability',
@@ -187,12 +187,13 @@ describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', 
       .toEqual(new Set(['Team constraint', 'Context constraint']));
 
     const comparison = await requestConceptExploration({
-      scope: 'combined', scenario: scenario('s5'), shared_scenario_id: 's5', compare: true,
+      scope: 'combined', uploads: [{ id: 'builder-s5', file_name: 'Builder · S5', scenario: scenario('s5') }],
+      shared_scenario_id: 's5', compare: true, comparison_source_ids: ['upload:builder-s5', 'reference:s5'],
     }, options);
     if (comparison.kind !== 'ok') throw new Error(JSON.stringify(comparison));
-    expect(new Set(comparison.data.sources.map((source) => source.id))).toEqual(new Set(['provisional:s5', 'reference:s5']));
+    expect(new Set(comparison.data.sources.map((source) => source.id))).toEqual(new Set(['upload:builder-s5', 'reference:s5']));
     expect(new Set(comparison.data.rows.map((row) => row.values.overlap)))
-      .toEqual(new Set(['Recorded in both', 'Recorded only in draft', 'Recorded only in shared']));
+      .toEqual(new Set(['Recorded in both', 'Recorded only in first scenario', 'Recorded only in second scenario']));
     expect(comparison.data.truncated).toBe(false);
     expect(comparison.data.rows.every((row) => row.evidence.length > 0)).toBe(true);
     for (const source of comparison.data.sources) {
@@ -200,7 +201,7 @@ describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', 
     }
   }, 30_000);
 
-  it('explores a draft alongside an approved named graph and rolls back the draft', async () => {
+  it('explores an added snapshot alongside an approved named graph and rolls back the snapshot', async () => {
     const id = `${RUN}-explorer`;
     await saveAndTrack(scenario(id, (data) => { data.agents[0].name = 'Published fixture member'; }));
     const explorer = await startBackend({ GRAPHDB_APPROVED_SCENARIO_IDS: id });
@@ -212,13 +213,14 @@ describe.skipIf(!graphdbReady)('API client → FastAPI → GraphDB → SPARQL', 
 
     const draft = scenario(id, (data) => { data.agents[0].name = 'Private draft fixture member'; });
     const answer = await requestExplorerQuery({
-      question_id: 'cq1', scope: 'combined', shared_scenario_id: id, scenario: draft,
+      question_id: 'cq1', scope: 'combined', shared_scenario_id: id,
+      uploads: [{ id: 'builder-approved', file_name: 'Builder snapshot', scenario: draft }],
     }, options);
     expect(answer.kind).toBe('ok');
     if (answer.kind !== 'ok') throw new Error(JSON.stringify(answer));
     expect(answer.data.rows).toEqual(expect.arrayContaining([
       expect.objectContaining({ source_id: `approved:${id}`, values: expect.objectContaining({ member: 'Published fixture member' }) }),
-      expect.objectContaining({ source_id: `provisional:${id}`, values: expect.objectContaining({ member: 'Private draft fixture member' }) }),
+      expect.objectContaining({ source_id: 'upload:builder-approved', values: expect.objectContaining({ member: 'Private draft fixture member' }) }),
     ]));
     const provisional = answer.data.sources.find((source) => source.publication_status === 'provisional');
     if (!provisional) throw new Error('Missing provisional source');

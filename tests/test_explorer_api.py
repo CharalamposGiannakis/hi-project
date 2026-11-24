@@ -163,7 +163,7 @@ def test_reference_catalog_and_cq1_read_public_examples_without_publishing(explo
     assert all(not any(store.committed.quads((None, None, None, iri))) for iri in store.staged_contexts)
 
 
-def test_combined_scope_keeps_a_private_draft_separate_even_with_a_matching_id(explorer, monkeypatch):
+def test_combined_scope_keeps_a_private_snapshot_separate_even_with_a_matching_id(explorer, monkeypatch):
     client, store = explorer
     store.location_origin = "http://proxy-forwarded.invalid"
     monkeypatch.setenv("GRAPHDB_APPROVED_SCENARIO_IDS", APPROVED_ID)
@@ -176,10 +176,10 @@ def test_combined_scope_keeps_a_private_draft_separate_even_with_a_matching_id(e
 
     private_member = 'Zoë "Draft member"\nNo publication'
     scenario = _example(APPROVED_ID, private_member)
-    result = _query(client, question_id="cq1", scope="combined", scenario=scenario, shared_scenario_id=APPROVED_ID)
+    result = _query(client, question_id="cq1", scope="combined", uploads=[_upload(APPROVED_ID, scenario)], shared_scenario_id=APPROVED_ID)
     (draft_row,) = _rows_with(result, private_member)
     (approved_row,) = _rows_with(result, "Approved member")
-    assert draft_row["source_id"] == f"provisional:{APPROVED_ID}"
+    assert draft_row["source_id"] == f"upload:{APPROVED_ID}"
     assert approved_row["source_id"] == f"approved:{APPROVED_ID}"
     assert not _rows_with(result, "Unlisted member")
 
@@ -195,11 +195,11 @@ def test_combined_scope_keeps_a_private_draft_separate_even_with_a_matching_id(e
     assert denied.status_code == 404
 
 
-def test_query_failure_rolls_back_the_private_draft(explorer):
+def test_query_failure_rolls_back_the_private_snapshot(explorer):
     client, store = explorer
     store.fail_queries = True
     response = client.post("/explorer/query", json={
-        "question_id": "cq1", "scope": "draft", "scenario": _example("draft-only", "Unsaved member"),
+        "question_id": "cq1", "scope": "session", "uploads": [_upload("snapshot", _example("snapshot", "Unsaved member"))],
     })
     assert response.status_code == 503
     assert response.json()["code"] == "graphdb_unavailable"
@@ -242,18 +242,18 @@ def test_cq5_missing_link_notice_is_scoped_alongside_existing_results(explorer, 
     client, store = explorer
     monkeypatch.setenv("GRAPHDB_APPROVED_SCENARIO_IDS", APPROVED_ID)
     scenario = json.loads((ROOT / "examples" / "s2.json").read_bytes())
-    result = _query(client, question_id="cq5", scope="combined", scenario=scenario)
+    result = _query(client, question_id="cq5", scope="combined", uploads=[_upload(scenario["id"], scenario)])
     assert result["rows"]
     assert {row["source_id"] for row in result["rows"]} == {f"approved:{APPROVED_ID}"}
-    assert [notice["source_id"] for notice in result["notices"]] == ["provisional:s2"]
+    assert [notice["source_id"] for notice in result["notices"]] == ["upload:s2"]
     assert not store.transactions
 
 
-def test_incomplete_draft_is_rejected_before_opening_a_transaction(explorer):
+def test_incomplete_snapshot_is_rejected_before_opening_a_transaction(explorer):
     client, store = explorer
     scenario = _example("incomplete", "Human member")
     scenario["agents"] = scenario["agents"][:1]
-    response = client.post("/explorer/query", json={"question_id": "cq1", "scope": "draft", "scenario": scenario})
+    response = client.post("/explorer/query", json={"question_id": "cq1", "scope": "session", "uploads": [_upload("incomplete", scenario)]})
     assert response.status_code == 422
     assert store.started == 0
 
@@ -264,7 +264,7 @@ def test_pending_question_is_rejected_without_querying_graphdb(explorer, questio
     before = store.started
     store.fail_queries = True
     response = client.post("/explorer/query", json={
-        "question_id": question, "scope": "draft", "scenario": _example("pending", "Draft member"),
+        "question_id": question, "scope": "session", "uploads": [_upload("pending", _example("pending", "Snapshot member"))],
     })
     assert response.status_code == 422
     assert "Scientific review pending" in response.json()["message"]
@@ -272,24 +272,25 @@ def test_pending_question_is_rejected_without_querying_graphdb(explorer, questio
     assert store.read_queries == 0
 
 
-def test_two_uploads_keep_duplicate_scenario_ids_separate_with_draft_and_shared_sources(explorer):
+def test_two_uploads_keep_duplicate_scenario_ids_separate_with_builder_snapshots_and_shared_sources(explorer):
     client, store = explorer
     uploads = [
         _upload("first", _example("s1", "First uploaded researcher"), "first-copy.json"),
         _upload("second", _example("s1", "Second uploaded researcher"), "second-copy.json"),
+        _upload("s1", _example("s1", "Current draft researcher"), "Builder · S1"),
     ]
     result = _query(
         client, question_id="cq1", scope="combined", uploads=uploads,
-        scenario=_example("s1", "Current draft researcher"), shared_scenario_id="s1",
+        shared_scenario_id="s1",
     )
     sources = {source["id"]: source for source in result["sources"]}
-    assert set(sources) == {"provisional:s1", "upload:first", "upload:second", "reference:s1"}
+    assert set(sources) == {"upload:s1", "upload:first", "upload:second", "reference:s1"}
     assert {source["scenario_id"] for source in sources.values()} == {"s1"}
     assert len({source["graph_iri"] for source in sources.values()}) == 4
     assert sources["upload:first"]["publication_status"] == sources["upload:second"]["publication_status"] == "provisional"
     for name, source_id in (
         ("First uploaded researcher", "upload:first"), ("Second uploaded researcher", "upload:second"),
-        ("Current draft researcher", "provisional:s1"), ("Human user", "reference:s1"),
+        ("Current draft researcher", "upload:s1"), ("Human user", "reference:s1"),
     ):
         (row,) = _rows_with(result, name)
         assert row["source_id"] == source_id
@@ -297,10 +298,47 @@ def test_two_uploads_keep_duplicate_scenario_ids_separate_with_draft_and_shared_
     assert all(not any(store.committed.quads((None, None, None, iri))) for iri in store.staged_contexts)
 
     # Each request carries only selected uploads. The backend stores no prior selection.
-    selected = _query(client, question_id="cq1", scope="draft", uploads=[uploads[1]])
+    selected = _query(client, question_id="cq1", scope="session", uploads=[uploads[1]])
     assert {source["id"] for source in selected["sources"]} == {"upload:second"}
     assert not _rows_with(selected, "First uploaded researcher")
     assert _rows_with(selected, "Second uploaded researcher")
+
+
+def test_validated_builder_snapshots_of_s1_and_s2_can_be_queried_together(explorer):
+    client, store = explorer
+    editor = json.loads((ROOT / "examples" / "s1.json").read_bytes())
+    assert client.post("/scenarios/preview", json=editor).status_code == 200
+    first = _upload("builder-one", json.loads(json.dumps(editor)), "Builder · S1")
+    editor = json.loads((ROOT / "examples" / "s2.json").read_bytes())
+    assert client.post("/scenarios/preview", json=editor).status_code == 200
+    second = _upload("builder-two", json.loads(json.dumps(editor)), "Builder · S2")
+    editor["agents"][0]["name"] = "Later edit in the Builder"
+
+    result = _query(client, question_id="cq1", scope="session", uploads=[first, second])
+    assert {source["id"] for source in result["sources"]} == {"upload:builder-one", "upload:builder-two"}
+    assert {source["scenario_id"] for source in result["sources"]} == {"s1", "s2"}
+    assert len(result["rows"]) == 4
+    assert not _rows_with(result, "Later edit in the Builder")
+    assert all(source["publication_status"] == "provisional" for source in result["sources"])
+    assert store.started == store.rolled_back == 1
+    assert all(not any(store.committed.quads((None, None, None, iri))) for iri in store.staged_contexts)
+
+
+@pytest.mark.parametrize("endpoint", ["/explorer/query", "/explorer/concepts"])
+@pytest.mark.parametrize("legacy", ["scenario", "draft_scope"])
+def test_active_builder_draft_input_is_rejected(explorer, endpoint, legacy):
+    client, store = explorer
+    snapshot = _example("snapshot", "Snapshot member")
+    payload = {"scope": "session", "uploads": [_upload("snapshot", snapshot)]}
+    if endpoint.endswith("/query"):
+        payload["question_id"] = "cq1"
+    if legacy == "scenario":
+        payload["scenario"] = snapshot
+    else:
+        payload["scope"] = "draft"
+    response = client.post(endpoint, json=payload)
+    assert response.status_code == 422
+    assert store.started == store.read_queries == 0
 
 
 def test_uploaded_concepts_can_be_compared_with_another_upload_or_shared_s5(explorer):
@@ -310,7 +348,7 @@ def test_uploaded_concepts_can_be_compared_with_another_upload_or_shared_s5(expl
         _upload("right", json.loads((ROOT / "examples" / "s5.json").read_bytes())),
     ]
     result = _concepts(
-        client, scope="draft", uploads=uploads, compare=True,
+        client, scope="session", uploads=uploads, compare=True,
         comparison_source_ids=["upload:left", "upload:right"],
     )
     assert {source["id"] for source in result["sources"]} == {"upload:left", "upload:right"}
@@ -334,7 +372,7 @@ def test_uploaded_scenarios_participate_in_concept_search(explorer):
         _upload("s5", json.loads((ROOT / "examples" / "s5.json").read_bytes())),
     ]
     result = _concepts(
-        client, scope="draft", uploads=uploads, category="Capability", concept="KnowledgeGraphQueryingCapability",
+        client, scope="session", uploads=uploads, category="Capability", concept="KnowledgeGraphQueryingCapability",
     )
     assert {row["source_id"] for row in result["rows"]} == {"upload:s2", "upload:s5"}
     assert not result["truncated"]
@@ -352,7 +390,7 @@ def test_invalid_upload_reports_its_location_before_any_staging(explorer, monkey
     else:
         monkeypatch.setattr(api, "validate_rdf", lambda _graph: (False, None, "Upload SHACL failure"))
     response = client.post("/explorer/query", json={
-        "question_id": "cq1", "scope": "draft",
+        "question_id": "cq1", "scope": "session",
         "uploads": [_upload("invalid", invalid)],
     })
     assert response.status_code == 422
@@ -366,12 +404,12 @@ def test_invalid_upload_reports_its_location_before_any_staging(explorer, monkey
 
 @pytest.mark.parametrize("payload", [
     {"scope": "shared", "uploads": [_upload("local", _example("local", "Local member"))]},
-    {"scope": "draft", "uploads": [
+    {"scope": "session", "uploads": [
         _upload("duplicate", _example("one", "One")), _upload("duplicate", _example("two", "Two")),
     ]},
-    {"scope": "draft", "uploads": [_upload("first", _example("one", "One"))], "compare": True,
+    {"scope": "session", "uploads": [_upload("first", _example("one", "One"))], "compare": True,
      "comparison_source_ids": ["upload:first", "upload:unknown"]},
-    {"scope": "draft", "uploads": [_upload("first", _example("one", "One"))], "compare": True,
+    {"scope": "session", "uploads": [_upload("first", _example("one", "One"))], "compare": True,
      "comparison_source_ids": ["upload:first", "upload:first"]},
 ])
 def test_invalid_upload_scopes_or_comparisons_are_rejected(explorer, payload):
@@ -385,7 +423,7 @@ def test_uploaded_scenario_query_failure_rolls_back_every_staged_graph(explorer)
     client, store = explorer
     store.fail_queries = True
     response = client.post("/explorer/query", json={
-        "question_id": "cq1", "scope": "draft",
+        "question_id": "cq1", "scope": "session",
         "uploads": [_upload("first", _example("one", "One")), _upload("second", _example("two", "Two"))],
     })
     assert response.status_code == 503
@@ -409,18 +447,19 @@ def test_concept_search_finds_recorded_scenarios_and_relationships(explorer, cat
     assert all(not any(store.committed.quads((None, None, None, iri))) for iri in store.staged_contexts)
 
 
-def test_compare_current_scenario_with_s5_retains_common_and_different_concept_evidence(explorer):
+def test_compare_added_snapshot_with_s5_retains_common_and_different_concept_evidence(explorer):
     client, store = explorer
     scenario = _example("draft-comparison", "Draft participant")
-    result = _concepts(client, scope="combined", scenario=scenario, shared_scenario_id="s5", compare=True)
-    assert {source["id"] for source in result["sources"]} == {"provisional:draft-comparison", "reference:s5"}
+    result = _concepts(client, scope="combined", uploads=[_upload("draft-comparison", scenario)], shared_scenario_id="s5", compare=True,
+                       comparison_source_ids=["upload:draft-comparison", "reference:s5"])
+    assert {source["id"] for source in result["sources"]} == {"upload:draft-comparison", "reference:s5"}
     assert {row["values"]["overlap"] for row in result["rows"]} == {
-        "Recorded in both", "Recorded only in draft", "Recorded only in shared",
+        "Recorded in both", "Recorded only in first scenario", "Recorded only in second scenario",
     }
     privacy = [row for row in result["rows"] if any(
         item["label"] == "HINT concept" and item["iri"].endswith("/PrivacyConstraint") for item in row["evidence"]
     )]
-    assert {row["source_id"] for row in privacy} == {"provisional:draft-comparison", "reference:s5"}
+    assert {row["source_id"] for row in privacy} == {"upload:draft-comparison", "reference:s5"}
     assert {row["values"]["overlap"] for row in privacy} == {"Recorded in both"}
     assert not result["truncated"]
     assert store.started == store.rolled_back == 1
@@ -432,14 +471,14 @@ def test_concept_comparison_keeps_matching_scenario_ids_and_approved_scope_separ
     scenario = _example(APPROVED_ID, "Private capability owner")
     scenario["team_constraints"] = ["PrivacyConstraint"]
     result = _concepts(
-        client, scope="combined", scenario=scenario, shared_scenario_id=APPROVED_ID,
-        category="Constraint", concept="PrivacyConstraint", compare=True,
+        client, scope="combined", uploads=[_upload(APPROVED_ID, scenario)], shared_scenario_id=APPROVED_ID,
+        comparison_source_ids=[f"upload:{APPROVED_ID}", f"approved:{APPROVED_ID}"], category="Constraint", concept="PrivacyConstraint", compare=True,
     )
-    assert {row["source_id"] for row in result["rows"]} == {f"provisional:{APPROVED_ID}", f"approved:{APPROVED_ID}"}
+    assert {row["source_id"] for row in result["rows"]} == {f"upload:{APPROVED_ID}", f"approved:{APPROVED_ID}"}
     assert {row["values"]["overlap"] for row in result["rows"]} == {"Recorded in both"}
     assert {(row["source_id"], row["values"]["connection"]) for row in result["rows"]} == {
-        (f"provisional:{APPROVED_ID}", "Team constraint"),
-        (f"provisional:{APPROVED_ID}", "Context constraint"),
+        (f"upload:{APPROVED_ID}", "Team constraint"),
+        (f"upload:{APPROVED_ID}", "Context constraint"),
         (f"approved:{APPROVED_ID}", "Context constraint"),
     }
     denied = client.post("/explorer/concepts", json={
@@ -452,7 +491,7 @@ def test_concept_comparison_keeps_matching_scenario_ids_and_approved_scope_separ
 @pytest.mark.parametrize("payload", [
     {"scope": "shared", "compare": True},
     {"scope": "combined", "scenario": _example("draft", "Human"), "compare": True},
-    {"scope": "draft", "scenario": _example("draft", "Human"), "shared_scenario_id": "s5"},
+    {"scope": "session", "scenario": _example("draft", "Human"), "shared_scenario_id": "s5"},
     {"scope": "shared", "category": "Role"},
     {"scope": "shared", "category": "Constraint", "concept": "KnowledgeGraphQueryingCapability"},
     {"scope": "shared", "category": "Capability", "concept": "UnknownCapability"},
@@ -465,11 +504,11 @@ def test_invalid_concept_exploration_is_rejected_before_staging(explorer, payloa
     assert store.started == 0
 
 
-def test_concept_query_failure_rolls_back_current_scenario(explorer):
+def test_concept_query_failure_rolls_back_session_scenario(explorer):
     client, store = explorer
     store.fail_queries = True
     response = client.post("/explorer/concepts", json={
-        "scope": "draft", "scenario": _example("draft", "Private member"), "category": "Capability",
+        "scope": "session", "uploads": [_upload("snapshot", _example("snapshot", "Private member"))], "category": "Capability",
     })
     assert response.status_code == 503
     assert response.json()["code"] == "graphdb_unavailable"
@@ -491,18 +530,18 @@ def test_live_explorer_queries_both_named_graphs_and_rolls_back(monkeypatch, sce
     scenario["agents"][0]["name"] = private_member
     with TestClient(api.app) as client:
         result = _query(
-            client, question_id=question_id, scope="combined", scenario=scenario, shared_scenario_id=scenario_id,
+            client, question_id=question_id, scope="combined", uploads=[_upload(scenario_id, scenario)], shared_scenario_id=scenario_id,
         )
 
     assert {source["publication_status"] for source in result["sources"]} == {"provisional", "reference"}
-    assert {source["id"] for source in result["sources"]} == {f"provisional:{scenario_id}", f"reference:{scenario_id}"}
-    expected = {f"provisional:{scenario_id}": rows_per_source, f"reference:{scenario_id}": rows_per_source}
+    assert {source["id"] for source in result["sources"]} == {f"upload:{scenario_id}", f"reference:{scenario_id}"}
+    expected = {f"upload:{scenario_id}": rows_per_source, f"reference:{scenario_id}": rows_per_source}
     assert Counter(row["source_id"] for row in result["rows"]) == (expected if rows_per_source else {})
     assert result["truncated"] is False
     if question_id == "cq5" and scenario_id in {"s2", "s3"}:
-        assert {notice["source_id"] for notice in result["notices"]} == {f"provisional:{scenario_id}", f"reference:{scenario_id}"}
+        assert {notice["source_id"] for notice in result["notices"]} == {f"upload:{scenario_id}", f"reference:{scenario_id}"}
     if question_id == "cq1":
-        assert {row["source_id"] for row in _rows_with(result, private_member)} == {"provisional:s1"}
+        assert {row["source_id"] for row in _rows_with(result, private_member)} == {"upload:s1"}
         assert {row["source_id"] for row in _rows_with(result, "Human user")} == {"reference:s1"}
     with graphdb.connect_graphdb() as store:
         for source in result["sources"]:
@@ -533,10 +572,11 @@ def test_live_concept_comparison_preserves_provisional_and_reference_sources(mon
     assert settings.url.host in {"127.0.0.1", "localhost", "[::1]"}
     monkeypatch.delenv("GRAPHDB_APPROVED_SCENARIO_IDS", raising=False)
     with TestClient(api.app) as client:
-        result = _concepts(client, scope="combined", scenario=_example("s5", "Private member"), shared_scenario_id="s5", compare=True)
-    assert {source["id"] for source in result["sources"]} == {"provisional:s5", "reference:s5"}
+        result = _concepts(client, scope="combined", uploads=[_upload("s5", _example("s5", "Private member"))], shared_scenario_id="s5", compare=True,
+                           comparison_source_ids=["upload:s5", "reference:s5"])
+    assert {source["id"] for source in result["sources"]} == {"upload:s5", "reference:s5"}
     assert {row["values"]["overlap"] for row in result["rows"]} == {
-        "Recorded in both", "Recorded only in draft", "Recorded only in shared",
+        "Recorded in both", "Recorded only in first scenario", "Recorded only in second scenario",
     }
     assert not result["truncated"]
     with graphdb.connect_graphdb() as store:
@@ -568,7 +608,7 @@ def test_live_cq10_requires_distinct_use_cases_among_selected_sources(monkeypatc
     with TestClient(api.app) as client:
         single = _query(client, question_id="cq10", scope="shared", shared_scenario_id="s1")
         assert single["rows"] == []
-        copies = _query(client, question_id="cq10", scope="draft", uploads=[
+        copies = _query(client, question_id="cq10", scope="session", uploads=[
             _upload("copy-one", _example("s1", "First copy")), _upload("copy-two", _example("s1", "Second copy")),
         ])
         assert copies["rows"] == []
@@ -582,30 +622,31 @@ def test_live_cq10_requires_distinct_use_cases_among_selected_sources(monkeypatc
 
 
 @pytest.mark.skipif(os.getenv("HI_GRAPHDB_LIVE") != "1", reason="Set HI_GRAPHDB_LIVE=1 for the local GraphDB check")
-def test_live_two_uploads_combine_with_builder_and_shared_knowledge_without_persistence(monkeypatch):
+def test_live_session_scenarios_combine_with_shared_knowledge_without_persistence(monkeypatch):
     settings = graphdb.GraphDBSettings.from_env()
     assert settings.url.host in {"127.0.0.1", "localhost", "[::1]"}
     monkeypatch.delenv("GRAPHDB_APPROVED_SCENARIO_IDS", raising=False)
     uploads = [
         _upload("first", _example("s1", "First live uploaded member")),
         _upload("second", _example("s1", "Second live uploaded member")),
+        _upload("s1", _example("s1", "Current live draft member"), "Builder · S1"),
     ]
     with TestClient(api.app) as client:
         result = _query(
             client, question_id="cq1", scope="combined", uploads=uploads,
-            scenario=_example("s1", "Current live draft member"), shared_scenario_id="s1",
+            shared_scenario_id="s1",
         )
         comparison = _concepts(
             client, scope="combined", uploads=[uploads[0]], shared_scenario_id="s5", compare=True,
             comparison_source_ids=["upload:first", "reference:s5"],
         )
     assert {source["id"] for source in result["sources"]} == {
-        "upload:first", "upload:second", "provisional:s1", "reference:s1",
+        "upload:first", "upload:second", "upload:s1", "reference:s1",
     }
     assert len({source["graph_iri"] for source in result["sources"]}) == 4
     for label, source_id in (
         ("First live uploaded member", "upload:first"), ("Second live uploaded member", "upload:second"),
-        ("Current live draft member", "provisional:s1"), ("Human user", "reference:s1"),
+        ("Current live draft member", "upload:s1"), ("Human user", "reference:s1"),
     ):
         (row,) = _rows_with(result, label)
         assert row["source_id"] == source_id

@@ -9,12 +9,11 @@
   /** @typedef {import('./api.js').ExplorerQuestionId} QuestionId */
   /** @typedef {import('./api.js').ExplorerScope} Scope */
   /** @typedef {import('./api.js').ExplorerRequest} Query */
-  /** @typedef {ReturnType<typeof import('./scenario.js').toContract>} Draft */
   /** @typedef {Awaited<ReturnType<typeof requestExplorerQuery>>} Outcome */
-  /** @type {{ active: boolean, draft: Draft | null }} */
-  let { active, draft } = $props();
+  /** @type {{ active: boolean, uploads?: import('./api.js').SessionUpload[], focusSourceId?: string }} */
+  let { active, uploads = $bindable([]), focusSourceId = '' } = $props();
 
-  // Draft queries are useful even when GraphDB cannot provide the shared catalog.
+  // Session scenarios remain queryable when the shared catalog is unavailable.
   const originalQuestions = {
     cq1: "Given a use case, how is the hybrid intelligence team composed, and what roles do its agents assume?",
     cq2: "Given an agent's capabilities, which tasks can it perform, and in which use cases can it participate?",
@@ -45,18 +44,15 @@
     { id: 'cq10', label: 'CQ10 · Shared constraints', description: 'Find constraints across at least two distinct use-case identifiers. Scenarios with different identifiers may represent identical scientific content.', parameters: [] },
     { id: 'cq12', label: 'CQ12 · Compliance with contextual constraints', description: '', parameters: [] },
   ]).sort((first, second) => Number(first.id.slice(2)) - Number(second.id.slice(2)));
-  const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional draft' };
+  const statuses = { approved: 'Approved', reference: 'Experimental reference', provisional: 'Provisional session scenario' };
 
   /** @param {import('./api.js').ExplorerSource} source */
-  const sourceStatus = (source) => source.publication_status === 'provisional' && source.file_name
-    ? 'Provisional upload' : statuses[source.publication_status];
+  const sourceStatus = (source) => statuses[source.publication_status];
 
-  let scope = $state(/** @type {Scope} */ ('draft'));
+  let scope = $state(/** @type {Scope} */ ('session'));
   let mode = $state(/** @type {'questions' | 'find' | 'compare'} */ ('questions'));
   let questionId = $state(/** @type {QuestionId} */ ('cq1'));
   let sharedScenarioId = $state('');
-  let includeCurrent = $state(true);
-  let uploads = $state(/** @type {import('./api.js').SessionUpload[]} */ ([]));
   let selectedUploads = $derived(uploads.filter((upload) => upload.selected).map(({ selected: _selected, ...upload }) => upload));
   let parameters = $state(/** @type {Record<string, string>} */ ({}));
   let catalog = $state.raw(/** @type {Awaited<ReturnType<typeof fetchExplorerCatalog>> | null} */ (null));
@@ -64,6 +60,7 @@
   const catalogController = new AbortController();
   let pending = $state.raw(/** @type {{ query: Query, controller: AbortController } | null} */ (null));
   let result = $state.raw(/** @type {{ query: Query, outcome: Outcome } | null} */ (null));
+  let lastFocusedSourceId = '';
 
   let shared = $derived(catalog?.kind === 'ok' ? catalog.data : null);
   let sharedLabel = $derived(shared?.shared_source === 'approved' ? 'Approved scenarios'
@@ -72,21 +69,27 @@
   let question = $derived(questions.find(({ id }) => id === questionId) ?? questions[0]);
   let scientificPending = $derived(question.status === 'scientific_review_pending' || pendingIds.includes(question.id));
   let selectedScenario = $derived(shared?.scenarios.find((source) => source.scenario_id === sharedScenarioId));
-  let includesDraft = $derived(scope !== 'shared');
-  let includesShared = $derived(scope !== 'draft');
+  let includesSession = $derived(scope !== 'shared');
+  let includesShared = $derived(scope !== 'session');
   let query = $derived(/** @type {Query} */ ({
     question_id: questionId, scope,
-    ...(includesDraft && includeCurrent && draft ? { scenario: draft } : {}),
-    ...(includesDraft && selectedUploads.length ? { uploads: selectedUploads } : {}),
+    ...(includesSession && selectedUploads.length ? { uploads: selectedUploads } : {}),
     ...(includesShared && selectedScenario ? { shared_scenario_id: selectedScenario.scenario_id } : {}),
     ...(Object.keys(parameters).length ? { parameters: { ...parameters } } : {}),
   }));
-  let canRun = $derived(!scientificPending && (!includesDraft || (includeCurrent && draft !== null) || selectedUploads.length > 0)
+  let canRun = $derived(!scientificPending && (!includesSession || selectedUploads.length > 0)
     && (!includesShared || Boolean(shared?.scenarios.length)));
   let outcome = $derived(result?.query === query ? result.outcome : null);
 
   $effect(() => {
     if (active && !catalog && !loadingCatalog) void loadCatalog();
+  });
+  $effect(() => {
+    if (active && focusSourceId && focusSourceId !== lastFocusedSourceId) {
+      mode = 'questions';
+      scope = 'session';
+      lastFocusedSourceId = focusSourceId;
+    }
   });
   $effect(() => {
     if (pending && pending.query !== query) {
@@ -151,15 +154,13 @@
   <form onsubmit={(event) => { event.preventDefault(); void run(); }}>
     <fieldset class="source-options">
       <legend>Query source</legend>
-      <label class="inline"><input type="radio" id="explorer-source-draft" bind:group={scope} value="draft" /> My current scenario and selected uploads</label>
+      <label class="inline"><input type="radio" id="explorer-source-session" bind:group={scope} value="session" /> Selected session scenarios</label>
       <label class="inline"><input type="radio" id="explorer-source-approved" bind:group={scope} value="shared" /> {sharedLabel}</label>
-      <label class="inline"><input type="radio" id="explorer-source-combined" bind:group={scope} value="combined" /> My current scenario, selected uploads, and {sharedLabel.toLowerCase()}</label>
+      <label class="inline"><input type="radio" id="explorer-source-combined" bind:group={scope} value="combined" /> Selected session scenarios and {sharedLabel.toLowerCase()}</label>
     </fieldset>
 
-    {#if includesDraft}
-      <label class="inline"><input id="explorer-include-current" type="checkbox" bind:checked={includeCurrent} /> Include current Builder scenario</label>
-      <p class="hint">{draft ? `${draft.use_case.name || 'Untitled scenario'} · Provisional draft` : 'Start or open a structured scenario in the Scenario Builder to query your draft.'}</p>
-      {#if selectedUploads.length}<p class="hint">{selectedUploads.length} selected provisional uploads will participate.</p>{/if}
+    {#if includesSession}
+      <p class="hint">{selectedUploads.length ? `${selectedUploads.length} selected provisional session scenarios will participate.` : 'Add a validated scenario from the Builder or upload JSON files, then select scenarios to query.'}</p>
     {/if}
 
     {#each shared?.warnings ?? [] as warning}
@@ -286,8 +287,8 @@
       {/if}
     {:else if outcome}
       <p class="error" role="alert">{outcome.kind === 'rejected' ? outcome.error.message : 'The query could not be completed. Try again.'}</p>
-      {#if outcome.kind === 'rejected' && outcome.status === 422 && includesDraft}
-        <p class="hint">Use technical validation in the Scenario Builder to check the current draft.</p>
+      {#if outcome.kind === 'rejected' && outcome.status === 422 && includesSession}
+        <p class="hint">Check the selected session scenarios and their technical validation details.</p>
       {/if}
     {/if}
   </section>
@@ -295,7 +296,7 @@
 </div>
 
 <div hidden={mode === 'questions'}>
-  <CrossScenarioExplorer active={active && mode !== 'questions'} compare={mode === 'compare'} {draft}
+  <CrossScenarioExplorer active={active && mode !== 'questions'} compare={mode === 'compare'}
     {uploads} {shared} loading={loadingCatalog} catalogFailed={catalog !== null && catalog.kind !== 'ok'} onretry={loadCatalog} />
 </div>
 

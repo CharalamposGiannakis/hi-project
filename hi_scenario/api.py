@@ -239,13 +239,7 @@ def explorer_catalog() -> explorer.ExplorerCatalog:
         return explorer.catalog(store)
 
 
-def _explorer_graphs(request: explorer.ScopeRequest) -> tuple[Graph | None, dict[str, Graph]] | JSONResponse:
-    graph = None
-    if request.scenario is not None:
-        prepared = _validated_graph(request.scenario)
-        if isinstance(prepared, JSONResponse):
-            return prepared
-        graph, _ = prepared
+def _explorer_graphs(request: explorer.ScopeRequest) -> dict[str, Graph] | JSONResponse:
     uploaded_graphs = {}
     for index, upload in enumerate(request.uploads):
         prepared = _validated_graph(upload.scenario)
@@ -257,7 +251,7 @@ def _explorer_graphs(request: explorer.ScopeRequest) -> tuple[Graph | None, dict
             ] or [InputIssue(location=location, message=error.message, type=error.code)]
             return _error(prepared.status_code, error)
         uploaded_graphs[upload.id] = prepared[0]
-    return graph, uploaded_graphs
+    return uploaded_graphs
 
 
 @app.post(
@@ -269,9 +263,8 @@ def query_explorer(request: explorer.ExplorerRequest) -> explorer.ExplorerResult
     prepared = _explorer_graphs(request)
     if isinstance(prepared, JSONResponse):
         return prepared
-    graph, uploaded_graphs = prepared
     with connect_graphdb() as store:
-        return explorer.answer(store, request, graph, uploaded_graphs)
+        return explorer.answer(store, request, prepared)
 
 
 @app.post(
@@ -282,6 +275,5 @@ def query_concepts(request: explorer.ConceptExplorationRequest) -> explorer.Expl
     prepared = _explorer_graphs(request)
     if isinstance(prepared, JSONResponse):
         return prepared
-    graph, uploaded_graphs = prepared
     with connect_graphdb() as store:
-        return explorer.explore_concepts(store, request, graph, uploaded_graphs)
+        return explorer.explore_concepts(store, request, prepared)
