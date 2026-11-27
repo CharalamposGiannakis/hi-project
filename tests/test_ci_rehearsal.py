@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +12,69 @@ import pytest
 spec = importlib.util.spec_from_file_location("ci_rehearsal", Path(__file__).resolve().parents[1] / ".github/scripts/rehearse.py")
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)
+
+
+def directory_link(link, target):
+    if sys.platform == "win32":
+        import _winapi
+        # Directory junctions do not require Windows symlink privileges.
+        _winapi.CreateJunction(str(target), str(link))
+    else:
+        link.symlink_to(target, target_is_directory=True)
+
+
+def test_bundle_discovery_accepts_one_directory_without_aliases(tmp_path):
+    bundle = tmp_path / "test_azure_capture_transport0" / "capture"
+    bundle.mkdir(parents=True)
+    assert ci.find_captured_bundle(tmp_path) == bundle.resolve()
+
+
+def test_bundle_discovery_deduplicates_pytest_current_directory_alias(tmp_path):
+    test_directory = tmp_path / "test_azure_capture_transport0"
+    bundle = test_directory / "capture"
+    bundle.mkdir(parents=True)
+    directory_link(tmp_path / "test_azure_capture_transportcurrent", test_directory)
+    # Reproduce the original false ambiguity with real filesystem aliases.
+    assert len(list(tmp_path.glob("test_azure_capture_transport*/capture"))) == 2
+    assert ci.find_captured_bundle(tmp_path) == bundle.resolve()
+
+
+def test_bundle_discovery_rejects_missing_bundle(tmp_path):
+    with pytest.raises(RuntimeError, match="found 0 distinct locations"):
+        ci.find_captured_bundle(tmp_path)
+
+
+def test_bundle_discovery_rejects_distinct_bundles_even_with_alias(tmp_path):
+    for index in (0, 1):
+        (tmp_path / f"test_azure_capture_transport{index}" / "capture").mkdir(parents=True)
+    directory_link(tmp_path / "test_azure_capture_transportcurrent", tmp_path / "test_azure_capture_transport1")
+    with pytest.raises(RuntimeError, match="found 2 distinct locations"):
+        ci.find_captured_bundle(tmp_path)
+
+
+def test_bundle_discovery_rejects_alias_outside_capture_root(tmp_path):
+    capture = tmp_path / "capture"
+    capture.mkdir()
+    outside = tmp_path / "outside"
+    (outside / "capture").mkdir(parents=True)
+    directory_link(capture / "test_azure_capture_transportcurrent", outside)
+    with pytest.raises(RuntimeError, match="inside the capture root"):
+        ci.find_captured_bundle(capture)
+
+
+def test_bundle_discovery_after_real_pytest_capture(tmp_path):
+    test_file = tmp_path / "test_capture.py"
+    test_file.write_text(
+        "def test_azure_capture_transport(tmp_path):\n    (tmp_path / 'capture').mkdir()\n", encoding="utf-8",
+    )
+    capture = tmp_path / "capture"
+    result = subprocess.run([sys.executable, "-m", "pytest", "-q", str(test_file), "--basetemp", str(capture)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    if sys.platform != "win32":
+        assert (capture / "test_azure_capture_transportcurrent").is_symlink()
+        assert len(list(capture.glob("test_azure_capture_transport*/capture"))) == 2
+    assert ci.find_captured_bundle(capture) == (capture / "test_azure_capture_transport0" / "capture").resolve()
 
 
 def test_rehearsal_refuses_remote_docker_before_any_resource_operation(monkeypatch):

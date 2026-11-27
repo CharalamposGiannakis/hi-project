@@ -44,6 +44,17 @@ def require_fresh(context, projects):
             raise ValueError("Rehearsal projects must be fresh; existing resources will not be changed.")
 
 
+def find_captured_bundle(capture_root):
+    root = capture_root.resolve(strict=True)
+    # Pytest's numbered directory and its "current" link can both match the glob.
+    bundles = {path.resolve(strict=True) for path in root.glob("test_azure_capture_transport*/capture")}
+    if any(not path.is_relative_to(root) or not path.is_dir() for path in bundles):
+        raise RuntimeError("Synthetic captured bundles must be directories inside the capture root.")
+    if len(bundles) != 1:
+        raise RuntimeError(f"Expected one synthetic captured bundle; found {len(bundles)} distinct locations.")
+    return bundles.pop()
+
+
 def test_settings(context, path, volume):
     passwords = [secrets.token_urlsafe(24), secrets.token_urlsafe(24)]
     hashes = []
@@ -123,12 +134,10 @@ def rehearse(context, work):
         recovery(source, "up", "-d", "--wait", "--wait-timeout", "180")
         python("-m", "pytest", "-q", "-s", "tests/test_azure_capture_live.py", "--basetemp", str(work / "capture"),
                extra_env={"HI_AZURE_CAPTURE_TEST_PROJECT": source, "HI_AZURE_CAPTURE_TEST_CONTEXT": context})
-        bundles = list((work / "capture").glob("test_azure_capture_transport*/capture"))
-        if len(bundles) != 1:
-            raise RuntimeError("Expected one synthetic captured bundle.")
+        captured = find_captured_bundle(work / "capture")
         bundle = work / "retrieved"
-        shutil.copytree(bundles[0], bundle)
-        if (bundles[0] / "SHA256SUMS").read_bytes() != (bundle / "SHA256SUMS").read_bytes():
+        shutil.copytree(captured, bundle)
+        if (captured / "SHA256SUMS").read_bytes() != (bundle / "SHA256SUMS").read_bytes():
             raise RuntimeError("Checksum list changed during synthetic retrieval.")
         python("-m", "infra.recovery_rdf", "check", str(bundle))
         recovery(source, "stop")
