@@ -1,7 +1,8 @@
 <script>
   import { workspacePages } from './workspace-pages.js';
 
-  const pillars = workspacePages.filter((page) => page.id !== 'home');
+  let { onfeedback } = $props();
+  const pillars = workspacePages.filter((page) => ['builder', 'management', 'explorer'].includes(page.id));
 </script>
 
 <p class="home-introduction">{workspacePages[0].description}</p>
@@ -18,6 +19,7 @@
 
 <p class="workspace-note">Technical validation checks the scenario representation. Scientific approval requires separate review.</p>
 <p class="hint">Your draft and experimental session scenarios stay available as you navigate. Download your draft JSON before closing or reloading the app.</p>
+<p>Have a problem, suggestion, or scientific observation? <button type="button" class="link" onclick={onfeedback}>Share feedback</button> with the project operator.</p>
 
 <style>
   .home-introduction { max-width: 65ch; margin: 0 0 1.25rem; font-size: 1.05rem; }

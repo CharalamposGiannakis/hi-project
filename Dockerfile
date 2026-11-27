@@ -8,5 +8,6 @@ COPY infra/ ./infra/
 COPY ontology/ ./ontology/
 COPY examples/ ./examples/
 
+RUN mkdir -p /data/feedback && chown 10001:10001 /data/feedback && chmod 700 /data/feedback
 USER 10001:10001
 CMD ["python", "-m", "uvicorn", "hi_scenario.api:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--root-path", "/api"]

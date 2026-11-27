@@ -8,7 +8,7 @@ import { concepts } from './scenario.js';
  * @typedef {{
  *   code: 'invalid_request' | 'invalid_vocabulary' | 'shacl_failed' | 'internal_error'
  *     | 'scenario_exists' | 'scenario_id_reserved' | 'scenario_not_found' | 'graphdb_unavailable'
- *     | 'graphdb_invalid_response' | 'graphdb_configuration' | 'interpretation_unavailable' | 'interpretation_failed',
+ *     | 'graphdb_invalid_response' | 'graphdb_configuration' | 'interpretation_unavailable' | 'interpretation_failed' | 'feedback_unavailable',
  *   message: string, issues: InputIssue[], shacl_report: string | null,
  * }} SubmissionError
  * @typedef {{
@@ -280,4 +280,15 @@ export function requestExplorerQuery(request, options = {}) {
 /** @param {ConceptExplorationRequest} request @param {Options} [options] */
 export function requestConceptExploration(request, options = {}) {
   return call('POST', '/explorer/concepts', request, isExplorerResults, options);
+}
+
+/**
+ * Send only the feedback fields explicitly entered by the researcher.
+ * @param {{ category: string, area: string, message: string }} feedback
+ * @param {Options} [options]
+ */
+export function submitFeedback(feedback, options = {}) {
+  return call('POST', '/feedback', feedback,
+    /** @returns {body is {id: string, created_at: string}} */
+    (body) => typeof body?.id === 'string' && typeof body?.created_at === 'string', options);
 }

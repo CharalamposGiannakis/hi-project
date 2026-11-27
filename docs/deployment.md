@@ -64,6 +64,8 @@ These browser steps check the live HTTPS deployment manually. The automated Pyth
 
 The development stack in [`compose.yaml`](../compose.yaml) starts only GraphDB, binds its unauthenticated port to `127.0.0.1:7200`, and uses `hi-project_graphdb-data`. The deployment stack uses `hi-project-deploy_graphdb-data` for GraphDB and separate `hi-project-deploy_caddy-data` and `hi-project-deploy_caddy-config` volumes for Caddy state. These are different Compose projects and volumes: development data does not appear in deployment automatically. Routine container restarts and Compose `down`/`up` retain named volumes; `down --volumes` removes them. Volumes are persistence, **not** a backup.
 
+Feedback uses the additional `hi-project-deploy_feedback-data` volume mounted only in the backend at `/data/feedback`. The image initializes this directory for the existing non-root backend user, with private directory/file permissions. Keep `FEEDBACK_DIR=/data/feedback` in deployment. Local standalone startup defaults to ignored `.local/feedback`. Do not expose this directory through Caddy or mount it in the frontend or GraphDB.
+
 For an update, repeat the reviewed-revision checkout above and review any ontology/HINT changes before rebuilding:
 
 ```bash
@@ -83,6 +85,38 @@ docker compose --env-file .env.deploy -f compose.deploy.yaml ps web
 Check the new login at the affected HTTPS address and that the old password is rejected. Recreating `web` reads the changed environment without restarting `backend` or `graphdb`; a plain container restart would keep the old environment.
 
 Caddy Basic Auth protects both the application (including `/api` write endpoints) and the separate Workbench hostname. It is shared-access protection, without per-researcher accounts or an audit trail. Give Workbench credentials only to trusted operators. The GraphDB service accepts unauthenticated connections on the internal Compose network, and Workbench users can perform administrator-level reads and writes, including changes that bypass the API's create-only policy. Pause API writes during direct Workbench edits. The backend must remain at **one worker and one instance**. Its save lock is process-local, and GraphDB 10.8 read-committed transactions allow concurrent independent writers to merge data. Multi-worker deployment needs a stronger coordination design.
+
+## Feedback review and recovery
+
+The app's existing authentication protects `POST /api/feedback`. There are no API endpoints to list or retrieve feedback, including by reference ID. Shared app credentials do not grant review access. Review requires trusted operator access to the server's Docker socket or private filesystem; this privilege also permits reading all feedback. The operator decides what to act on and whether to create a GitHub Issue. No automated scientific review or identity tracking is involved.
+
+Review in a restricted operator terminal (JSON lines escape embedded terminal controls):
+
+```bash
+docker compose --env-file .env.deploy -f compose.deploy.yaml exec -T backend python -m infra.feedback review
+```
+
+Feedback is stored as immutable JSON records with server-generated IDs and UTC timestamps. Export a snapshot to approved restricted storage **outside Git**, accept it only on exit status zero, and transfer it to encrypted off-server storage using the same custody and retrieval discipline as GraphDB bundles:
+
+```bash
+umask 077
+backup_dir='/approved/restricted/backup-directory'
+docker compose --env-file .env.deploy -f compose.deploy.yaml exec -T backend python -m infra.feedback export > "$backup_dir/feedback.json"
+# Require successful export before accepting or transferring this file.
+```
+
+The export contains the complete records, format version, and a SHA-256 of their canonical payload. Writes publish complete files atomically, so export can run while the app is available; submissions arriving during/after enumeration may require the next backup. GraphDB native/RDF bundles exclude feedback. Retain and retrieve both backups for migration, and freeze application writes for a final cutover capture. A checksum detects corruption, not an untrusted operator's modification. Treat feedback and its backups as potentially sensitive; agree access, retention and deletion arrangements before the research preview.
+
+On the recovery server, build the reviewed backend image and restore the retrieved feedback export **before starting the application**, using a fresh feedback volume. Use the same Compose project and overlays as the target deployment (including `compose.restored.yaml` when adopting a restored GraphDB volume):
+
+```bash
+docker compose --env-file .env.deploy -f compose.deploy.yaml build backend
+docker compose --env-file .env.deploy -f compose.deploy.yaml run --rm --no-deps --entrypoint python backend -m infra.feedback restore < "$backup_dir/feedback.json"
+```
+
+Restore validates the schema, checksum, unique identities, destination state, and complete restored content. It refuses unrelated existing records or replacement of an ID; repeating an identical or interrupted partial restore is safe. Keep failed recovery isolated and investigate before exposing the target. For an existing server, stop the backend first under an approved maintenance window. Never run restore alongside submissions. Routine updates/recreation retain feedback; `down --volumes` deletes its volume along with the other non-external volumes.
+
+Observable acceptance: submit synthetic feedback from Home, confirm its receipt, return to the Builder without losing work, and review that receipt using the operator command. Confirm unauthenticated submission returns `401`, authenticated `GET /api/feedback` returns `405`, and `GET /api/feedback/<id>` returns `404`. On a disposable deployment, recreate the backend and verify the exported records persist, restore the export into a fresh directory/volume, and compare the complete records and checksum. `tests/test_feedback.py`, the frontend feedback integration test, and the opt-in deployment rehearsal cover these checks with synthetic data; hosted HTTPS and the actual off-server backup schedule remain operator checks.
 
 ## Local GraphDB recovery rehearsal
 

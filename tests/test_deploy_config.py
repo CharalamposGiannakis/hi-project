@@ -58,6 +58,13 @@ def test_default_deployment_remains_portable_and_private(compose):
     assert not config["services"]["backend"].get("ports")
     assert config["networks"]["data"]["internal"] is True
     assert config["services"]["backend"]["environment"]["GRAPHDB_URL"] == "http://graphdb:7200"
+    assert config["services"]["backend"]["environment"]["FEEDBACK_DIR"] == "/data/feedback"
+    assert config["services"]["backend"]["volumes"] == [
+        {"type": "volume", "source": "feedback-data", "target": "/data/feedback", "volume": {}},
+    ]
+    assert config["volumes"]["feedback-data"]["name"] == "hi-project-deploy_feedback-data"
+    assert not any(mount.get("source") == "feedback-data" for name in ("web", "graphdb")
+                   for mount in config["services"][name].get("volumes", []))
     assert config["services"]["web"]["environment"]["APP_SITE_ADDRESS"] == "https://app.example.invalid"
     assert all(mount["type"] == "volume" for service in config["services"].values()
                for mount in service.get("volumes", []))
@@ -90,6 +97,7 @@ def test_migration_rehearsal_has_independent_application_volumes(compose):
     assert config["volumes"]["graphdb-data"]["external"] is True
     assert config["volumes"]["caddy-data"]["name"] == "hi-deploy-test-fixture_caddy-data"
     assert config["volumes"]["caddy-config"]["name"] == "hi-deploy-test-fixture_caddy-config"
+    assert config["volumes"]["feedback-data"]["name"] == "hi-deploy-test-fixture_feedback-data"
 
 
 @pytest.mark.parametrize("project", ["hi-project-deploy", "hi-project", ""])

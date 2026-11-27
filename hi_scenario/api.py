@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from rdflib import Graph
 
-from . import explorer, nebula
+from . import explorer, feedback, nebula
 from .graphdb import GraphDBError, connect_graphdb, scenario_graph_iri
 from .interpretation import InterpretationRequest, InterpretationResult, assemble_interpretation
 from .model import Identifier, Scenario
@@ -45,6 +45,7 @@ class SubmissionError(BaseModel):
         "invalid_request", "invalid_vocabulary", "shacl_failed", "internal_error",
         "scenario_exists", "scenario_id_reserved", "scenario_not_found", "graphdb_unavailable",
         "graphdb_invalid_response", "graphdb_configuration", "interpretation_unavailable", "interpretation_failed",
+        "feedback_unavailable",
     ]
     message: str
     issues: list[InputIssue] = Field(default_factory=list)
@@ -108,7 +109,9 @@ async def invalid_request(request: Request, exc: RequestValidationError) -> JSON
         for error in exc.errors()
     ]
     endpoint = request.scope.get("endpoint")
-    if endpoint is interpret_scenario:
+    if endpoint is submit_feedback:
+        message = "Check the feedback category, application area, and message (1–6000 characters)."
+    elif endpoint is interpret_scenario:
         message = "The description could not be submitted for interpretation."
     elif endpoint in (query_explorer, query_concepts):
         message = "The Explorer query is incomplete or the current scenario failed structural validation."
@@ -120,6 +123,17 @@ async def invalid_request(request: Request, exc: RequestValidationError) -> JSON
 @app.exception_handler(GraphDBError)
 async def graphdb_error(_request: Request, exc: GraphDBError) -> JSONResponse:
     return _error(exc.status_code, SubmissionError(code=exc.code, message=str(exc)))
+
+
+@app.post("/feedback", status_code=201, response_model=feedback.FeedbackReceipt,
+          responses={422: {"model": SubmissionError}, 503: {"model": SubmissionError}},
+          summary="Submit private feedback for manual operator review")
+def submit_feedback(submission: feedback.FeedbackSubmission) -> feedback.FeedbackReceipt | JSONResponse:
+    try:
+        return feedback.submit(submission)
+    except (OSError, ValueError):
+        logger.error("Feedback storage unavailable")
+        return _error(503, SubmissionError(code="feedback_unavailable", message="Feedback could not be saved. Please try again later."))
 
 
 @app.post(
