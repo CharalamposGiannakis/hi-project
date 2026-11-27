@@ -1,5 +1,9 @@
 # HI Scenario Builder
 
+[![CI](https://github.com/CharalamposGiannakis/hi-project/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CharalamposGiannakis/hi-project/actions/workflows/ci.yml)
+
+[![Recovery rehearsal](https://github.com/CharalamposGiannakis/hi-project/actions/workflows/recovery.yml/badge.svg?branch=main)](https://github.com/CharalamposGiannakis/hi-project/actions/workflows/recovery.yml)
+
 The HI Scenario Builder is a research prototype for describing Hybrid Intelligence (HI) scenarios and validating their RDF against the checked-in HI resources. A Svelte wizard and structured editor share a JSON draft. FastAPI validates canonical scenario JSON and HINT concepts, generates deterministic RDF, and runs SHACL. The Knowledge Explorer queries and compares validated provisional session scenarios and authorized shared knowledge in GraphDB.
 
 The [hosted MVP](https://hi-project-demo.duckdns.org) is an authenticated research demonstration, not a production service. Credentials are distributed separately.
