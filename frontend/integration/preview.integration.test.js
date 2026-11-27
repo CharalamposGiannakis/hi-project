@@ -60,6 +60,7 @@ async function mountApp(apiUrl = baseUrl, structured = true) {
   const { default: App } = await import('../src/App.svelte');
   app = mount(App, { target: document.body });
   flushSync();
+  clickButton('Scenario Builder');
   if (structured) {
     clickButton('Structured Editor');
     clickButton('Expand all');

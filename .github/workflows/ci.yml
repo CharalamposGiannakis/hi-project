@@ -1,0 +1,117 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  HI_NEBULA_LIVE: '0'
+  NEBULA_API_KEY: ''
+  PYTHONUNBUFFERED: '1'
+
+jobs:
+  backend:
+    name: Backend and semantics
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - run: docker compose version
+      # Includes S1–S7 RDF/SHACL, HINT alignment, API and recovery guard tests,
+      # plus deployment Compose rendering. Live suites run in the other jobs.
+      - run: python -m pytest -q
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci
+        working-directory: frontend
+      - run: npm test
+        working-directory: frontend
+      - run: npm run check
+        working-directory: frontend
+      - run: npm run build
+        working-directory: frontend
+        env:
+          VITE_API_URL: /api
+      - name: Builder → FastAPI → RDF/SHACL (simulated AI)
+        run: npx vitest run integration/preview.integration.test.js
+        working-directory: frontend
+        env:
+          PYTHON: python
+
+  graphdb:
+    name: GraphDB integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      HI_GRAPHDB_LIVE: '1'
+      GRAPHDB_URL: http://127.0.0.1:7200
+      GRAPHDB_REPOSITORY: hi
+      GRAPHDB_APPROVED_SCENARIO_IDS: ''
+      PYTHON: python
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci
+        working-directory: frontend
+      - name: Start disposable GraphDB and load references
+        run: |
+          docker compose -f compose.yaml up -d --wait --wait-timeout 180
+          python -m infra.graphdb setup
+      - name: Importer, competency questions, provenance and rollback
+        run: python -m pytest -q tests/test_canonical_live.py tests/test_explorer_api.py
+      - name: API client → FastAPI → GraphDB
+        run: npx vitest run integration/workflow.integration.test.js
+        working-directory: frontend
+      - name: GraphDB diagnostics
+        if: failure()
+        run: docker compose -f compose.yaml logs --tail=100 graphdb
+      - name: Remove disposable GraphDB and data
+        if: always()
+        run: docker compose -f compose.yaml down --volumes

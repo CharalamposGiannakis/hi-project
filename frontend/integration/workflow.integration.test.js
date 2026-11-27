@@ -13,10 +13,14 @@ import { closedPort, startBackend } from './backend.js';
 
 const GRAPHDB = (process.env.GRAPHDB_URL ?? 'http://127.0.0.1:7200').replace(/\/+$/, '');
 const REPOSITORY = process.env.GRAPHDB_REPOSITORY ?? 'hi';
-const graphdbReady = await fetch(`${GRAPHDB}/rest/repositories/${REPOSITORY}`)
+const graphdbReady = await fetch(`${GRAPHDB}/rest/repositories/${REPOSITORY}`, { signal: AbortSignal.timeout(5_000) })
   .then((response) => response.ok)
   .catch(() => false);
-if (!graphdbReady) console.warn(`Skipping workflow tests: GraphDB repository '${REPOSITORY}' at ${GRAPHDB} is not reachable.`);
+if (!graphdbReady) {
+  const message = `GraphDB repository '${REPOSITORY}' at ${GRAPHDB} is not reachable.`;
+  if (process.env.HI_GRAPHDB_LIVE === '1') throw new Error(message);
+  console.warn(`Skipping workflow tests: ${message}`);
+}
 
 const RUN = `it-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 /** @type {Set<string>} */

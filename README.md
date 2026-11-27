@@ -117,6 +117,22 @@ That test cleans up only its temporary graphs and does not restart GraphDB. The 
 
 The single-server container deployment has no Azure service dependency. The runbook also covers [migration to another Linux host](docs/deployment.md#migration-to-another-linux-host), including attaching a verified restored GraphDB volume. VU SciCloud access and hosting requirements must be confirmed before choosing target networking, TLS, storage, or changing the current service.
 
+## Automated verification
+
+[CI](.github/workflows/ci.yml) runs on every pull request, pushes to `main`, and manual dispatch, using GitHub-hosted Ubuntu runners with Python 3.12 and Node 22. The checks reuse the local test commands:
+
+| Required PR check | Coverage |
+| --- | --- |
+| **Backend and semantics** | Python tests, S1–S7 RDF/SHACL, HINT/frontend vocabulary alignment, API and interpretation regressions, recovery guards, and deployment Compose configuration. |
+| **Frontend** | Lockfile installation, component tests, Svelte checks, production build, and Builder → real FastAPI → RDF/SHACL integration with simulated AI. |
+| **GraphDB integration** | Fresh GraphDB 10.8.14, canonical importer, live competency questions and concept search, provisional-source isolation/rollback, and the frontend API-client workflow. Database unavailability fails this check instead of skipping it. |
+
+[Recovery rehearsal](.github/workflows/recovery.yml) runs separately each Monday at 05:17 UTC and on manual dispatch. It tests concurrency and restart persistence, then runs the existing synthetic capture, checksum, canonical restore and complete-RDF checks before starting the authenticated container application on the restored volume. It verifies restart persistence and Explorer rollback and removes the disposable resources. This slower workflow is separate from the PR gate; run it manually before merging changes to storage, recovery or container deployment.
+
+Neither workflow updates the hosted application or uses Azure, VU hosting credentials, production data or a real Nebula key. Live Nebula evaluation remains an explicit researcher/operator check because it requires credentials, incurs provider usage and is nondeterministic. Passing CI checks technical behavior, not scientific approval. Local/container rehearsals do not verify production recovery, DNS or real HTTPS ingress. Workflows use read-only repository permissions and commit-pinned official actions; review and refresh those pins when updating CI dependencies.
+
+The owner must confirm GitHub Actions/GitHub-hosted runners are enabled and the three official `actions/*` dependencies are allowed, then require **Backend and semantics**, **Frontend**, and **GraphDB integration** in the `main` branch ruleset after the first successful run. Apply the repository's fork-workflow approval policy and ensure sufficient Actions minutes/registry access. Scheduled and manual workflows become available once the files reach the default branch; this implementation does not change repository settings. If a merge queue is enabled later, add its `merge_group` event before requiring these checks in the queue.
+
 ## Canonical scenario import
 
 The operator-run importer loads exactly `examples/s1.json` through `examples/s7.json` into the **local development Compose** repository `hi`. After local setup, run from the repository root:
