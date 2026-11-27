@@ -1,6 +1,29 @@
 name: Recovery rehearsal
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+      - 'infra/**'
+      - 'compose*.yaml'
+      - 'Dockerfile'
+      - 'frontend/Dockerfile'
+      - '.dockerignore'
+      - 'requirements.txt'
+      - 'frontend/package*.json'
+      - 'hi_scenario/graphdb.py'
+      - 'hi_scenario/api.py'
+      - 'hi_scenario/explorer.py'
+      - 'hi_scenario/model.py'
+      - 'hi_scenario/rdf.py'
+      - 'hi_scenario/validation.py'
+      - 'ontology/**'
+      - 'examples/**'
+      - 'tests/test_*live.py'
+      - 'tests/test_*recovery*.py'
+      - 'tests/test_deploy*.py'
+      - 'tests/test_ci_*.py'
   workflow_dispatch:
   schedule:
     - cron: '17 5 * * 1' # Weekly on the default branch, UTC.
@@ -37,7 +60,7 @@ jobs:
           docker compose -f compose.yaml up -d --wait --wait-timeout 180
           python -m infra.graphdb setup
       - name: Concurrency, real connection failures and restart persistence
-        run: python -m pytest -q tests/test_graphdb_live.py
+        run: python .github/scripts/required_tests.py -q tests/test_graphdb_live.py
         env:
           HI_GRAPHDB_LIVE: '1'
           GRAPHDB_URL: http://127.0.0.1:7200

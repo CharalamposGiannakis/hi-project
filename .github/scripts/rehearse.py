@@ -132,7 +132,7 @@ def rehearse(context, work):
 
     try:
         recovery(source, "up", "-d", "--wait", "--wait-timeout", "180")
-        python("-m", "pytest", "-q", "-s", "tests/test_azure_capture_live.py", "--basetemp", str(work / "capture"),
+        python(".github/scripts/required_tests.py", "-q", "-s", "tests/test_azure_capture_live.py", "--basetemp", str(work / "capture"),
                extra_env={"HI_AZURE_CAPTURE_TEST_PROJECT": source, "HI_AZURE_CAPTURE_TEST_CONTEXT": context})
         captured = find_captured_bundle(work / "capture")
         bundle = work / "retrieved"
@@ -149,7 +149,7 @@ def rehearse(context, work):
         passwords, _ = test_settings(context, env_file, target + "_graphdb-data")
         deployment("build")
         deployment("up", "-d", "--no-build", "--pull", "never", "--wait", "--wait-timeout", "180")
-        python("-m", "pytest", "-q", "tests/test_deploy_live.py", extra_env={
+        python(".github/scripts/required_tests.py", "-q", "tests/test_deploy_live.py", extra_env={
             "HI_DEPLOY_LIVE": "1", "HI_DEPLOY_TEST_CONTEXT": context, "HI_DEPLOY_TEST_PROJECT": project,
             "HI_DEPLOY_ENV_FILE": str(env_file), "HI_DEPLOY_TEST_PASSWORD": passwords[0],
             "HI_DEPLOY_WORKBENCH_TEST_PASSWORD": passwords[1], "HI_DEPLOY_TEST_RESTORED": "1",

@@ -105,7 +105,7 @@ jobs:
           docker compose -f compose.yaml up -d --wait --wait-timeout 180
           python -m infra.graphdb setup
       - name: Importer, competency questions, provenance and rollback
-        run: python -m pytest -q tests/test_canonical_live.py tests/test_explorer_api.py
+        run: python .github/scripts/required_tests.py -q tests/test_canonical_live.py tests/test_explorer_api.py
       - name: API client → FastAPI → GraphDB
         run: npx vitest run integration/workflow.integration.test.js
         working-directory: frontend
