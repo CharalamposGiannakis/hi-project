@@ -1,0 +1,6 @@
+# Apply only after verifying a restore and stopping its recovery container.
+# Keep this overlay on every subsequent deployment command for that installation.
+volumes:
+  graphdb-data:
+    external: true
+    name: ${RESTORED_GRAPHDB_VOLUME:?Set the verified restored GraphDB volume name}

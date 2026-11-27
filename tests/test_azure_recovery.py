@@ -96,6 +96,20 @@ def test_capture_inventory_drift_never_finalizes_bundle(tmp_path, monkeypatch, n
     assert {path.name for path in bundle.iterdir()} == {f"{ARCHIVE}.partial", f"{DATASET}.partial"}
 
 
+def test_capture_rechecks_the_approved_restored_volume(tmp_path, monkeypatch, native_tar):
+    mock_capture(monkeypatch, native_tar)
+    inspected = []
+    volume = "hi-recovery-migration-restore_graphdb-data"
+
+    def inspect(_host, _deployment, _revision, graphdb_volume):
+        inspected.append(graphdb_volume)
+        return IDENTITY
+
+    monkeypatch.setattr(azure_backup, "inspect_source", inspect)
+    azure_backup.capture("fixture", tmp_path, "a" * 40, "web-id", "backend-id", tmp_path / "bundle", volume)
+    assert inspected == [volume, volume]
+
+
 @pytest.mark.parametrize("change", [None, ARCHIVE, DATASET, MANIFEST])
 def test_bundle_validates_all_transferred_files(captured_bundle, change):
     if change is None:
@@ -162,11 +176,11 @@ def test_source_transport_uses_container_loopback_and_checks_media(monkeypatch):
 def test_wrong_source_host_fails_before_docker(monkeypatch):
     monkeypatch.setattr(azure_backup.socket, "gethostname", lambda: "other-host")
     monkeypatch.setattr(azure_backup, "docker", lambda *_: pytest.fail("Docker should not be called"))
-    with pytest.raises(ValueError, match="approved Azure OS hostname"):
+    with pytest.raises(ValueError, match="approved deployment OS hostname"):
         azure_backup.inspect_source("approved-host", Path("."), "a" * 40)
 
 
-@pytest.mark.parametrize("problem", [None, "published GraphDB", "different volume", "extra network member", "missing digest"])
+@pytest.mark.parametrize("problem", [None, "published GraphDB", "different volume", "extra network member", "missing digest", "restored volume", "unapproved restored volume"])
 def test_source_identity_checks_the_deployment(monkeypatch, tmp_path, problem):
     ids = {service: digit * 64 for service, digit in zip(("graphdb", "backend", "web"), "123")}
     revision = "a" * 40
@@ -188,7 +202,8 @@ def test_source_identity_checks_the_deployment(monkeypatch, tmp_path, problem):
             output = json.dumps({azure_backup.NETWORK: {}})
         else:
             graphdb = args[-1] == ids["graphdb"]
-            volume = "hi-project_graphdb-data" if problem == "different volume" else azure_backup.VOLUME
+            volume = ("hi-project_graphdb-data" if problem == "different volume" else
+                      "hi-recovery-migration-restore_graphdb-data" if problem in ("restored volume", "unapproved restored volume") else azure_backup.VOLUME)
             mounts = [{"Type": "volume", "Name": volume, "Destination": "/opt/graphdb/home"}] if graphdb else []
             ports = {"7200/tcp": [{"HostIp": "127.0.0.1", "HostPort": "7200"}]} if graphdb and problem == "published GraphDB" else {}
             output = "\n".join((str(tmp_path), "started", "false", azure_backup.IMAGE, "image-id",
@@ -204,11 +219,13 @@ def test_source_identity_checks_the_deployment(monkeypatch, tmp_path, problem):
 
     monkeypatch.setattr(azure_backup, "docker", docker)
     monkeypatch.setattr(azure_backup, "request", request)
-    if problem is None:
-        source = azure_backup.inspect_source("approved-host", tmp_path, revision)
+    if problem in (None, "restored volume"):
+        volume = "hi-recovery-migration-restore_graphdb-data" if problem == "restored volume" else azure_backup.VOLUME
+        source = azure_backup.inspect_source("approved-host", tmp_path, revision, volume)
         assert source["deployed_revision"] == revision
         assert source["services"]["graphdb"]["container"] == ids["graphdb"]
         assert source["graphdb_repo_digests"] == [DIGEST]
+        assert source["graphdb_volume"] == volume
     else:
         with pytest.raises(ValueError):
             azure_backup.inspect_source("approved-host", tmp_path, revision)
@@ -234,6 +251,21 @@ def test_graphdb_image_uses_repository_digest_and_matching_platform(platform, di
 def test_graphdb_image_requires_a_source_digest():
     with pytest.raises(ValueError, match="portable Ontotext GraphDB repository digest"):
         verify_graphdb_image({"graphdb_platform": "linux/amd64"}, "linux/amd64", [DIGEST])
+
+
+def test_source_preflight_passes_the_explicit_restored_volume(monkeypatch, tmp_path):
+    volume = "hi-recovery-migration-restore_graphdb-data"
+    monkeypatch.setattr(sys, "argv", ["azure_backup", "check", "--host", "fixture",
+                                      "--deployment", str(tmp_path), "--revision", "a" * 40,
+                                      "--graphdb-volume", volume])
+
+    def inspect(host, deployment, revision, graphdb_volume):
+        assert (host, deployment, revision, graphdb_volume) == ("fixture", tmp_path, "a" * 40, volume)
+        return IDENTITY
+
+    monkeypatch.setattr(azure_backup, "inspect_source", inspect)
+    monkeypatch.setattr(azure_backup, "snapshot", lambda _: SNAPSHOT)
+    azure_backup.main()
 
 
 def test_restore_passes_source_identity_to_local_guard(monkeypatch, tmp_path, capsys):

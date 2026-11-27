@@ -1,4 +1,4 @@
-"""Capture the approved Azure source through its local Docker socket. No restore operation."""
+"""Capture an approved Linux deployment through its local Docker socket. No restore operation."""
 
 import argparse
 from datetime import datetime, timezone
@@ -56,9 +56,11 @@ def check_graphdb(container):
         raise ValueError("Expected the local repository hi in the verified GraphDB container.")
 
 
-def inspect_source(host, deployment, revision):
+def inspect_source(host, deployment, revision, graphdb_volume=VOLUME):
     if socket.gethostname() != host:
-        raise ValueError("Host does not match the approved Azure OS hostname.")
+        raise ValueError("Host does not match the approved deployment OS hostname.")
+    if not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", graphdb_volume):
+        raise ValueError("Expected an explicit approved Docker volume name.")
     head = subprocess.check_output(["git", "-C", str(deployment), "rev-parse", "HEAD"], text=True).strip()
     if not re.fullmatch(r"[0-9a-f]{40}", revision) or head != revision:
         raise ValueError("Deployment checkout differs from the approved deployed revision.")
@@ -84,7 +86,7 @@ def inspect_source(host, deployment, revision):
             raise ValueError(f"{service} must have no published host ports.")
         if service == "graphdb":
             storage = [(m.get("Type"), m.get("Name"), m.get("Destination")) for m in json.loads(mounts)]
-            if paused != "false" or image != IMAGE or storage != [("volume", VOLUME, "/opt/graphdb/home")]:
+            if paused != "false" or image != IMAGE or storage != [("volume", graphdb_volume, "/opt/graphdb/home")]:
                 raise ValueError("GraphDB must be unpaused with the pinned image and production volume.")
         services[service] = {
             "container": container, "started_at": started, "paused": paused == "true", "image_id": image_id,
@@ -108,6 +110,7 @@ def inspect_source(host, deployment, revision):
         raise ValueError("The source GraphDB image has no portable Ontotext repository digest. Resolve its provenance before backup.")
     return {
         "host": host, "deployed_revision": revision, "graphdb_version": VERSION, "graphdb_edition": "free",
+        "graphdb_volume": graphdb_volume,
         "graphdb_platform": platform, "graphdb_repo_digests": digests, "services": services,
     }
 
@@ -137,8 +140,8 @@ def require_idle(container):
             raise ValueError("GraphDB has not reported zero open connections and active transactions. Check the write pause.")
 
 
-def capture(host, deployment, revision, paused_web, paused_backend, bundle):
-    source = inspect_source(host, deployment, revision)
+def capture(host, deployment, revision, paused_web, paused_backend, bundle, graphdb_volume=VOLUME):
+    source = inspect_source(host, deployment, revision, graphdb_volume)
     for service, expected_id in (("web", paused_web), ("backend", paused_backend)):
         state = source["services"][service]
         if state["container"] != expected_id or not state["paused"]:
@@ -164,7 +167,7 @@ def capture(host, deployment, revision, paused_web, paused_backend, bundle):
     with archive_partial.open("rb") as stream:
         archive_sha = archive_digest(stream)
     rdf_sha = file_digest(rdf_partial)
-    if snapshot(container) != before or inspect_source(host, deployment, revision) != source:
+    if snapshot(container) != before or inspect_source(host, deployment, revision, graphdb_volume) != source:
         raise ValueError("Deployment identity, write pause, repository settings, or inventory changed during capture.")
     require_idle(container)
     manifest = {
@@ -182,7 +185,8 @@ def capture(host, deployment, revision, paused_web, paused_backend, bundle):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("check", "capture"))
-    parser.add_argument("--host", required=True, help="approved Azure OS hostname")
+    parser.add_argument("--host", required=True, help="approved deployment OS hostname")
+    parser.add_argument("--graphdb-volume", default=VOLUME, help="approved data volume; defaults to the original deployment volume")
     parser.add_argument("--deployment", required=True, type=Path, help="active deployment checkout")
     parser.add_argument("--revision", required=True, help="full deployed SHA from the deployment record")
     parser.add_argument("--paused-web", help="full Caddy container ID from the approved preflight")
@@ -194,7 +198,7 @@ def main():
             raise ValueError(f"Python 3.11 or newer is required. Found Python {sys.version.split()[0]}.")
         deployment = args.deployment.resolve(strict=True)
         if args.action == "check":
-            source = inspect_source(args.host, deployment, args.revision)
+            source = inspect_source(args.host, deployment, args.revision, args.graphdb_volume)
             inventory = snapshot(source["services"]["graphdb"]["container"])
             print(json.dumps({
                 **source, "python_version": sys.version.split()[0],
@@ -206,10 +210,10 @@ def main():
             bundle = args.bundle.resolve()
             if any(bundle.is_relative_to(root) for root in (deployment, Path(__file__).resolve().parents[1])):
                 raise ValueError("Use a new staging directory outside the Git checkouts.")
-            capture(args.host, deployment, args.revision, args.paused_web, args.paused_backend, bundle)
+            capture(args.host, deployment, args.revision, args.paused_web, args.paused_backend, bundle, args.graphdb_volume)
             print(f"Created production backup bundle {bundle}.")
     except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, tarfile.TarError) as exc:
-        parser.exit(1, f"Azure backup {args.action} failed: {exc}\n")
+        parser.exit(1, f"Deployment backup {args.action} failed: {exc}\n")
 
 
 if __name__ == "__main__":

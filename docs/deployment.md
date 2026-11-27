@@ -370,6 +370,73 @@ Require both checks to pass, including the reference graphs, S1–S7, SHACL, and
 
 **Approval required.** Stop the test backend and run only the `$target` cleanup command from the local rehearsal on the recovery host. Review exact paths before removing incomplete transfers or VM staging. Retain the approved independent copy and verification record according to the agreed policy. Production recovery is established only after a retrieved off-VM copy passes all checks. Workbench system data, Caddy state and credentials, and unsaved JSON drafts require separate handling.
 
+## Migration to another Linux host
+
+The runtime uses Docker Compose, Caddy, FastAPI and GraphDB, with no Azure SDK, managed identity, Azure database or Azure storage dependency. Domain names and authentication settings come from the private environment file; the built frontend uses same-origin `/api`. The existing DuckDNS address is the current service address, not a runtime requirement. Keep the existing three-service architecture, production Compose project name `hi-project-deploy`, one backend worker and GraphDB 10.8.14 during migration. Migrate hosting separately from application or ontology upgrades.
+
+### Infrastructure to confirm before deployment
+
+VU SciCloud access is pending. Confirm these requirements with the infrastructure owner rather than assuming the Azure arrangement applies:
+
+- A Linux server with Docker Engine, Compose, permission to use its local Docker socket, and support for the existing container networks and pause/resume procedure. Confirm CPU architecture against the captured GraphDB platform and repository digest. The verified native restore requires the matching image and platform; do not substitute another architecture or database version.
+- Memory beyond the configured 1 GiB Java heap, and durable disk capacity for GraphDB, container builds, a backup archive, explicit RDF exports and isolated recovery. The full RDF comparison also needs RAM for both datasets. Size from the approved source inventory; a VM snapshot or an ephemeral root disk does not replace independent backups. Confirm encryption, custody, retention, and a recovery location independent of the application server.
+- Authorized SSH/operator access, application and Workbench hostnames, firewall rules and TLS ownership. The current Caddy setup needs separate hostnames and inbound 80/443. If VU requires an institutional reverse proxy, different ingress, or restricted Workbench access, review that arrangement before changing Caddy; no VU-specific proxy or authentication configuration is assumed here. GraphDB and FastAPI must remain unpublished on host ports.
+- Outbound access to the required container images and build registries, certificate services for the chosen TLS arrangement, and optionally `https://nebula.cs.vu.nl` for AI interpretation. Confirm any institutional proxy requirements; current HTTP clients do not use ambient proxy settings. Missing Nebula credentials leave structured editing, validation and graph exploration available.
+- Owner-approved application revision and canonical inputs, scientific approval designations, secret provisioning and a cutover/rollback window. The repository bundle excludes GraphDB Workbench system data, Caddy state and credentials. Recreate these through the approved custody process or agree separately how to preserve them. Browser-only drafts and Explorer session scenarios must be exported by researchers before switching servers.
+
+### Restore and attach verified storage
+
+Use the approved source capture, independent transfer/retrieval, checksum, canonical and full-RDF comparison procedures above. Do not use an Azure disk snapshot as the application migration format. The source capture remains named `infra.azure_backup` for compatibility but uses only the Linux Docker socket, Git and container-local GraphDB. It also works on the same deployment topology on another Linux provider. Its optional `--graphdb-volume` selects an **explicitly approved** restored-volume name for both `check` and `capture`; omitting it preserves the original Azure volume requirement. Host, deployment revision, project, private network, image/platform, paused writers and idle-repository checks still apply.
+
+On an approved new server, prepare the Python dependencies and the exact source GraphDB image as described under isolated restoration. A different or unrecorded digest/platform must fail verification, not be worked around. The following Linux sequence uses a trusted retrieved bundle outside Git and a fresh restore project. It does not operate on the Azure host. Run it before starting the new backend, which refreshes reference graphs. Use the original deployed application revision for recovery verification before considering a separate update.
+
+```bash
+set -euo pipefail
+context=default
+bundle='/approved/protected/retrieved-bundle'
+target="hi-recovery-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')-restore"
+endpoint=$(docker --context "$context" context inspect "$context" --format '{{.Endpoints.docker.Host}}')
+[[ "$endpoint" == unix:///* ]]  # Never a remote Docker context or tunnel.
+volumes=$(docker --context "$context" volume ls --format '{{.Name}}')
+if grep -Fxq "${target}_graphdb-data" <<< "$volumes"; then
+    printf '%s\n' 'Restore volume already exists; choose a fresh target.' >&2
+    exit 1
+fi
+containers=$(docker --context "$context" ps -aq --filter "label=com.docker.compose.project=$target")
+[[ -z "$containers" ]]
+
+python3 -m infra.recovery_rdf check "$bundle"
+docker --context "$context" compose -f compose.recovery.yaml -p "$target" up -d --pull never --wait --wait-timeout 180
+python3 -m infra.recovery --context "$context" restore "$target" "$bundle" --canonical
+python3 -m infra.recovery_rdf verify --context "$context" "$target" "$bundle"
+```
+
+Require every command to succeed. Retain the verification record and original bundle. A failed restore is disposable; investigate and retry with a new project. After verification, stop and remove **only** the recovery container/network, retaining its volume:
+
+```bash
+docker --context "$context" compose -f compose.recovery.yaml -p "$target" down
+```
+
+Record `${target}_graphdb-data` as `RESTORED_GRAPHDB_VOLUME` in the new server's private `.env.deploy`, alongside its approved hostnames, authentication hashes, optional Nebula settings and approval designations. Never run the recovery container and deployment GraphDB against that volume simultaneously. Use the storage-only overlay for initial deployment **and every later update/recreation**:
+
+```bash
+docker --context "$context" compose --env-file .env.deploy -f compose.deploy.yaml -f compose.restored.yaml config -q
+docker --context "$context" compose --env-file .env.deploy -f compose.deploy.yaml -f compose.restored.yaml up -d --build --pull never --wait
+docker --context "$context" compose --env-file .env.deploy -f compose.deploy.yaml -f compose.restored.yaml ps
+```
+
+The overlay attaches the already-existing verified volume as external storage. A missing volume causes startup to fail instead of silently creating an empty replacement, following [Compose external-volume semantics](https://docs.docker.com/reference/compose-file/volumes/#external). Omitting the overlay would select the ordinary deployment volume. Do not run the old recovery project's `down --volumes` cleanup after adoption. The external GraphDB volume is retained by deployment teardown; manage its retention separately. Plain `compose.deploy.yaml` deployments keep their existing volume behavior.
+
+Before exposing the target, run the authenticated application checks above, including saved-scenario CQ1, Builder preview/SHACL, Explorer provenance and a container restart. Verify known additional scenario IDs as well as S1–S7. Confirm target HTTPS and both authentication boundaries on the actual VU ingress. Local HTTP tests cannot establish DNS, public reachability, institutional network access, certificate issuance or renewal.
+
+### Local preparation and acceptance boundary
+
+Without target access, run `python -m pytest -q tests/test_deploy_config.py tests/test_recovery.py tests/test_azure_recovery.py`. Configuration tests render synthetic settings without a daemon, real environment files or credentials. They check unchanged default storage, the required external restored volume, private service exposure and disposable test isolation. Repeat the local recovery/capture rehearsals above with synthetic data; they do not authorize production capture or establish recovery of the current Azure data.
+
+The opt-in deployment smoke test requires an already-started, disposable `hi-deploy-test-<id>` project on a local Docker socket, with Caddy HTTP bound to `127.0.0.1:8080` and HTTPS also loopback-only. Use `http://app.localhost` and `http://workbench.localhost` as site addresses and `http://workbench.localhost:8080` as the public Workbench URL. Use generated **test-only** credentials (`researcher` and `graphadmin`) in a private test environment file outside Git. Set `HI_DEPLOY_LIVE=1`, `HI_DEPLOY_TEST_CONTEXT`, `HI_DEPLOY_TEST_PROJECT`, `HI_DEPLOY_ENV_FILE`, `HI_DEPLOY_TEST_PASSWORD` and `HI_DEPLOY_WORKBENCH_TEST_PASSWORD`; set `HI_DEPLOY_TEST_RESTORED=1` when testing the storage overlay. Run `python -m pytest -q tests/test_deploy_live.py`. It checks separate authentication, static assets and same-origin API, preview/SHACL, create-only save, CQ1, Workbench links and persistence through a restart, then removes only its random scenario graph. It refuses the normal deployment project and remote Docker contexts. For migration rehearsal, attach a verified **synthetic** restored volume, keep the recovery GraphDB stopped, and clean up only the named disposable projects after testing.
+
+**Owner approval remains required** for Azure preflight/capture and any production pause, export, secret transfer/rotation, target exposure, DNS changes, cutover or Azure decommissioning. Confirm the source and target identities and record hashes/revisions before approving the window. Keep one authoritative writer: freeze and drain source writes for the final capture, verify the target, then switch access. If writes resume on Azure after capture, a fresh capture is needed before cutover. Retain Azure intact until the agreed acceptance and rollback period ends. After target writes begin, routing users back to an older Azure copy would lose new research data; rollback then requires an approved return-data/recovery plan. Verify independent backup and recovery from the new host before retiring Azure, supplying its approved external volume name to the capture tool.
+
 ## Troubleshooting
 
 Check service state and the relevant logs, without printing the environment file or a full rendered Compose configuration containing password hashes:

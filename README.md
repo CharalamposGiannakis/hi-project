@@ -115,6 +115,8 @@ Remove-Item Env:HI_GRAPHDB_LIVE
 
 That test cleans up only its temporary graphs and does not restart GraphDB. The separate opt-in [persistence test](tests/test_graphdb_live.py) restarts local GraphDB; run it only when that interruption is acceptable. Local tests do not establish hosted HTTPS behavior. The [deployment runbook](docs/deployment.md) covers persistent volumes, deployment security, and the [local recovery rehearsal](docs/deployment.md#local-graphdb-recovery-rehearsal).
 
+The single-server container deployment has no Azure service dependency. The runbook also covers [migration to another Linux host](docs/deployment.md#migration-to-another-linux-host), including attaching a verified restored GraphDB volume. VU SciCloud access and hosting requirements must be confirmed before choosing target networking, TLS, storage, or changing the current service.
+
 ## Canonical scenario import
 
 The operator-run importer loads exactly `examples/s1.json` through `examples/s7.json` into the **local development Compose** repository `hi`. After local setup, run from the repository root:

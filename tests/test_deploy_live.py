@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -18,7 +19,36 @@ APP_URL = "http://127.0.0.1:8080"
 GRAPH_IRI = "urn:hi-app:graph:scenario:"
 
 
+def local_stack(context, project):
+    """Refuse remote daemons and existing deployment projects before any HTTP or restart."""
+    if not re.fullmatch(r"hi-deploy-test-[a-z0-9]+", project):
+        raise ValueError("Use a disposable hi-deploy-test-<id> project.")
+    docker = ["docker", "--context", context]
+    endpoint = subprocess.check_output(
+        docker + ["context", "inspect", context, "--format", "{{.Endpoints.docker.Host}}"], text=True,
+    ).strip()
+    if not endpoint.startswith(("unix:///", "npipe:////./pipe/")):
+        raise ValueError("Deployment smoke tests require a local Docker socket.")
+    container = subprocess.check_output(docker + [
+        "ps", "-q", "--filter", f"label=com.docker.compose.project={project}",
+        "--filter", "label=com.docker.compose.service=web",
+    ], text=True).strip()
+    if not container or len(container.splitlines()) != 1:
+        raise ValueError("Expected one web container in the disposable test project.")
+    ports = json.loads(subprocess.check_output(
+        docker + ["container", "inspect", "--format", "{{json .NetworkSettings.Ports}}", container], text=True,
+    ))
+    bindings = [binding for group in (ports or {}).values() for binding in (group or [])]
+    if not bindings or any(binding["HostIp"] != "127.0.0.1" for binding in bindings):
+        raise ValueError("Test web ports must bind only to loopback.")
+    if not any(binding["HostPort"] == "8080" for binding in (ports.get("80/tcp") or [])):
+        raise ValueError("Test HTTP must bind 127.0.0.1:8080.")
+    return docker
+
+
 def test_authenticated_container_workflow_and_restart():
+    project = os.environ.get("HI_DEPLOY_TEST_PROJECT", "")
+    docker = local_stack(os.environ.get("HI_DEPLOY_TEST_CONTEXT", "default"), project)
     password = os.environ["HI_DEPLOY_TEST_PASSWORD"]
     env_file = os.environ["HI_DEPLOY_ENV_FILE"]
     scenario_id = "deploy-test-" + uuid4().hex
@@ -40,12 +70,15 @@ def test_authenticated_container_workflow_and_restart():
 
         page = app.get("/")
         assert page.status_code == 200 and "<div id=\"app\"" in page.text
-        script = page.text.split('src="')[1].split('"')[0]
-        bundle = app.get(script)
-        assert bundle.status_code == 200
-        assert '"/api"' in bundle.text or '`/api`' in bundle.text
-        assert "/scenarios/preview" in bundle.text
-        assert "http://127.0.0.1:8000" not in bundle.text
+        # Vite can place API code in a module-preloaded shared chunk.
+        scripts = set(re.findall(r'(?:src|href)="(/assets/[^"<>]+\.js)"', page.text))
+        assert scripts
+        bundles = [app.get(script) for script in scripts]
+        assert all(bundle.status_code == 200 for bundle in bundles)
+        javascript = "\n".join(bundle.text for bundle in bundles)
+        assert '"/api"' in javascript or '`/api`' in javascript
+        assert "/scenarios/preview" in javascript
+        assert "http://127.0.0.1:8000" not in javascript
         assert workbench.get("/", headers={**workbench_headers, "Accept": "text/html"}).status_code == 200
 
         scenario = json.loads((ROOT / "examples" / "s1.json").read_text(encoding="utf-8"))
@@ -81,8 +114,11 @@ def test_authenticated_container_workflow_and_restart():
             graph_link = urlsplit(location["workbench_graph_url"])
             assert workbench.get(graph_link.path + "?" + graph_link.query, headers={**workbench_headers, "Accept": "text/html"}).status_code == 200
 
+            compose = docker + ["compose", "--env-file", env_file, "-f", "compose.deploy.yaml"]
+            if os.environ.get("HI_DEPLOY_TEST_RESTORED") == "1":
+                compose += ["-f", "compose.restored.yaml"]
             subprocess.run(
-                ["docker", "compose", "--env-file", env_file, "-f", "compose.deploy.yaml", "restart", "graphdb"],
+                compose + ["-p", project, "restart", "graphdb"],
                 cwd=ROOT, check=True, capture_output=True, text=True,
             )
             deadline = time.monotonic() + 120
