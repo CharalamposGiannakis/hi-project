@@ -67,8 +67,8 @@ jobs:
         working-directory: frontend
         env:
           VITE_API_URL: /api
-      - name: Builder → FastAPI → RDF/SHACL (simulated AI)
-        run: npx vitest run integration/preview.integration.test.js
+      - name: Builder and feedback → FastAPI (simulated AI)
+        run: npx vitest run integration/preview.integration.test.js integration/feedback.integration.test.js
         working-directory: frontend
         env:
           PYTHON: python

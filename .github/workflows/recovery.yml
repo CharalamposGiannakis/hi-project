@@ -18,6 +18,7 @@ on:
       - 'hi_scenario/model.py'
       - 'hi_scenario/rdf.py'
       - 'hi_scenario/validation.py'
+      - 'hi_scenario/feedback.py'
       - 'ontology/**'
       - 'examples/**'
       - 'tests/test_*live.py'

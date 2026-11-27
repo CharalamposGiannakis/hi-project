@@ -24,6 +24,10 @@ Home is the default landing page. Use the application sidebar to open the Scenar
 
 **Open JSON in new tab** opens a read-only snapshot viewer. **Refresh JSON** or reloading the viewer retrieves the latest draft directly from the open Builder tab. Reloading the Builder requires opening a new viewer. The viewer uses BroadcastChannel and keeps its snapshot in memory until you refresh or close it.
 
+Open **Researcher feedback** in the sidebar or **Share feedback** on Home to report a problem, suggest an improvement, or share a scientific observation. Send only information authorized for operator review. Only the selected type, application area, and message are submitted; scenario contents, browser details, and researcher identity are not attached. A successful submission shows a reference ID. Failed submissions retain the message, and unsent text survives navigation but not a reload.
+
+Feedback is persistent and private to operators, separate from scenarios, GraphDB, scientific approval, and GitHub Issues. The API accepts submissions and provides no feedback retrieval endpoints. Local startup stores records in ignored `.local/feedback`; `FEEDBACK_DIR` overrides the directory. Deployment uses a dedicated backend volume. Operators review, export, and restore feedback using the [feedback runbook](docs/deployment.md#feedback-review-and-recovery); GraphDB backups do **not** include it.
+
 ## Capabilities and limitations
 
 Each scenario has one use case, an implicit HI team, one goal, at least one task, and at least two named agents including a human and an artificial agent, with HINT roles. Optional components include Context, independent Team constraints, capabilities, task executions and methods, experiments and hypotheses, evaluations and metrics, and multi-agent interactions. Researchers select goal-required tasks separately from the task inventory. Existing JSON that omits optional components remains valid.
@@ -128,7 +132,7 @@ The single-server container deployment has no Azure service dependency. The runb
 | Required PR check | Coverage |
 | --- | --- |
 | **Backend and semantics** | Python tests, S1–S7 RDF/SHACL, HINT/frontend vocabulary alignment, API and interpretation regressions, recovery guards, and deployment Compose configuration. |
-| **Frontend** | Lockfile installation, component tests, Svelte checks, production build, and Builder → real FastAPI → RDF/SHACL integration with simulated AI. |
+| **Frontend** | Lockfile installation, component tests, Svelte checks, production build, Builder → real FastAPI → RDF/SHACL integration with simulated AI, and feedback form → private storage/recovery integration. |
 | **GraphDB integration** | Fresh GraphDB 10.8.14, canonical importer, live competency questions and concept search, provisional-source isolation/rollback, and the frontend API-client workflow. Database unavailability fails this check instead of skipping it. |
 
 The explicitly required Python live suites run through `.github/scripts/required_tests.py`. Collection-time and execution-time skips make that invocation fail, including when other tests pass. The runner does not enable live tests or change their safety prerequisites. Ordinary `python -m pytest` retains the intentional opt-in skips for local testing and the backend check.

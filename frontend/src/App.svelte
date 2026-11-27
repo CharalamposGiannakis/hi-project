@@ -14,6 +14,7 @@
   import ScenarioWizard from './lib/ScenarioWizard.svelte';
   import KnowledgeExplorer from './lib/KnowledgeExplorer.svelte';
   import Home from './lib/Home.svelte';
+  import ResearcherFeedback from './lib/ResearcherFeedback.svelte';
   import { workspacePages } from './lib/workspace-pages.js';
   import {
     emptyScenario,
@@ -428,7 +429,7 @@
 </header>
 
 <main id="home-view" class="information-view" hidden={view !== 'home'} aria-labelledby="home-heading">
-  <Home />
+  <Home onfeedback={() => void navigate('feedback')} />
 </main>
 
 <main id="management-view" class="information-view" hidden={view !== 'management'} aria-labelledby="management-heading">
@@ -711,6 +712,9 @@
 
 <main id="explorer-view" class="explorer-view" hidden={view !== 'explorer'}>
   <KnowledgeExplorer active={view === 'explorer'} bind:uploads={sessionScenarios} focusSourceId={lastAddedSessionId} />
+</main>
+<main id="feedback-view" class="information-view" hidden={view !== 'feedback'} aria-labelledby="feedback-heading">
+  <ResearcherFeedback />
 </main>
 </div>
 </div>

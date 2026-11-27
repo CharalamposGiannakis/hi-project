@@ -1,4 +1,4 @@
-/** @typedef {'home' | 'builder' | 'management' | 'explorer'} ViewId */
+/** @typedef {'home' | 'builder' | 'management' | 'explorer' | 'feedback'} ViewId */
 
 /** @type {{ id: ViewId, label: string, heading: string, description: string, status?: string }[]} */
 export const workspacePages = [
@@ -26,5 +26,11 @@ export const workspacePages = [
     label: 'Knowledge Explorer',
     heading: 'HI Knowledge Explorer',
     description: 'Query validated session scenarios and shared knowledge, inspect supporting RDF evidence, and compare recorded HINT concepts across scenarios.',
+  },
+  {
+    id: 'feedback',
+    label: 'Researcher feedback',
+    heading: 'Researcher feedback',
+    description: 'Share feedback for restricted manual review by the project operator.',
   },
 ];

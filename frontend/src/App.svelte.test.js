@@ -81,7 +81,23 @@ async function settleDisclosure() {
 }
 
 describe('Application navigation', () => {
-  it('lands on Home with four persistent navigation choices and loads shared knowledge only when opened', async () => {
+  it('keeps unsent feedback and Builder work while switching views', async () => {
+    render();
+    click('Load S1 example');
+    const before = draft();
+    click('Researcher feedback');
+    const message = /** @type {HTMLTextAreaElement} */ (document.getElementById('feedback-message'));
+    enter(message, 'Synthetic observation to finish later.');
+    click('Home');
+    click('Share feedback');
+    expect(message.value).toBe('Synthetic observation to finish later.');
+    expect(document.getElementById('feedback-view')?.hidden).toBe(false);
+    click('Scenario Builder');
+    expect(draft()).toEqual(before);
+    await until(() => expect(document.activeElement?.id).toBe('builder-heading'));
+  });
+
+  it('lands on Home with persistent navigation choices and loads shared knowledge only when opened', async () => {
     const fetch = vi.fn(async (/** @type {string} */ _url) => new Response(JSON.stringify({
       shared_source: 'reference', scenarios: [], questions: [],
     })));
@@ -90,7 +106,7 @@ describe('Application navigation', () => {
     const navigation = document.querySelector('nav[aria-label="Application navigation"]');
     const choices = [...(navigation?.querySelectorAll('button') ?? [])];
     expect(choices.map((choice) => choice.textContent?.trim())).toEqual([
-      'Home', 'Scenario Builder', 'Scientific Knowledge Management', 'Knowledge Explorer',
+      'Home', 'Scenario Builder', 'Scientific Knowledge Management', 'Knowledge Explorer', 'Researcher feedback',
     ]);
     expect(choices.filter((choice) => choice.getAttribute('aria-current') === 'page'))
       .toEqual([choices[0]]);
@@ -103,7 +119,11 @@ describe('Application navigation', () => {
       .map((section) => section.querySelector('h2')?.textContent)).toEqual([
       'Scenario Builder', 'Scientific Knowledge Management', 'Knowledge Explorer',
     ]);
-    expect(home?.querySelectorAll('button, a')).toHaveLength(0);
+    expect(home?.querySelectorAll('button, a')).toHaveLength(1);
+    click('Share feedback');
+    expect(document.getElementById('feedback-view')?.hidden).toBe(false);
+    expect(choices[4].getAttribute('aria-current')).toBe('page');
+    expect(fetch).not.toHaveBeenCalled();
 
     click('Scientific Knowledge Management');
     expect(document.getElementById('management-view')?.hidden).toBe(false);

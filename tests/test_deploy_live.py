@@ -64,6 +64,7 @@ def test_authenticated_container_workflow_and_restart():
     ):
         assert httpx.get(APP_URL + "/", headers=app_headers, trust_env=False).status_code == 401
         assert httpx.post(APP_URL + "/api/scenarios", headers=app_headers, trust_env=False).status_code == 401
+        assert httpx.post(APP_URL + "/api/feedback", headers=app_headers, trust_env=False).status_code == 401
         assert httpx.get(APP_URL + "/repositories/hi", headers=workbench_headers, trust_env=False).status_code == 401
         assert httpx.get(APP_URL + "/repositories/hi", headers=workbench_headers, auth=auth, trust_env=False).status_code == 401
         assert httpx.get(APP_URL + "/", headers=app_headers, auth=workbench_auth, trust_env=False).status_code == 401
@@ -131,6 +132,42 @@ def test_authenticated_container_workflow_and_restart():
                 time.sleep(2)
             else:
                 pytest.fail("Saved graph was unavailable after GraphDB restart")
+            assert app.get(f"/api/scenarios/{scenario_id}/team").json() == before
+
+            # Private feedback is stored outside GraphDB and survives replacing the
+            # backend container. Only this verified disposable project is touched.
+            sent = app.post("/api/feedback", json={"category": "improvement", "area": "builder", "message": "Synthetic deployment feedback."})
+            assert sent.status_code == 201
+            receipt = sent.json()
+            assert app.get("/api/feedback").status_code == 405
+            assert app.get(f"/api/feedback/{receipt['id']}").status_code == 404
+            operator = compose + ["-p", project, "exec", "-T"]
+            export = subprocess.run(operator + ["backend", "python", "-m", "infra.feedback", "export"],
+                                    cwd=ROOT, check=True, capture_output=True, text=True)
+            bundle = json.loads(export.stdout)
+            assert any(record["id"] == receipt["id"] and record["message"] == "Synthetic deployment feedback."
+                       for record in bundle["records"])
+            subprocess.run(compose + ["-p", project, "up", "-d", "--no-deps", "--force-recreate", "backend"],
+                           cwd=ROOT, check=True, capture_output=True, text=True)
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                try:
+                    if app.get("/api/feedback").status_code == 405:
+                        break
+                except httpx.HTTPError:
+                    pass
+                time.sleep(1)
+            else:
+                pytest.fail("Backend unavailable after recreation")
+            after = subprocess.run(operator + ["backend", "python", "-m", "infra.feedback", "export"],
+                                   cwd=ROOT, check=True, capture_output=True, text=True)
+            assert json.loads(after.stdout) == bundle
+            target = "/tmp/feedback-restore-" + uuid4().hex
+            subprocess.run(operator + ["-e", f"FEEDBACK_DIR={target}", "backend", "python", "-m", "infra.feedback", "restore"],
+                           cwd=ROOT, input=export.stdout, check=True, capture_output=True, text=True)
+            restored = subprocess.run(operator + ["-e", f"FEEDBACK_DIR={target}", "backend", "python", "-m", "infra.feedback", "export"],
+                                      cwd=ROOT, check=True, capture_output=True, text=True)
+            assert json.loads(restored.stdout) == bundle
             assert app.get(f"/api/scenarios/{scenario_id}/team").json() == before
         finally:
             # This test owns only this random graph. Never remove reference or user data.
